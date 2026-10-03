@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="keywords" content="Relay,即应,中间件,消息接入,任务调度">
+<meta name="description" content="Relay · 即应接入与任务调度控制台">
+<title>Relay 控制台</title>
+<script>(function(){try{var t=localStorage.getItem("relay-theme");if(t!=="dark"&&t!=="light")t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";document.documentElement.setAttribute("data-bs-theme",t);}catch(e){}})();</script>
+<link rel="icon" type="image/svg+xml" href="relay-logo.svg">
+<link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
+<link rel="stylesheet" href="vendor/bootstrap/bootstrap-icons.min.css">
+<link rel="stylesheet" href="relay.css">
+</head>
+<body>
+<div id="app" class="relay">
+  <aside class="sidebar" id="sidebar">
+      <div class="brand">
+      <div class="brand-mark"><svg viewBox="0 0 512 512" fill="none"><defs><linearGradient id="tile" x1="0" y1="0" x2="0" y2="512" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#FBFAF7"/><stop offset="1" stop-color="#F1EEE7"/></linearGradient></defs><rect x="1" y="1" width="510" height="510" rx="116" fill="url(#tile)" stroke="#E5E0D6" stroke-width="2"/><g stroke="#191B1E" stroke-width="34" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M208 184 L208 330"/><path d="M208 184 A48 48 0 0 1 208 280"/><path d="M208 280 L300 332"/></g></svg></div>
+      <div class="brand-text"><strong>Relay</strong><span data-i18n="brand.sub">即应接入与调度</span></div>
+    </div>
+    <div class="nav-filter">
+      <input class="input" id="navFilter" type="search" placeholder="筛选菜单" aria-label="筛选菜单" data-i18n-ph="nav.filter.ph" autocomplete="off">
+      <button type="button" class="icon-btn nav-custom-btn" id="navCustomBtn" title="自定义侧栏" aria-label="自定义侧栏" data-i18n-title="nav.custom.title" data-ico="settings"></button>
+    </div>
+    <nav class="nav" id="nav"></nav>
+    <div class="sidebar-foot">
+      <div class="side-status">
+        <span class="dot" id="dotWs"></span><span id="sideWs" data-i18n="side.ws">应用通道</span>
+      </div>
+      <div class="side-status">
+        <span class="dot" id="dotAcct"></span><span id="sideAcct" data-i18n="side.acct">账号通道</span>
+      </div>
+    </div>
+  </aside>
+
+  <div class="sidebar-backdrop" id="navBackdrop"></div>
+
+  <div class="main">
+    <header class="topbar">
+       <button type="button" class="icon-btn" id="navToggle" title="收起菜单" aria-label="展开或收起菜单" data-i18n-title="nav.toggle.title" aria-controls="sidebar" aria-expanded="true"><span></span><span></span><span></span></button>
+      <div class="crumbs" id="crumbs">Relay</div>
+      <div class="topbar-right">
+        <span class="chip chip-success" id="chipWs">应用未连接</span>
+        <span class="chip" id="chipAcct">账号未登录</span>
+        <button type="button" class="icon-btn lang-btn" id="langBtn" title="切换语言" aria-label="切换语言" data-i18n-title="lang.toggle"><span class="ico" data-ico="language"></span><span data-lang-label>EN</span></button>
+        <button type="button" class="icon-btn" id="themeBtn" title="切换深浅色" aria-label="切换深浅色" data-i18n-title="theme.toggle"></button>
+        <div class="user">
+          <div class="avatar" id="avatar" data-ico="user">U</div>
+          <div class="user-meta"><span id="userName">管理员</span><small id="userRole">Relay 控制台</small></div>
+           <button type="button" class="icon-btn" id="logoutBtn" title="退出登录" aria-label="退出登录" data-i18n-title="logout.title"><span data-ico="logout"></span></button>
+        </div>
+      </div>
+    </header>
+
+    <main class="content" id="content">
+      <div class="page" id="view-home"></div>
+      <div class="page" id="view-connect" hidden></div>
+      <div class="page" id="view-pool" hidden></div>
+      <div class="page" id="view-roles" hidden></div>
+      <div class="page" id="view-chat" hidden></div>
+      <div class="page" id="view-scripts" hidden></div>
+      <div class="page" id="view-features" hidden></div>
+      <div class="page" id="view-agent" hidden></div>
+      <div class="page" id="view-cron" hidden></div>
+      <div class="page" id="view-tasks" hidden></div>
+      <div class="page" id="view-market" hidden></div>
+      <div class="page" id="view-audit" hidden></div>
+      <div class="page" id="view-observe" hidden></div>
+      <div class="page" id="view-logs" hidden></div>
+    </main>
+  </div>
+</div>
+
+<div class="toast-container rl-toasts" id="toasts"></div>
+
+<div class="modal fade" id="modal" tabindex="-1" aria-labelledby="modalTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="modalTitle"></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+      <div class="modal-footer" id="modalFoot"></div>
+    </div>
+  </div>
+</div>
+
+<script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
+<script src="relay.js"></script>
+</body>
+</html>

@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="keywords" content="Relay,即应,中间件,控制台">
+<meta name="description" content="Relay · 即应接入与任务调度控制台">
+<title data-i18n="login.title">登录 · Relay 控制台</title>
+<script>(function(){try{var t=localStorage.getItem("relay-theme");if(t!=="dark"&&t!=="light")t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";document.documentElement.setAttribute("data-bs-theme",t);}catch(e){}})();</script>
+<link rel="icon" type="image/svg+xml" href="relay-logo.svg">
+<link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
+<link rel="stylesheet" href="vendor/bootstrap/bootstrap-icons.min.css">
+<link rel="stylesheet" href="relay.css">
+</head>
+<body>
+<button type="button" class="icon-btn" id="themeBtn" title="切换深浅色" aria-label="切换深浅色" data-i18n-title="theme.toggle" style="position:fixed;top:16px;right:72px;z-index:5"></button>
+<button type="button" class="icon-btn lang-btn" id="langBtn" title="切换语言" aria-label="切换语言" data-i18n-title="lang.toggle" style="position:fixed;top:16px;right:16px;z-index:5"><span class="ico" data-ico="language"></span><span data-lang-label>EN</span></button>
+<div class="login-page">
+  <div class="login-left">
+    <div class="inner">
+      <div class="brand-row">
+        <div class="brand-mark"><svg viewBox="0 0 512 512" fill="none"><defs><linearGradient id="tileside" x1="0" y1="0" x2="0" y2="512" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#FBFAF7"/><stop offset="1" stop-color="#F1EEE7"/></linearGradient></defs><rect x="1" y="1" width="510" height="510" rx="116" fill="url(#tileside)" stroke="#E5E0D6" stroke-width="2"/><g stroke="#191B1E" stroke-width="34" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M208 184 L208 330"/><path d="M208 184 A48 48 0 0 1 208 280"/><path d="M208 280 L300 332"/></g></svg></div>
+        <div class="brand-text"><strong style="font-size:20px">Relay</strong><span data-i18n="login.brand.sub">即应接入与任务调度控制台</span></div>
+      </div>
+      <h1 data-i18n="login.tagline">接入即应，编排一切</h1>
+      <p data-i18n="login.desc">Relay 面向即应应用的消息接入与任务调度中间件。通过应用密钥或账号授权一键接入，在聊天中完成功能调用、脚本执行与定时编排。</p>
+      <div class="login-features">
+        <span data-i18n="login.f1">应用密钥接入</span>
+        <span data-i18n="login.f2">账号 / 邮箱验证码</span>
+        <span data-i18n="login.f3">功能目录</span>
+        <span data-i18n="login.f4">任务队列</span>
+        <span data-i18n="login.f5">定时调度</span>
+      </div>
+    </div>
+  </div>
+  <div class="login-right">
+    <div class="login-card">
+      <div class="brand-row">
+        <div class="brand-mark"><svg viewBox="0 0 512 512" fill="none"><defs><linearGradient id="tilecard" x1="0" y1="0" x2="0" y2="512" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#FBFAF7"/><stop offset="1" stop-color="#F1EEE7"/></linearGradient></defs><rect x="1" y="1" width="510" height="510" rx="116" fill="url(#tilecard)" stroke="#E5E0D6" stroke-width="2"/><g stroke="#191B1E" stroke-width="34" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M208 184 L208 330"/><path d="M208 184 A48 48 0 0 1 208 280"/><path d="M208 280 L300 332"/></g></svg></div>
+        <div class="brand-text"><strong>Relay</strong></div>
+      </div>
+      <h2 data-i18n="login.heading">登录控制台</h2>
+      <p class="sub" data-i18n="login.sub">登录后接入即应应用或账号通道</p>
+       <div class="field"><label for="username" data-i18n="login.username">用户名</label><input class="input" id="username" autocomplete="username" placeholder="请输入用户名" data-i18n-ph="login.username.ph" required></div>
+       <div class="field"><label for="password" data-i18n="login.password">密码</label><input class="input" id="password" type="password" autocomplete="current-password" placeholder="请输入密码" data-i18n-ph="login.password.ph" required></div>
+       <button type="button" class="btn btn-primary btn-lg" style="width:100%;justify-content:center" id="loginBtn" data-i18n="login.submit">登 录</button>
+       <div class="muted mt-16" style="text-align:center;font-size:12px" id="loginMsg" role="status" aria-live="polite"></div>
+    </div>
+  </div>
+</div>
+<script src="relay.js"></script>
+<script>
+(function () {
+  "use strict";
+  // 复用 relay.js 暴露的翻译函数；缺失时回退中文常量。
+  function T(k, fallback) {
+    return (window.RelayI18N && window.RelayI18N.t) ? window.RelayI18N.t(k) : fallback;
+  }
+  function doLogin() {
+    var un = document.getElementById("username").value.trim();
+    var pw = document.getElementById("password").value;
+    var msg = document.getElementById("loginMsg");
+     var btn = document.getElementById("loginBtn");
+     if (!un || !pw) { msg.textContent = T("login.empty", "请输入用户名与密码"); return; }
+     if (btn.disabled) return;
+     btn.disabled = true;
+     btn.setAttribute("aria-busy", "true");
+    msg.textContent = T("login.busy", "登录中…");
+    fetch("/login", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ username: un, password: pw })
+     }).then(function (r) {
+       return r.text().then(function (raw) { try { return raw ? JSON.parse(raw) : {}; } catch (e) { return { msg: T("login.parse", "服务返回了无法解析的响应") }; } });
+     }).then(function (r) {
+       if (r.code === 200) { location.href = "index.html"; }
+       else { msg.textContent = r.msg || T("login.fail", "登录失败"); btn.disabled = false; btn.removeAttribute("aria-busy"); }
+     }).catch(function () { msg.textContent = T("login.network", "网络错误，请稍后重试"); btn.disabled = false; btn.removeAttribute("aria-busy"); });
+  }
+  document.getElementById("loginBtn").addEventListener("click", doLogin);
+  ["username", "password"].forEach(function (id) {
+    document.getElementById(id).addEventListener("keydown", function (e) { if (e.key === "Enter") doLogin(); });
+  });
+  fetch("/login", { credentials: "same-origin" }).then(function (r) {
+    if (r.ok) location.href = "index.html";
+  }).catch(function () {});
+})();
+</script>
+</body>
+</html>
