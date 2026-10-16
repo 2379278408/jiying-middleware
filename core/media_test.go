@@ -1,21 +1,31 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 )
 
 func TestMediaMessageBuilders(t *testing.T) {
-	img := ImageMessage("f1", "hi")
-	if img["type"] != "image" || img["file_id"] != "f1" || img["caption"] != "hi" {
+	img := ImageMessage("https://cdn.example.com/a.png", "hi", "")
+	if img["type"] != "image" || img["content"] != "https://cdn.example.com/a.png" || img["caption"] != "hi" {
 		t.Fatalf("image message mismatch: %+v", img)
 	}
-	if _, ok := ImageMessage("f1", "")["caption"]; ok {
+	if img["caption_type"] != "text" {
+		t.Fatalf("caption_type should default to text, got %v", img["caption_type"])
+	}
+	if ImageMessage("https://cdn.example.com/a.png", "md", "markdown")["caption_type"] != "markdown" {
+		t.Fatal("markdown caption_type must be preserved")
+	}
+	if _, ok := ImageMessage("https://cdn.example.com/a.png", "", "")["caption"]; ok {
 		t.Fatal("empty caption must be omitted")
 	}
-	file := FileMessage("f2", "a.pdf", 10)
-	if file["type"] != "file" || file["size_bytes"] != int64(10) {
+	file := FileMessage("https://cdn.example.com/a.pdf", "a.pdf", 10)
+	if file["type"] != "file" || file["content"] != "https://cdn.example.com/a.pdf" || file["size_bytes"] != int64(10) {
 		t.Fatalf("file message mismatch: %+v", file)
+	}
+	if got := MarkdownMessage("**hi**")["type"]; got != "markdown" {
+		t.Fatalf("markdown type mismatch: %v", got)
 	}
 	if CardMessage("t", "d", "")["url"] != nil {
 		t.Fatal("empty card url must be omitted")
@@ -26,6 +36,19 @@ func TestMediaMessageBuilders(t *testing.T) {
 	chart := ChartMessage("", "t", "d", map[string]any{"labels": []string{"a"}})
 	if chart["chart_type"] != "bar" {
 		t.Fatalf("empty chart type should default to bar, got %v", chart["chart_type"])
+	}
+}
+
+func TestResolveMediaContentPassthroughURL(t *testing.T) {
+	got, err := resolveMediaContent(context.Background(), "conv1", "", "https://cdn.example.com/x.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "https://cdn.example.com/x.png" {
+		t.Fatalf("absolute URL must pass through, got %q", got)
+	}
+	if _, err := resolveMediaContent(context.Background(), "conv1", "", "   "); err == nil {
+		t.Fatal("blank source must error")
 	}
 }
 

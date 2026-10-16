@@ -104,8 +104,16 @@ func connectionReadiness() map[string]any {
 	app := readinessCheck{Status: "missing", Issues: []readinessIssue{{Code: "missing_app", Message: "尚未配置应用通道", Hint: "先添加一个 MagicChat 应用连接"}}}
 	if len(apps) > 0 {
 		app = appReadiness(apps[0])
-		if app.Status == "configured" && AppChannelConnected() {
-			app.Status = "connected"
+		if app.Status == "configured" {
+			if AppChannelConnected() {
+				app.Status = "connected"
+			} else if msg := AppChannelLastError(); msg != "" {
+				app.Issues = append(app.Issues, readinessIssue{
+					Code:    "app_connect_failed",
+					Message: msg,
+					Hint:    "核对应用地址、ID、连接密钥，并确认应用已启用且未重置密钥",
+				})
+			}
 		}
 	}
 	account := accountReadiness(CurrentAccountConfig())

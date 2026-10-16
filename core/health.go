@@ -89,6 +89,9 @@ func metrics(c *gin.Context) {
 	fmt.Fprintf(&b, "# HELP jiying_ratelimit_rejected_total 因限流或配额被拒绝的任务数\n")
 	fmt.Fprintf(&b, "# TYPE jiying_ratelimit_rejected_total counter\n")
 	fmt.Fprintf(&b, "jiying_ratelimit_rejected_total %d\n", RateLimitRejected())
+	fmt.Fprintf(&b, "# HELP jiying_app_ratelimited_total 应用通道被服务端限流(rate_limited)的调用次数\n")
+	fmt.Fprintf(&b, "# TYPE jiying_app_ratelimited_total counter\n")
+	fmt.Fprintf(&b, "jiying_app_ratelimited_total %d\n", JiyingRateLimitedTotal())
 	c.Data(http.StatusOK, "text/plain; version=0.0.4; charset=utf-8", []byte(b.String()))
 }
 

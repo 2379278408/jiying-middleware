@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 type fakeSock struct {
@@ -258,11 +259,15 @@ func TestCommandPanicStillAcks(t *testing.T) {
 
 	got := make(chan jiyingEnvelope, 1)
 	go func() {
-		req := <-sock.out
-		got <- req
-		_ = client.HandleInbound(context.Background(), jiyingEnvelope{
-			Kind: "response", ReplyTo: req.ID, OK: true, Payload: json.RawMessage(`{}`),
-		})
+		for req := range sock.out {
+			_ = client.HandleInbound(context.Background(), jiyingEnvelope{
+				Kind: "response", ReplyTo: req.ID, OK: true, Payload: json.RawMessage(`{}`),
+			})
+			if req.Method == "events.ack" {
+				got <- req
+				return
+			}
+		}
 	}()
 	s := &JiyingSender{client: client, ChatID: "conv-1", MsgID: "m1", Text: "panic-test", ackCursor: 9}
 	if !HandleMessage(s) {
@@ -344,7 +349,7 @@ func TestMessageCreatedEnrichesSender(t *testing.T) {
 		"conversation": map[string]any{"id": "conv-9", "type": "group", "name": "研发群"},
 		"sender":       map[string]any{"id": "u-9", "name": "ada", "nickname": "Ada", "email": "ada@example.com", "type": "user"},
 		"message": map[string]any{
-			"id": "m-9", "summary": "图片", "reply_to_message_id": "m-1",
+			"id": "m-9", "seq": 42, "summary": "图片", "reply_to_message_id": "m-1",
 			"body": map[string]any{"type": "image", "file_id": "file-1", "caption": "看这张图"},
 		},
 	})
@@ -389,6 +394,9 @@ func TestMessageCreatedEnrichesSender(t *testing.T) {
 	if js.GetImtype() != "jiying" {
 		t.Fatalf("imtype=%q", js.GetImtype())
 	}
+	if js.Seq != 42 {
+		t.Fatalf("seq=%d", js.Seq)
+	}
 }
 
 func TestMessageBodyPlainText(t *testing.T) {
@@ -414,6 +422,197 @@ func TestMessageBodyPlainText(t *testing.T) {
 		if got := tc.body.plainText(); got != tc.want {
 			t.Errorf("%s: got %q want %q", tc.name, got, tc.want)
 		}
+	}
+}
+
+func TestReactionReceiptOnCommand(t *testing.T) {
+	sock := &fakeSock{in: make(chan jiyingEnvelope, 8), out: make(chan jiyingEnvelope, 8)}
+	client := NewJiyingClient(JiyingConfig{AppID: "app"}, nil)
+	client.conn = sock
+	activeJiying = client
+	defer func() { activeJiying = nil }()
+
+	cmdRouter.Store("receipt-test", func() {})
+	defer cmdRouter.Delete("receipt-test")
+	snapshot := Functions
+	Functions = append([]*Function(nil), snapshot...)
+	Functions = append(Functions, &Function{Title: "receipt-test", Handle: "receipt-test", Origin: true})
+	defer func() { Functions = snapshot }()
+
+	var mu sync.Mutex
+	var reqs []jiyingEnvelope
+	go func() {
+		for req := range sock.out {
+			mu.Lock()
+			reqs = append(reqs, req)
+			mu.Unlock()
+			_ = client.HandleInbound(context.Background(), jiyingEnvelope{
+				Kind: "response", ReplyTo: req.ID, OK: true, Payload: json.RawMessage(`{}`),
+			})
+		}
+	}()
+
+	s := &JiyingSender{client: client, ChatID: "conv-1", MsgID: "m1", Text: "receipt-test"}
+	if !HandleMessage(s) {
+		t.Fatal("command not matched")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		mu.Lock()
+		var reaction *jiyingEnvelope
+		for i := range reqs {
+			if reqs[i].Method == "message.reaction.set" {
+				reaction = &reqs[i]
+			}
+		}
+		mu.Unlock()
+		if reaction != nil {
+			var p struct {
+				ConversationID string `json:"conversation_id"`
+				MessageID      string `json:"message_id"`
+				Text           string `json:"text"`
+				Reacted        bool   `json:"reacted"`
+			}
+			_ = json.Unmarshal(reaction.Payload, &p)
+			if p.ConversationID != "conv-1" || p.MessageID != "m1" {
+				t.Fatalf("reaction target=%s", reaction.Payload)
+			}
+			if p.Text != receiptReaction || !p.Reacted {
+				t.Fatalf("reaction content=%s", reaction.Payload)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no reaction receipt sent")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestRateLimitedRetriesWithSameRequestID(t *testing.T) {
+	sock := &fakeSock{in: make(chan jiyingEnvelope, 8), out: make(chan jiyingEnvelope, 8)}
+	client := NewJiyingClient(JiyingConfig{AppID: "app"}, nil)
+	client.conn = sock
+	before := JiyingRateLimitedTotal()
+	go func() {
+		first := <-sock.out
+		_ = client.HandleInbound(context.Background(), jiyingEnvelope{
+			Kind: "response", ReplyTo: first.ID, OK: false,
+			Error: &jiyingError{Code: "rate_limited", Message: "too many"},
+		})
+		second := <-sock.out
+		if second.ID != first.ID {
+			t.Errorf("retry must reuse request id: %s != %s", second.ID, first.ID)
+		}
+		_ = client.HandleInbound(context.Background(), jiyingEnvelope{
+			Kind: "response", ReplyTo: second.ID, OK: true, Payload: json.RawMessage(`{}`),
+		})
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := client.Call(ctx, "message.send", map[string]any{"x": 1}); err != nil {
+		t.Fatal(err)
+	}
+	if got := JiyingRateLimitedTotal(); got != before+1 {
+		t.Fatalf("rate limited counter=%d want=%d", got, before+1)
+	}
+}
+
+func TestMessageCreatedTopicContext(t *testing.T) {
+	client := NewJiyingClient(JiyingConfig{AppID: "app"}, nil)
+	old := Senders
+	Senders = make(chan Sender, 1)
+	defer func() { Senders = old }()
+
+	payload, _ := json.Marshal(map[string]any{
+		"conversation": map[string]any{
+			"id": "topic-1", "type": "topic", "name": "发布计划",
+			"created_by_app_id": "app-owner",
+			"parent":            map[string]any{"id": "group-1", "type": "group", "name": "产品讨论组"},
+			"source_message":    map[string]any{"id": "src-1", "seq": 42},
+		},
+		"sender":  map[string]any{"id": "u1", "name": "Ada"},
+		"message": map[string]any{"id": "m1", "summary": "hi", "body": map[string]any{"type": "text", "content": "hi"}},
+	})
+	if _, err := client.dispatchEvent(context.Background(), jiyingEnvelope{
+		Kind: "event", Event: "message.created", Cursor: 5, Payload: payload,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var s Sender
+	select {
+	case s = <-Senders:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout")
+	}
+	js, ok := s.(*JiyingSender)
+	if !ok {
+		t.Fatalf("sender type %T", s)
+	}
+	if !js.IsTopic() {
+		t.Fatal("expected topic conversation")
+	}
+	if js.ParentConvID != "group-1" || js.ParentConvType != "group" || js.ParentConvName != "产品讨论组" {
+		t.Fatalf("parent meta=%+v", js)
+	}
+	if js.SourceMessageID != "src-1" || js.CreatedByAppID != "app-owner" {
+		t.Fatalf("source meta=%+v", js)
+	}
+}
+
+func TestValidateChoice(t *testing.T) {
+	valid := []map[string]string{{"id": "today", "label": "今天"}, {"id": "tomorrow", "label": "明天"}}
+	if err := validateChoice("请选择部署时间", valid); err != nil {
+		t.Fatalf("valid choice rejected: %v", err)
+	}
+	bad := []struct {
+		name    string
+		content string
+		opts    []map[string]string
+	}{
+		{"empty-content", "   ", valid},
+		{"too-few-options", "x", []map[string]string{{"id": "a", "label": "A"}}},
+		{"bad-option-id", "x", []map[string]string{{"id": "a b", "label": "A"}, {"id": "c", "label": "C"}}},
+		{"duplicate-option-id", "x", []map[string]string{{"id": "a", "label": "A"}, {"id": "a", "label": "B"}}},
+		{"missing-label", "x", []map[string]string{{"id": "a", "label": " "}, {"id": "c", "label": "C"}}},
+		{"newline-label", "x", []map[string]string{{"id": "a", "label": "A\nB"}, {"id": "c", "label": "C"}}},
+	}
+	for _, tc := range bad {
+		if err := validateChoice(tc.content, tc.opts); err == nil {
+			t.Errorf("%s: expected error", tc.name)
+		}
+	}
+}
+
+func TestJiyingDialErrorMessage(t *testing.T) {
+	cases := map[int]string{
+		400: "应用 ID 格式错误",
+		401: "连接密钥错误",
+		403: "应用已停用",
+		500: "HTTP 500",
+	}
+	for status, want := range cases {
+		got := (&jiyingDialError{Status: status}).Error()
+		if !strings.Contains(got, want) {
+			t.Errorf("status %d: got %q want contains %q", status, got, want)
+		}
+	}
+}
+
+func TestClampOutboundText(t *testing.T) {
+	if got := clampOutboundText("short"); got != "short" {
+		t.Fatalf("short text changed: %q", got)
+	}
+	long := strings.Repeat("字", maxOutboundTextBytes)
+	got := clampOutboundText(long)
+	if len(got) > maxOutboundTextBytes {
+		t.Fatalf("clamped length=%d exceeds limit=%d", len(got), maxOutboundTextBytes)
+	}
+	if !utf8.ValidString(got) {
+		t.Fatal("clamped text is not valid UTF-8")
+	}
+	if !strings.HasSuffix(got, "（内容过长已截断）") {
+		t.Fatalf("missing truncation note: %q", got[len(got)-32:])
 	}
 }
 

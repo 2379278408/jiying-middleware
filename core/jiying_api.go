@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -57,6 +58,14 @@ func jiyingMsgCounts() (int, int) {
 	}
 	return jiyingMsgStats.inbound, jiyingMsgStats.out
 }
+
+// jiyingRateLimitedTotal 累计应用通道被服务端限流（rate_limited）的调用次数。
+var jiyingRateLimitedTotal atomic.Int64
+
+func jiyingCountRateLimited() { jiyingRateLimitedTotal.Add(1) }
+
+// JiyingRateLimitedTotal 返回累计被限流次数，供指标与排障读取。
+func JiyingRateLimitedTotal() int64 { return jiyingRateLimitedTotal.Load() }
 
 func jiyingJSON(c *gin.Context, data any) {
 	c.JSON(http.StatusOK, gin.H{
@@ -147,6 +156,7 @@ func registerJiyingAPI() {
 	g.POST("/send/image", requireRole(RoleOps), jiyingAPISendImage)
 	g.POST("/send/file", requireRole(RoleOps), jiyingAPISendFile)
 	g.POST("/send/card", requireRole(RoleOps), jiyingAPISendCard)
+	g.POST("/send/markdown", requireRole(RoleOps), jiyingAPISendMarkdown)
 	g.POST("/send/link", requireRole(RoleOps), jiyingAPISendLink)
 	g.POST("/send/chart", requireRole(RoleOps), jiyingAPISendChart)
 	g.GET("/logs", jiyingAPILogs)
@@ -662,24 +672,63 @@ func jiyingAPISendMedia(c *gin.Context, action string, message map[string]any) {
 	jiyingJSON(c, "ok")
 }
 
-func jiyingAPISendImage(c *gin.Context) {
-	fileID := strings.TrimSpace(c.PostForm("file_id"))
-	if fileID == "" {
-		jiyingErr(c, "缺少 file_id")
+// jiyingAPISendResolvedMedia 用于 media 消息体需先解析可拉取 URL 的场景。
+func jiyingAPISendResolvedMedia(c *gin.Context, action string, build func(ctx context.Context) (map[string]any, error)) {
+	convID := strings.TrimSpace(c.PostForm("conversation_id"))
+	if convID == "" {
+		jiyingErr(c, "缺少会话")
 		return
 	}
-	jiyingAPISendMedia(c, "media.image", ImageMessage(fileID, c.PostForm("caption")))
+	if clientForConv(convID) == nil {
+		jiyingErr(c, "即应未连接")
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
+	defer cancel()
+	message, err := build(ctx)
+	if err != nil {
+		RecordAudit(consoleUser(c), action, convID, "", "失败: "+err.Error())
+		jiyingErr(c, err.Error())
+		return
+	}
+	if _, err := SendMediaToConv(ctx, convID, strings.TrimSpace(c.PostForm("reply_to")), message); err != nil {
+		RecordAudit(consoleUser(c), action, convID, "", "失败: "+err.Error())
+		jiyingErr(c, err.Error())
+		return
+	}
+	jiyingCountOutbound()
+	RecordAudit(consoleUser(c), action, convID, "", "成功")
+	jiyingJSON(c, "ok")
+}
+
+func jiyingAPISendImage(c *gin.Context) {
+	src := strings.TrimSpace(c.PostForm("url"))
+	if src == "" {
+		src = strings.TrimSpace(c.PostForm("file_id"))
+	}
+	if src == "" {
+		jiyingErr(c, "缺少 url 或 file_id")
+		return
+	}
+	jiyingAPISendResolvedMedia(c, "media.image", func(ctx context.Context) (map[string]any, error) {
+		return buildImageMessage(ctx, strings.TrimSpace(c.PostForm("conversation_id")), src, c.PostForm("caption"), c.PostForm("caption_type"))
+	})
 }
 
 func jiyingAPISendFile(c *gin.Context) {
-	fileID := strings.TrimSpace(c.PostForm("file_id"))
-	if fileID == "" {
-		jiyingErr(c, "缺少 file_id")
+	src := strings.TrimSpace(c.PostForm("url"))
+	if src == "" {
+		src = strings.TrimSpace(c.PostForm("file_id"))
+	}
+	if src == "" {
+		jiyingErr(c, "缺少 url 或 file_id")
 		return
 	}
 	var size int64
 	fmt.Sscan(c.PostForm("size"), &size)
-	jiyingAPISendMedia(c, "media.file", FileMessage(fileID, c.PostForm("name"), size))
+	jiyingAPISendResolvedMedia(c, "media.file", func(ctx context.Context) (map[string]any, error) {
+		return buildFileMessage(ctx, strings.TrimSpace(c.PostForm("conversation_id")), src, c.PostForm("name"), size)
+	})
 }
 
 func jiyingAPISendCard(c *gin.Context) {
@@ -689,6 +738,18 @@ func jiyingAPISendCard(c *gin.Context) {
 		return
 	}
 	jiyingAPISendMedia(c, "media.card", CardMessage(title, c.PostForm("description"), c.PostForm("url")))
+}
+
+func jiyingAPISendMarkdown(c *gin.Context) {
+	content := strings.TrimSpace(c.PostForm("content"))
+	if content == "" {
+		content = strings.TrimSpace(c.PostForm("text"))
+	}
+	if content == "" {
+		jiyingErr(c, "缺少内容")
+		return
+	}
+	jiyingAPISendMedia(c, "media.markdown", MarkdownMessage(content))
 }
 
 func jiyingAPISendLink(c *gin.Context) {

@@ -9,9 +9,11 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gorilla/websocket"
 )
@@ -23,6 +25,14 @@ const (
 	jiyingPongWait  = 60 * time.Second
 	jiyingRetryWait = 500 * time.Millisecond
 	statusPingEvery = 3 * time.Second
+	// maxCallAttempts 是单次调用（含首次）的最大尝试次数。
+	maxCallAttempts = 2
+	// maxRateLimitWait 限制为等待服务端限流恢复而在调用内阻塞的上限。
+	maxRateLimitWait = 10 * time.Second
+	// maxOutboundTextBytes 是单条文本消息的字面上限，避免 Envelope 触顶 1 MiB。
+	maxOutboundTextBytes = 256 << 10
+	// receiptReaction 是收到待处理消息后立即回发的接收回执表情。
+	receiptReaction = "🔥"
 )
 
 type JiyingConfig struct {
@@ -57,8 +67,27 @@ type jiyingEnvelope struct {
 }
 
 type jiyingError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code              string `json:"code"`
+	Message           string `json:"message"`
+	RetryAfterSeconds int    `json:"retry_after_seconds,omitempty"`
+}
+
+// jiyingDialError 承载应用通道握手失败时的 HTTP 状态码，供日志与就绪面板给出可读原因。
+type jiyingDialError struct {
+	Status int
+}
+
+func (e *jiyingDialError) Error() string {
+	switch e.Status {
+	case http.StatusBadRequest:
+		return "应用 ID 格式错误（HTTP 400）"
+	case http.StatusUnauthorized:
+		return "应用不存在或连接密钥错误（HTTP 401）"
+	case http.StatusForbidden:
+		return "应用已停用（HTTP 403）"
+	default:
+		return fmt.Sprintf("应用握手失败 HTTP %d", e.Status)
+	}
 }
 
 type jiyingPending struct {
@@ -80,6 +109,8 @@ type JiyingClient struct {
 	// ackWatermark 是已确认水位；ACK 某个 cursor 会同时确认不大于它的所有事件。
 	ackWatermark int64
 	serial       chan struct{}
+	// lastErr 记录最近一次连接失败的原因，供就绪面板与排障读取。
+	lastErr string
 }
 
 type jiyingSocket interface {
@@ -95,8 +126,14 @@ func NewJiyingClient(cfg JiyingConfig, dial func(context.Context) (jiyingSocket,
 			h.Set("X-MagicChat-App-ID", cfg.AppID)
 			h.Set("Authorization", "Bearer "+cfg.Secret)
 			d := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
-			c, _, err := d.DialContext(ctx, cfg.WSURL, h)
-			return c, err
+			c, resp, err := d.DialContext(ctx, cfg.WSURL, h)
+			if err != nil {
+				if resp != nil {
+					return nil, &jiyingDialError{Status: resp.StatusCode}
+				}
+				return nil, err
+			}
+			return c, nil
 		}
 	}
 	return &JiyingClient{
@@ -124,8 +161,9 @@ func (c *JiyingClient) Call(ctx context.Context, method string, payload any) (js
 	// Server 按 (id, method, payload) 去重，重复请求返回首次结果。
 	id := c.nextID()
 	var lastErr error
-	for attempt := 0; attempt < 2; attempt++ {
-		if attempt > 0 && !sleepCtx(ctx, jiyingRetryWait) {
+	delay := time.Duration(0)
+	for attempt := 0; attempt < maxCallAttempts; attempt++ {
+		if attempt > 0 && !sleepCtx(ctx, delay) {
 			return nil, ctx.Err()
 		}
 		resp, err := c.callOnce(ctx, id, method, raw)
@@ -133,9 +171,15 @@ func (c *JiyingClient) Call(ctx context.Context, method string, payload any) (js
 			return resp, nil
 		}
 		lastErr = err
-		if ctx.Err() != nil || !retryableCallError(err) {
+		if ctx.Err() != nil {
 			break
 		}
+		wait, retry := callRetryDelay(err)
+		if !retry {
+			logCallFailure(method, err)
+			break
+		}
+		delay = wait
 		GetMyLog().Warn("即应调用 %s 失败，复用请求 ID 重试：%v", method, err)
 	}
 	return nil, lastErr
@@ -167,7 +211,7 @@ func (c *JiyingClient) callOnce(ctx context.Context, id, method string, raw json
 	case resp := <-ch:
 		if !resp.OK {
 			if resp.Error != nil {
-				return nil, &jiyingCallError{Code: resp.Error.Code, Message: resp.Error.Message}
+				return nil, &jiyingCallError{Code: resp.Error.Code, Message: resp.Error.Message, RetryAfterSeconds: resp.Error.RetryAfterSeconds}
 			}
 			return nil, fmt.Errorf("即应调用失败")
 		}
@@ -176,27 +220,58 @@ func (c *JiyingClient) callOnce(ctx context.Context, id, method string, raw json
 }
 
 type jiyingCallError struct {
-	Code    string
-	Message string
+	Code              string
+	Message           string
+	RetryAfterSeconds int
 }
 
 func (e *jiyingCallError) Error() string { return e.Code + ": " + e.Message }
 
 var errJiyingNotConnected = errors.New("即应未连接")
 
-// retryableCallError 判断错误是否适合复用原请求 ID 重试：传输层失败或 Server 内部错误。
-func retryableCallError(err error) bool {
+// rateLimitWait 把服务端给出的 retry_after_seconds 折算为阻塞时长，并收敛到上限。
+func rateLimitWait(seconds int) time.Duration {
+	if seconds <= 0 {
+		return jiyingRetryWait
+	}
+	d := time.Duration(seconds) * time.Second
+	if d > maxRateLimitWait {
+		return maxRateLimitWait
+	}
+	return d
+}
+
+// callRetryDelay 判断错误是否适合复用原请求 ID 重试，并给出建议等待时长。
+// 传输层失败与 Server internal_error 可重试；rate_limited 按 retry_after_seconds 退避；
+// unsupported_version / request_id_conflict 属确定性失败，不重试。
+func callRetryDelay(err error) (time.Duration, bool) {
 	if err == nil {
-		return false
+		return 0, false
 	}
 	var ce *jiyingCallError
 	if errors.As(err, &ce) {
-		return ce.Code == "internal_error"
+		switch ce.Code {
+		case "internal_error":
+			return jiyingRetryWait, true
+		case "rate_limited":
+			jiyingCountRateLimited()
+			return rateLimitWait(ce.RetryAfterSeconds), true
+		default:
+			return 0, false
+		}
 	}
 	if errors.Is(err, errJiyingNotConnected) {
-		return false
+		return 0, false
 	}
-	return true
+	return jiyingRetryWait, true
+}
+
+// logCallFailure 对需要人工关注的确定性失败打一条告警，便于从运行日志定位。
+func logCallFailure(method string, err error) {
+	var ce *jiyingCallError
+	if errors.As(err, &ce) && (ce.Code == "unsupported_version" || ce.Code == "request_id_conflict") {
+		GetMyLog().Warn("即应调用 %s 失败 code=%s: %s", method, ce.Code, ce.Message)
+	}
 }
 
 func (c *JiyingClient) dropPending(id string) {
@@ -239,7 +314,25 @@ func configureJiyingSocket(sock jiyingSocket) {
 	})
 }
 
+// clampOutboundText 限制单条文本消息体积，避免入站/出站 Envelope 触顶 1 MiB。
+// 超限时按字节边界安全截断并追加提示，保证不会切断 UTF-8 字符。
+func clampOutboundText(text string) string {
+	if len(text) <= maxOutboundTextBytes {
+		return text
+	}
+	const note = "\n\n（内容过长已截断）"
+	limit := maxOutboundTextBytes - len(note)
+	if limit < 0 {
+		limit = 0
+	}
+	for limit > 0 && !utf8.RuneStart(text[limit]) {
+		limit--
+	}
+	return text[:limit] + note
+}
+
 func (c *JiyingClient) SendText(ctx context.Context, conversationID, replyTo, text string) error {
+	text = clampOutboundText(text)
 	body := map[string]any{
 		"target":  map[string]any{"type": "conversation", "conversation_id": conversationID},
 		"message": map[string]any{"type": "text", "content": text},
@@ -259,6 +352,21 @@ func (c *JiyingClient) SendStatus(ctx context.Context, conversationID, status st
 	_, err := c.Call(ctx, "conversation.status", map[string]any{
 		"conversation_id": conversationID,
 		"status":          status,
+	})
+	return err
+}
+
+// SendReaction 以应用身份给指定消息添加或移除文本表情（message.reaction.set）。
+// 文本去首尾空白后不得为空；这里用于接收回执，失败只记日志、不影响业务。
+func (c *JiyingClient) SendReaction(ctx context.Context, conversationID, messageID, text string, reacted bool) error {
+	if conversationID == "" || messageID == "" || strings.TrimSpace(text) == "" {
+		return fmt.Errorf("缺少会话 / 消息 / 表情内容")
+	}
+	_, err := c.Call(ctx, "message.reaction.set", map[string]any{
+		"conversation_id": conversationID,
+		"message_id":      messageID,
+		"text":            text,
+		"reacted":         reacted,
 	})
 	return err
 }
@@ -301,7 +409,51 @@ func startSenderStatus(s Sender) func() {
 	return startStatusPing(js.ConvType, js.ChatID, "正在处理消息")
 }
 
+// choiceOptionIDRe 匹配选择项 ID 允许的字符集。
+var choiceOptionIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// validateChoice 校验选择消息参数，避免把必然触发 invalid_request 的内容发出去。
+// 规则来自应用开发指南：正文去空白后 1~5000 字符；选项 2~20 个，ID 1~64 字符且限
+// 字母/数字/连字符/下划线，展示文本 1~200 字符且不含换行或控制字符。
+func validateChoice(content string, options []map[string]string) error {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return fmt.Errorf("选择消息正文不能为空")
+	}
+	if n := len([]rune(content)); n > 5000 {
+		return fmt.Errorf("选择消息正文过长（%d > 5000 字符）", n)
+	}
+	if len(options) < 2 || len(options) > 20 {
+		return fmt.Errorf("选择项数量必须是 2~20 个，当前 %d 个", len(options))
+	}
+	seen := map[string]bool{}
+	for _, opt := range options {
+		id := strings.TrimSpace(opt["id"])
+		if id == "" || len([]rune(id)) > 64 || !choiceOptionIDRe.MatchString(id) {
+			return fmt.Errorf("选择项 ID 非法：%q（1~64 位字母/数字/-/_）", id)
+		}
+		if seen[id] {
+			return fmt.Errorf("选择项 ID 重复：%q", id)
+		}
+		seen[id] = true
+		label := opt["label"]
+		if strings.TrimSpace(label) == "" {
+			return fmt.Errorf("选择项 %q 缺少展示文本", id)
+		}
+		if len([]rune(label)) > 200 {
+			return fmt.Errorf("选择项 %q 展示文本过长（最多 200 字符）", id)
+		}
+		if strings.ContainsAny(label, "\r\n") {
+			return fmt.Errorf("选择项 %q 展示文本不能包含换行", id)
+		}
+	}
+	return nil
+}
+
 func (c *JiyingClient) SendChoice(ctx context.Context, conversationID, content string, options []map[string]string) (string, error) {
+	if err := validateChoice(content, options); err != nil {
+		return "", err
+	}
 	raw, err := c.Call(ctx, "message.send", map[string]any{
 		"target": map[string]any{"type": "conversation", "conversation_id": conversationID},
 		"message": map[string]any{
@@ -556,9 +708,19 @@ func (c *JiyingClient) dispatchEvent(ctx context.Context, env jiyingEnvelope) (b
 	case "message.created":
 		var p struct {
 			Conversation struct {
-				ID   string `json:"id"`
-				Type string `json:"type"`
-				Name string `json:"name"`
+				ID             string `json:"id"`
+				Type           string `json:"type"`
+				Name           string `json:"name"`
+				CreatedByAppID string `json:"created_by_app_id"`
+				Parent         struct {
+					ID   string `json:"id"`
+					Type string `json:"type"`
+					Name string `json:"name"`
+				} `json:"parent"`
+				SourceMessage struct {
+					ID  string `json:"id"`
+					Seq int64  `json:"seq"`
+				} `json:"source_message"`
 			} `json:"conversation"`
 			Sender struct {
 				ID       string `json:"id"`
@@ -569,6 +731,7 @@ func (c *JiyingClient) dispatchEvent(ctx context.Context, env jiyingEnvelope) (b
 			} `json:"sender"`
 			Message struct {
 				ID               string            `json:"id"`
+				Seq              int64             `json:"seq"`
 				Summary          string            `json:"summary"`
 				ReplyToMessageID string            `json:"reply_to_message_id"`
 				Body             jiyingMessageBody `json:"body"`
@@ -582,18 +745,26 @@ func (c *JiyingClient) dispatchEvent(ctx context.Context, env jiyingEnvelope) (b
 			text = p.Message.Summary
 		}
 		rememberConvApp(p.Conversation.ID, c.cfg.AppID)
+		if p.Conversation.Parent.ID != "" {
+			rememberConvApp(p.Conversation.Parent.ID, c.cfg.AppID)
+		}
 		if p.Message.Body.isMedia() && p.Message.Body.FileID != "" {
 			recordMediaCtx(p.Conversation.ID, p.Message.ID, []string{p.Message.Body.FileID})
 		}
 		jiyingCountInbound()
 		s := &JiyingSender{
 			client: c, UserID: p.Sender.ID, ChatID: p.Conversation.ID,
-			MsgID: p.Message.ID, ConvType: p.Conversation.Type, Text: text,
+			MsgID: p.Message.ID, Seq: p.Message.Seq, ConvType: p.Conversation.Type, Text: text,
 			SenderName: p.Sender.Name, SenderNickname: p.Sender.Nickname,
 			SenderEmail: p.Sender.Email, SenderType: p.Sender.Type,
 			ConvName: p.Conversation.Name, ReplyToMsgID: p.Message.ReplyToMessageID,
-			Body:      p.Message.Body,
-			ackCursor: env.Cursor,
+			Body:            p.Message.Body,
+			ParentConvID:    p.Conversation.Parent.ID,
+			ParentConvType:  p.Conversation.Parent.Type,
+			ParentConvName:  p.Conversation.Parent.Name,
+			SourceMessageID: p.Conversation.SourceMessage.ID,
+			CreatedByAppID:  p.Conversation.CreatedByAppID,
+			ackCursor:       env.Cursor,
 		}
 		if err := enqueueSender(ctx, s); err != nil {
 			return false, err
@@ -659,7 +830,8 @@ func (c *JiyingClient) Run(ctx context.Context) error {
 		}
 		sock, err := c.dial(ctx)
 		if err != nil {
-			GetMyLog().Warn("即应连接失败")
+			c.setLastError(err.Error())
+			GetMyLog().Warn("即应连接失败: %v", err)
 			if !sleepCtx(ctx, backoff) {
 				return ctx.Err()
 			}
@@ -669,6 +841,7 @@ func (c *JiyingClient) Run(ctx context.Context) error {
 			continue
 		}
 		backoff = time.Second
+		c.setLastError("")
 		c.mu.Lock()
 		c.conn = sock
 		c.mu.Unlock()
@@ -720,6 +893,7 @@ type JiyingSender struct {
 	UserID         string
 	ChatID         string
 	MsgID          string
+	Seq            int64
 	ConvType       string
 	Text           string
 	SenderName     string
@@ -729,8 +903,14 @@ type JiyingSender struct {
 	ConvName       string
 	ReplyToMsgID   string
 	Body           jiyingMessageBody
-	ackCursor      int64
-	ackOnce        sync.Once
+	// 话题上下文：消息来自话题时记录父会话与来源消息，便于功能与 Agent 感知层级。
+	ParentConvID    string
+	ParentConvType  string
+	ParentConvName  string
+	SourceMessageID string
+	CreatedByAppID  string
+	ackCursor       int64
+	ackOnce         sync.Once
 	BaseSender
 }
 
@@ -762,6 +942,32 @@ func (s *JiyingSender) IsMedia() bool { return s.Body.isMedia() }
 
 // IsReply 报告用户是否在回复某条更早的消息。
 func (s *JiyingSender) IsReply() bool { return s.ReplyToMsgID != "" }
+
+// IsTopic 报告消息是否来自话题会话。
+func (s *JiyingSender) IsTopic() bool { return s.ConvType == "topic" }
+
+// Receipt 在确认需要处理该消息后立即异步回接收回执；尽力投递，失败只记日志。
+// 不阻塞消息处理，也不影响 events.ack。
+func (s *JiyingSender) Receipt() {
+	if s == nil || s.client == nil || s.ChatID == "" || s.MsgID == "" {
+		return
+	}
+	client, convID, msgID := s.client, s.ChatID, s.MsgID
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		if err := client.SendReaction(ctx, convID, msgID, receiptReaction, true); err != nil {
+			GetMyLog().Debug("接收回执发送失败 conv=%s msg=%s: %v", convID, msgID, err)
+		}
+	}()
+}
+
+// sendReceipt 触发 sender 自带的接收回执（非即应消息为 no-op）。
+func sendReceipt(sender Sender) {
+	if r, ok := sender.(interface{ Receipt() }); ok {
+		r.Receipt()
+	}
+}
 
 func (s *JiyingSender) Send(msg interface{}) bool {
 	return s.send(fmt.Sprint(msg), "")
@@ -909,6 +1115,28 @@ func AppChannelConnected() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.conn != nil
+}
+
+// setLastError 记录最近一次连接失败原因，连接成功时清空。
+func (c *JiyingClient) setLastError(msg string) {
+	c.mu.Lock()
+	c.lastErr = msg
+	c.mu.Unlock()
+}
+
+// LastError 返回最近一次连接失败原因；正常连接时为空串。
+func (c *JiyingClient) LastError() string {
+	if c == nil {
+		return ""
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastErr
+}
+
+// AppChannelLastError 返回默认应用通道最近一次连接失败原因，供就绪面板与排障展示。
+func AppChannelLastError() string {
+	return currentJiying().LastError()
 }
 
 var jiyingStartedAt = time.Now()

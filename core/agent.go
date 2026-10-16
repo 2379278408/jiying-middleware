@@ -329,8 +329,42 @@ func resetAgentHistory(convID string) {
 	agentHistory.Unlock()
 }
 
+// loadServerHistory 读取服务端会话历史作为 Agent 上下文；seq 缺失或读取失败时返回 nil，
+// 由本地历史回退。当前消息（seq）作为 prompt 单独传入，故从历史中剔除以免重复。
+func loadServerHistory(ctx context.Context, convID string, seq int64) []chatMessage {
+	if convID == "" || seq <= 0 {
+		return nil
+	}
+	client := clientForConv(convID)
+	if client == nil {
+		return nil
+	}
+	limit := LoadAgentConfig().MaxHistory
+	if limit <= 0 {
+		limit = 30
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	msgs, err := client.ListMessages(ctx, convID, seq, limit)
+	if err != nil {
+		GetMyLog().Debug("读取服务端历史失败 conv=%s seq=%d: %v", convID, seq, err)
+		return nil
+	}
+	return messagesToChatHistory(msgs, strings.TrimSpace(CurrentAppConfig().AppID), seq)
+}
+
+// agentContext 组装 Agent 的既有上下文：优先服务端可见历史，不可用时回退本地短历史。
+func agentContext(ctx context.Context, convID string, seq int64) []chatMessage {
+	if h := loadServerHistory(ctx, convID, seq); len(h) > 0 {
+		return h
+	}
+	return getAgentHistory(convID)
+}
+
 // RunAgent 执行一轮薄 Agent：模型决策、调用功能、回灌结果，直到出最终答复。
-func RunAgent(ctx context.Context, convID, userID, prompt string) (string, error) {
+// seq 为触发消息的会话序号，用于读取服务端历史；无序号时回退本地历史。
+func RunAgent(ctx context.Context, convID, userID, prompt string, seq int64) (string, error) {
 	cfg := LoadAgentConfig()
 	if !cfg.ready() {
 		return "", fmt.Errorf("Agent 未配置：请设置 USER_LLM_BASE_URL / USER_LLM_API_KEY / USER_LLM_MODEL")
@@ -341,7 +375,7 @@ func RunAgent(ctx context.Context, convID, userID, prompt string) (string, error
 	if cfg.System != "" {
 		msgs = append(msgs, chatMessage{Role: "system", Content: cfg.System})
 	}
-	msgs = append(msgs, getAgentHistory(convID)...)
+	msgs = append(msgs, agentContext(ctx, convID, seq)...)
 	msgs = append(msgs, chatMessage{Role: "user", Content: prompt})
 
 	turns := cfg.MaxTurns
@@ -536,7 +570,7 @@ func registerAgentAPI() {
 		}
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 120*time.Second)
 		defer cancel()
-		out, err := RunAgent(ctx, convID, consoleUser(c), prompt)
+		out, err := RunAgent(ctx, convID, consoleUser(c), prompt, 0)
 		if err != nil {
 			RecordAudit(consoleUser(c), "agent.run", convID, prompt, "失败: "+err.Error())
 			jiyingErr(c, err.Error())

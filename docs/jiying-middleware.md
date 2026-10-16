@@ -148,3 +148,46 @@
 - 插件页内嵌「技能」面板（不新增导航项）：列出 `skills/` 下的 JS 模块与 Markdown 文档，展示类型徽标与大小；JS 技能可一键运行并回显结果、可删除（删除前提示会波及引用它的插件），安装入口与插件一致，均走独立运行时试跑后再落盘。
 - 模型降级：Agent 配置支持一个主模型加多个后备模型，主模型不可用（无渠道、限流、超时）时按顺序自动重试后备模型，成功与最终失败都会写入审计；后备模型可用环境变量 `USER_LLM_FALLBACK_MODELS` 或控制台配置，逗号分隔。
 - Agent 配置里的 Base URL 同样以掩码回显，提交掩码或空值即保持原值；API Key 留空或回传 `****` 也保持原值，界面只提示「已配置」。
+
+## 当前实现补充（2026-10-16）
+
+对照《第三方应用开发指南》（协议 v1）补齐协议面能力。
+
+### 应用通道协议
+
+- 接收回执：命中处理（命令匹配或 Agent 唤醒）后立即异步回发 `message.reaction.set`，文本为 `🔥`、`reacted=true`。回执在业务执行前发出，不阻塞队列、不等待模型，失败只记 Debug 日志，不影响 `events.ack`。常量 `receiptReaction` 定义于 `core/jiying_app.go`。
+- 限流退避：`message.send` 的滚动 60 秒限额（单应用 300 条 / 30 个不同用户）超限时服务端返回 `rate_limited`。`Call` 解析错误体中的 `retry_after_seconds`，按该值退避（上限 10 秒）后复用原请求 ID 重试一次；限流次数计入指标 `jiying_app_ratelimited_total`。
+- 错误分类：`internal_error` 与传输层失败复用原请求 ID 重试；`rate_limited` 按退避重试；`unsupported_version`、`request_id_conflict`、`forbidden`、`not_found`、`conflict` 属确定性失败，不重试并对前两者打告警日志。
+- 话题上下文：`message.created` 解析 `conversation.parent`、`conversation.source_message` 与 `conversation.created_by_app_id`，落在 `JiyingSender` 的 `ParentConvID` / `ParentConvType` / `ParentConvName` / `SourceMessageID` / `CreatedByAppID`；`IsTopic()` 判断话题会话，父会话同时登记进会话归属映射以保证出站路由。
+- 握手诊断：应用通道握手失败按 HTTP 状态给出可读原因（400 应用 ID 格式错误、401 密钥错误、403 应用已停用），最近一次失败原因经 `AppChannelLastError()` 在 `/jiying/api/connect/readiness` 的应用项中作为 `app_connect_failed` 问题展示，便于就地排障。
+- 出站保护：单条文本经 `clampOutboundText` 截断到 256 KiB 以内（按 UTF-8 边界），避免 Envelope 触顶 1 MiB；`SendChoice` 在发送前校验正文长度（≤5000）、选项数量（2~20）、选项 ID（1~64，限 `[A-Za-z0-9_-]` 且不重复）与展示文本（1~200、无换行），非法参数直接返回错误而不发请求。
+- 单测覆盖：`core/jiying_test.go` 新增接收回执、限流复用请求 ID、话题上下文解析、选择参数校验、握手错误文案、出站文本截断等用例。
+
+### 应用通道 RPC 面（`core/jiying_rpc.go`）
+
+按指南把应用通道对普通应用开放的方法补齐为类型化的 Go API，并接入脚本运行时。
+
+- 目标类型化发送：`rpcTarget{Type,UserID,ConversationID}` 覆盖 `user` / `app` / `group` / `topic` / `conversation`，`SendTo` 统一构造 `message.send` 请求体；`SendMessage` 改为委托 `SendTo`，消除重复实现。`SendToConv` 按会话归属选通道。
+- 查询类：`UsersGet`（`users.get`）、`AppsGet`（`apps.get`）、`ListConversations`（`conversations.list`）、`ListMessages`（`conversation.messages.list`，要求 `before_or_equal_seq` 为正整数）。
+- 话题类：`TopicCreate` / `TopicGet` / `TopicClose`（`conversation.topic.create|get|close`），`JiyingTopic` 暴露话题会话 ID、父会话、来源消息与 `last_message_seq`。
+- 群聊类：`GroupCreate` / `GroupGet` / `GroupUpdate` / `GroupDissolve` 与 `GroupMembers` / `GroupAddMembers` / `GroupRemoveMember` / `GroupSetRole`，并在发送前校验群名称（1~120 字符）、公告长度（≤200）、名称与公告只能改其一、`member_type`（user/app）与 `role`（admin/member）。
+- 脚本能力：`registerSendApis` 末尾调用 `registerAppApis`，向 goja 注入 `appUser` / `appSelf` / `appConversations` / `appHistory` / `appReaction` / `appTopic`；查询类失败返回 `null`、`appReaction` 返回布尔，便于脚本判空。这些仅覆盖指南对普通应用开放的只读与回执能力，不含 `runas`、代用户发送、群管理等写操作。
+- 单测覆盖：`core/jiying_rpc_test.go` 覆盖目标校验、用户/会话发送、查询解析、话题解析、群参数校验与脚本 API 行为。
+
+### Agent 服务端历史上下文（`core/agent.go`）
+
+- 序号捕获：`message.created` 解析 `message.seq` 存入 `JiyingSender.Seq`，作为读取服务端历史的锚点。
+- 上下文来源：`RunAgent` 新增 `seq` 参数，经 `agentContext` 优先通过 `conversation.messages.list`（`before_or_equal_seq=seq`）拉取服务端可见历史；`seq` 缺失、未连接或读取失败时回退本地短历史（`getAgentHistory`），读取失败仅记 Debug，不阻断回复。
+- 角色映射：`messagesToChatHistory` 把发送方 `type=app`（或 ID 等于本应用）映射为 assistant，其余为 user；`seq` 不小于锚点的消息（即当前 prompt）从历史中剔除以免重复；消息体经 `plainText` 取文本，缺失时回退 `summary`。
+- 调用点：`handle_msg.go` 传入 `sender.Seq`；即应命令 `问` 经 `senderSeq` 传入；控制台 Agent 无锚点传入 0。
+- 单测覆盖：`TestMessageCreatedEnrichesSender` 断言 seq 捕获；`TestMessagesToChatHistory` / `TestJiyingMessagePlainTextFallsBackToSummary` 覆盖角色映射、剔除当前消息与文本回退。
+
+### 媒体消息 URL 化（`core/media.go`）
+
+按指南要求，图片/文件消息体使用服务端可拉取的 `content`（URL），不再发送仅应用可见的 `file_id`。
+
+- 解析入口：`resolveMediaContent` 统一处理媒体来源——传入绝对 `http(s)` URL 时原样返回，传入 `file_id` 时经 `appReadTemporaryURL`（`temporary_files.read_urls`）换取签名 URL；空白来源直接报错。`buildImageMessage` / `buildFileMessage` 先解析再构造消息体。
+- 消息体：`ImageMessage(content, caption, captionType)` 写 `content` 与可选 `caption` / `caption_type`（默认 `text`，为 `markdown` 时保留）；`FileMessage(content, name, sizeBytes)` 写 `content` / `name` / `size_bytes`；新增 `MarkdownMessage(content)` 构造 `markdown` 富文本。
+- 调用面：控制台 `/send/image`、`/send/file` 同时接受 `url` 或 `file_id`（无 `url` 时回退 `file_id`），新增 `/send/markdown`；脚本 `sendImage` / `sendFile` 接受 URL 或 `file_id` 并支持 `caption_type`，新增 `sendMarkdown`；便捷函数 `SendImageToConv` / `SendFileToConv` 语义同步为「URL 或 `file_id`」，新增 `SendMarkdownToConv`。
+- 单测覆盖：`TestMediaMessageBuilders` 断言 `content` 与 `caption_type`；`TestResolveMediaContentPassthroughURL` 覆盖 URL 直通与空白报错。
+

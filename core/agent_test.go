@@ -101,7 +101,7 @@ func TestRunAgentToolLoop(t *testing.T) {
 
 	SaveAgentConfig(AgentConfig{Enabled: true, BaseURL: srv.URL, APIKey: "test-key", Model: "fake", MaxTurns: 4})
 	resetAgentHistory("conv-1")
-	out, err := RunAgent(context.Background(), "conv-1", "system", "帮我看看")
+	out, err := RunAgent(context.Background(), "conv-1", "system", "帮我看看", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestAgentFallsBackWhenPrimaryUnavailable(t *testing.T) {
 
 	SaveAgentConfig(AgentConfig{Enabled: true, BaseURL: srv.URL, APIKey: "test-key", Model: "primary", Fallback: []string{"backup"}, MaxTurns: 2})
 	resetAgentHistory("conv-fb")
-	out, err := RunAgent(context.Background(), "conv-fb", "system", "你好")
+	out, err := RunAgent(context.Background(), "conv-fb", "system", "你好", 0)
 	if err != nil {
 		t.Fatal(err)
 	}

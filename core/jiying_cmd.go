@@ -54,6 +54,14 @@ func senderUserID(s Sender) string {
 	return ""
 }
 
+// senderSeq 返回触发消息的会话序号；非即应消息为 0（表示无服务端历史锚点）。
+func senderSeq(s Sender) int64 {
+	if js, ok := s.(*JiyingSender); ok {
+		return js.Seq
+	}
+	return 0
+}
+
 func requireMaster() bool {
 	s := CurrentSender()
 	if s == nil {
@@ -113,7 +121,7 @@ func cmdAskAgent() {
 	convID := fmt.Sprint(s.GetParentID())
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
-	out, err := RunAgent(ctx, convID, senderUserID(s), prompt)
+	out, err := RunAgent(ctx, convID, senderUserID(s), prompt, senderSeq(s))
 	if err != nil {
 		ReplyCurrent("Agent 执行失败: " + err.Error())
 		return

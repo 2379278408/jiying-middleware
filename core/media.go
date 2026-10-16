@@ -5,8 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/dop251/goja"
@@ -14,27 +14,10 @@ import (
 
 // SendMessage 发送任意合法消息体，返回服务端消息 ID。
 func (c *JiyingClient) SendMessage(ctx context.Context, conversationID, replyTo string, message map[string]any) (string, error) {
-	if conversationID == "" || len(message) == 0 {
-		return "", fmt.Errorf("缺少会话或消息内容")
+	if conversationID == "" {
+		return "", fmt.Errorf("缺少会话 ID")
 	}
-	body := map[string]any{
-		"target":  map[string]any{"type": "conversation", "conversation_id": conversationID},
-		"message": message,
-	}
-	if replyTo != "" {
-		body["reply_to_message_id"] = replyTo
-	}
-	raw, err := c.Call(ctx, "message.send", body)
-	if err != nil {
-		return "", err
-	}
-	var resp struct {
-		Message struct {
-			ID string `json:"id"`
-		} `json:"message"`
-	}
-	_ = json.Unmarshal(raw, &resp)
-	return resp.Message.ID, nil
+	return c.SendTo(ctx, convTarget("conversation", conversationID), replyTo, message)
 }
 
 // SendMediaToConv 按会话归属应用通道发送媒体消息。
@@ -46,19 +29,63 @@ func SendMediaToConv(ctx context.Context, conversationID, replyTo string, messag
 	return c.SendMessage(ctx, conversationID, replyTo, message)
 }
 
-// ImageMessage 构造图片消息体。
-func ImageMessage(fileID, caption string) map[string]any {
-	m := map[string]any{"type": "image", "file_id": fileID}
+// looksLikeURL 判断媒体来源是否已是可直接拉取的绝对 URL。
+func looksLikeURL(s string) bool {
+	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")
+}
+
+// resolveMediaContent 将媒体来源统一解析为服务端可拉取的 URL。
+// 传入绝对 URL 时原样返回；传入 file_id 时通过临时文件读取接口换取签名 URL。
+func resolveMediaContent(ctx context.Context, conversationID, messageID, src string) (string, error) {
+	src = strings.TrimSpace(src)
+	if src == "" {
+		return "", fmt.Errorf("缺少媒体来源")
+	}
+	if looksLikeURL(src) {
+		return src, nil
+	}
+	return appReadTemporaryURL(ctx, conversationID, messageID, src)
+}
+
+// buildImageMessage 解析图片来源并构造图片消息体。
+func buildImageMessage(ctx context.Context, conversationID, src, caption, captionType string) (map[string]any, error) {
+	content, err := resolveMediaContent(ctx, conversationID, "", src)
+	if err != nil {
+		return nil, err
+	}
+	return ImageMessage(content, caption, captionType), nil
+}
+
+// buildFileMessage 解析文件来源并构造文件消息体。
+func buildFileMessage(ctx context.Context, conversationID, src, name string, sizeBytes int64) (map[string]any, error) {
+	content, err := resolveMediaContent(ctx, conversationID, "", src)
+	if err != nil {
+		return nil, err
+	}
+	return FileMessage(content, name, sizeBytes), nil
+}
+
+// ImageMessage 构造图片消息体，content 需为服务端可拉取的 URL。
+func ImageMessage(content, caption, captionType string) map[string]any {
+	m := map[string]any{"type": "image", "content": content}
 	if caption != "" {
+		if captionType != "markdown" {
+			captionType = "text"
+		}
 		m["caption"] = caption
-		m["caption_type"] = "text"
+		m["caption_type"] = captionType
 	}
 	return m
 }
 
-// FileMessage 构造文件消息体。
-func FileMessage(fileID, name string, sizeBytes int64) map[string]any {
-	return map[string]any{"type": "file", "file_id": fileID, "name": name, "size_bytes": sizeBytes}
+// FileMessage 构造文件消息体，content 需为服务端可拉取的 URL。
+func FileMessage(content, name string, sizeBytes int64) map[string]any {
+	return map[string]any{"type": "file", "content": content, "name": name, "size_bytes": sizeBytes}
+}
+
+// MarkdownMessage 构造 Markdown 富文本消息体。
+func MarkdownMessage(content string) map[string]any {
+	return map[string]any{"type": "markdown", "content": content}
 }
 
 // CardMessage 构造卡片消息体。
@@ -85,13 +112,26 @@ func ChartMessage(chartType, title, description string, data map[string]any) map
 
 // 便捷发送入口，供控制台接口与脚本调用。
 
-func SendImageToConv(ctx context.Context, conversationID, fileID, caption, replyTo string) error {
-	_, err := SendMediaToConv(ctx, conversationID, replyTo, ImageMessage(fileID, caption))
+func SendImageToConv(ctx context.Context, conversationID, src, caption, replyTo string) error {
+	message, err := buildImageMessage(ctx, conversationID, src, caption, "text")
+	if err != nil {
+		return err
+	}
+	_, err = SendMediaToConv(ctx, conversationID, replyTo, message)
 	return err
 }
 
-func SendFileToConv(ctx context.Context, conversationID, fileID, name string, size int64, replyTo string) error {
-	_, err := SendMediaToConv(ctx, conversationID, replyTo, FileMessage(fileID, name, size))
+func SendFileToConv(ctx context.Context, conversationID, src, name string, size int64, replyTo string) error {
+	message, err := buildFileMessage(ctx, conversationID, src, name, size)
+	if err != nil {
+		return err
+	}
+	_, err = SendMediaToConv(ctx, conversationID, replyTo, message)
+	return err
+}
+
+func SendMarkdownToConv(ctx context.Context, conversationID, content, replyTo string) error {
+	_, err := SendMediaToConv(ctx, conversationID, replyTo, MarkdownMessage(content))
 	return err
 }
 
@@ -145,14 +185,40 @@ func registerSendApis(rt *goja.Runtime, convID, replyTo string) {
 		}
 		return true
 	}
+	resolveAndSend := func(build func(ctx context.Context) (map[string]any, error)) bool {
+		if convID == "" {
+			return false
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		message, err := build(ctx)
+		if err != nil {
+			GetMyLog().Warn("脚本解析媒体来源失败：%v", err)
+			return false
+		}
+		return send(message)
+	}
 	_ = rt.Set("sendText", func(call goja.FunctionCall) goja.Value {
 		return rt.ToValue(send(map[string]any{"type": "text", "content": call.Argument(0).String()}))
 	})
+	_ = rt.Set("sendMarkdown", func(call goja.FunctionCall) goja.Value {
+		return rt.ToValue(send(MarkdownMessage(call.Argument(0).String())))
+	})
 	_ = rt.Set("sendImage", func(call goja.FunctionCall) goja.Value {
-		return rt.ToValue(send(ImageMessage(call.Argument(0).String(), call.Argument(1).String())))
+		src := call.Argument(0).String()
+		caption := call.Argument(1).String()
+		captionType := call.Argument(2).String()
+		return rt.ToValue(resolveAndSend(func(ctx context.Context) (map[string]any, error) {
+			return buildImageMessage(ctx, convID, src, caption, captionType)
+		}))
 	})
 	_ = rt.Set("sendFile", func(call goja.FunctionCall) goja.Value {
-		return rt.ToValue(send(FileMessage(call.Argument(0).String(), call.Argument(1).String(), call.Argument(2).ToInteger())))
+		src := call.Argument(0).String()
+		name := call.Argument(1).String()
+		size := call.Argument(2).ToInteger()
+		return rt.ToValue(resolveAndSend(func(ctx context.Context) (map[string]any, error) {
+			return buildFileMessage(ctx, convID, src, name, size)
+		}))
 	})
 	_ = rt.Set("sendCard", func(call goja.FunctionCall) goja.Value {
 		return rt.ToValue(send(CardMessage(call.Argument(0).String(), call.Argument(1).String(), call.Argument(2).String())))
@@ -260,4 +326,5 @@ func registerSendApis(rt *goja.Runtime, convID, replyTo string) {
 		}
 		return rt.ToValue(string(data))
 	})
+	registerAppApis(rt, convID)
 }

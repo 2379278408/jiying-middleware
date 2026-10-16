@@ -24,6 +24,8 @@ func HandleMessage(sender Sender) bool {
 		}
 		if matchFunctionCommand(f, msg) {
 			RecordCommand(f.Title)
+			// 命中处理即回接收回执，不等脚本/Agent 执行完成。
+			sendReceipt(sender)
 			dispatch := cloneFunction(f)
 			go func() {
 				if !tryAcquireMsgExec() {
@@ -49,6 +51,7 @@ func HandleMessage(sender Sender) bool {
 	}
 	if js, ok := sender.(*JiyingSender); ok {
 		if prompt, ok := agentWakePrompt(js); ok {
+			sendReceipt(js)
 			dispatchAgentReply(js, prompt)
 			return true
 		}
@@ -100,7 +103,7 @@ func dispatchAgentReply(sender *JiyingSender, prompt string) {
 		}()
 		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		defer cancel()
-		out, err := RunAgent(ctx, sender.ChatID, sender.UserID, prompt)
+		out, err := RunAgent(ctx, sender.ChatID, sender.UserID, prompt, sender.Seq)
 		if err != nil {
 			GetMyLog().Warn("Agent 自动回复失败 conv=%s user=%s 耗时=%s 错误=%v",
 				sender.ChatID, sender.UserID, time.Since(started).Round(time.Millisecond), err)
