@@ -130,9 +130,20 @@ func ListUserRoles() map[string]string {
 	return loadRoles()
 }
 
-// requireRole 返回一个校验控制台会话角色等级的中间件。
+// requireRole 返回一个校验控制台会话或 API Key 权限等级的中间件。
 func requireRole(min string) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if v, ok := c.Get(ctxAPIKeyScope); ok {
+			scope, _ := v.(string)
+			need, needOK := roleRank[min]
+			got, gotOK := roleRank[scope]
+			if !needOK || !gotOK || got < need {
+				c.AbortWithStatusJSON(403, gin.H{"code": 403, "message": "权限不足"})
+				return
+			}
+			c.Next()
+			return
+		}
 		user := consoleUser(c)
 		if !HasRole(user, min) {
 			c.AbortWithStatusJSON(403, gin.H{"code": 403, "message": "权限不足"})

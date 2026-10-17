@@ -18,6 +18,7 @@
     "nav.connect": { zh: "接入系统", en: "Connect" },
     "nav.pool": { zh: "连接池", en: "Connection pool" },
     "nav.roles": { zh: "权限管理", en: "Access control" },
+    "nav.ai": { zh: "AI 接入", en: "AI access" },
     "nav.scripts": { zh: "插件", en: "Plugins" },
     "nav.market": { zh: "插件市场", en: "Plugin market" },
     "nav.features": { zh: "功能管理", en: "Features" },
@@ -76,6 +77,85 @@
   // 英文模式下的整页文案表：渲染完成后按文本节点精确替换，用户数据与代码块不参与。
   var EN_TEXT = {
     "网络异常，请检查服务状态。": "Network error. Check the service status.",
+    "AI 接入": "AI access",
+    "创建 API Key，把控制台能力交给外部 AI 或脚本；接口文档无需登录即可阅读。": "Create API keys for external AI or scripts. API docs are public.",
+    "接入说明": "Guide",
+    "三步接入": "Three steps",
+    "创建密钥": "Create a key",
+    "为不同用途分别建钥匙，权限最小化。": "Issue separate keys per use case with least privilege.",
+    "复制说明": "Copy brief",
+    "说明包含地址、认证与常用流程，直接粘贴给 AI。": "The brief covers base URL, auth and common flows. Paste it into your AI.",
+    "直接调用": "Call the API",
+    "密钥放请求头，先读清单再执行操作。": "Send the key in the Authorization header. Read the manifest before acting.",
+    "API Key": "API keys",
+    "密钥只在创建时显示一次，妥善保存。": "A key is shown once at creation. Store it safely.",
+    "备注": "Label",
+    "前缀": "Prefix",
+    "备注，例如 巡检机器人": "Label, e.g. patrol bot",
+    "权限": "Scope",
+    "有效期": "Expiry",
+    "30 天": "30 days",
+    "7 天": "7 days",
+    "90 天": "90 days",
+    "永久": "Never",
+    "仅主人可管理密钥。": "Only owners can manage keys.",
+    "给 AI 的说明书": "Brief for your AI",
+    "下载 ai.txt": "Download ai.txt",
+    "暂无 API Key": "No API keys yet",
+    "新建一把密钥后即可让 AI 接入。": "Create a key to let an AI connect.",
+    "密钥加载失败": "Failed to load keys",
+    "撤销": "Revoke",
+    "已撤销": "Revoked",
+    "已创建": "Created",
+    "已复制": "Copied",
+    "已复制说明": "Brief copied",
+    "复制": "Copy",
+    "复制密钥": "Copy key",
+    "复制失败，请手动选择文本": "Copy failed. Select the text manually.",
+    "最后使用": "Last used",
+    "创建于": "Created",
+    "长期有效": "No expiry",
+    "已过期": "Expired",
+    "有效": "Active",
+    "只读": "Read-only",
+    "运营": "Operator",
+    "主人": "Owner",
+    "请输入备注": "Enter a label",
+    "生成失败": "Generation failed",
+    "新密钥只显示一次": "The new key is shown only once",
+    "API Key 已创建": "API key created",
+    "这是唯一一次显示明文，关闭后无法找回。": "This is the only time the key is shown. It cannot be recovered.",
+    "我已保存": "I saved it",
+    "复制接入说明": "Copy AI brief",
+    "加载失败": "Load failed",
+    "当前账号为只读或运营": "This account is read-only or operator",
+    "执行频率": "Frequency",
+    "每 5 分钟": "Every 5 min",
+    "每 30 分钟": "Every 30 min",
+    "每小时整点": "Hourly",
+    "每天 09:00": "Daily 09:00",
+    "每天 18:00": "Daily 18:00",
+    "工作日 09:00": "Weekdays 09:00",
+    "每周一 09:00": "Mondays 09:00",
+    "自定义": "Custom",
+    "每 5 分钟执行一次": "Runs every 5 minutes",
+    "每 30 分钟执行一次": "Runs every 30 minutes",
+    "每小时整点执行一次": "Runs hourly on the hour",
+    "每天 09:00执行一次": "Runs daily at 09:00",
+    "每天 18:00执行一次": "Runs daily at 18:00",
+    "工作日 09:00执行一次": "Runs weekdays at 09:00",
+    "每周一 09:00执行一次": "Runs Mondays at 09:00",
+    "按秒 分 时 日 月 周填写": "Use sec min hour day month weekday",
+    "每秒": "Every second",
+    "每分钟": "Every minute",
+    "每 10 分钟": "Every 10 min",
+    "每 15 分钟": "Every 15 min",
+    "模板": "Template",
+    "选一个接近需求的模板，再改文件名和代码即可安装。": "Pick a close template, adjust the name and code, then install.",
+    "JavaScript 空白模板": "Blank JavaScript",
+    "Python 空白模板": "Blank Python",
+    "回发消息（JavaScript）": "Echo message (JavaScript)",
+    "回发消息（Python）": "Echo message (Python)",
     "权限不足": "Insufficient permission",
     "运行失败": "Run failed",
     "已删除": "Deleted",
@@ -682,6 +762,7 @@
     [/^(.*)？其登记的可调用功能会一并移除。$/, "Delete $1? Its registered callable features will also be removed."],
     [/^(.*)？引用它的插件可能因此报错。$/, "Delete $1? Plugins that reference it may break."],
     [/^(.*)？已安装的插件与功能不受影响。$/, "Remove $1 from the market? Installed plugins and features are unaffected."],
+    [/^功能 · (.*)$/, "Feature · $1"],
     [/^角色 · 主人$/, "Role · Owner"],
     [/^角色 · 运营$/, "Role · Operator"],
     [/^角色 · 只读$/, "Role · Read-only"],
@@ -871,6 +952,7 @@
     { id: "connect", name: "nav.connect", ik: "link", group: "nav.group.access" },
     { id: "pool", name: "nav.pool", ik: "layers", group: "nav.group.access" },
     { id: "roles", name: "nav.roles", ik: "users", group: "nav.group.access" },
+    { id: "ai", name: "nav.ai", ik: "key", group: "nav.group.access" },
     { id: "scripts", name: "nav.scripts", ik: "puzzle", group: "nav.group.run" },
     { id: "market", name: "nav.market", ik: "inbox", group: "nav.group.run" },
     { id: "features", name: "nav.features", ik: "toggles", group: "nav.group.run" },
@@ -920,6 +1002,7 @@
     layers: "bi-layers",
     shield: "bi-shield-check",
     activity: "bi-activity",
+    key: "bi-key",
     refresh: "bi-arrow-clockwise",
     user: "bi-person",
     logout: "bi-box-arrow-right",
@@ -1007,7 +1090,7 @@
     if (b && retry) b.addEventListener("click", retry);
   }
 
-  var state = { view: "home", cerr: null, convs: [], conv: null, msgs: [], interval: null, baseUptime: null, uptimeAt: 0, uptimeTimer: null, chatEpoch: 0, chatRequest: 0, logLines: [], logShown: [], logPending: "", logTimer: null, logLevel: "all", logPinned: true, logFromBottom: 0, logLoadedAt: "", logDay: "", tasks: [], tasksErr: "", role: "", auditRows: [], auditErr: "", executions: [], executionsErr: "", execFilter: { kind: "", status: "", name: "" }, chatCaps: null, account: null };
+  var state = { view: "home", cerr: null, convs: [], conv: null, msgs: [], interval: null, baseUptime: null, uptimeAt: 0, uptimeTimer: null, chatEpoch: 0, chatRequest: 0, logLines: [], logShown: [], logPending: "", logTimer: null, logLevel: "all", logPinned: true, logFromBottom: 0, logLoadedAt: "", logDay: "", tasks: [], tasksErr: "", role: "", auditRows: [], auditErr: "", executions: [], executionsErr: "", execFilter: { kind: "", status: "", name: "" }, chatCaps: null, account: null, appProfiles: {} };
   var ROLE_LABEL = { master: "主人", ops: "运营", readonly: "只读" };
 
   function $(sel, root) { return (root || document).querySelector(sel); }
@@ -1027,6 +1110,19 @@
   function shortID(id) {
     id = String(id || "");
     return id.length > 18 ? id.slice(0, 8) + "…" + id.slice(-4) : id;
+  }
+  // 头像统一渲染：有图片时覆盖首字母，加载失败自动回退，避免破图。
+  function avatarInner(url, name) {
+    var ch = esc(String(name || "U").trim().charAt(0).toUpperCase() || "U");
+    return '<span class="av-fb">' + ch + "</span>" + (url ? '<img src="' + esc(url) + '" alt="" loading="lazy" onerror="this.remove()">' : "");
+  }
+  function avatarHTML(url, name, cls) {
+    var klass = "avatar" + (cls ? " " + cls : "");
+    return '<span class="' + klass + '">' + avatarInner(url, name) + "</span>";
+  }
+  function avatarName(st) {
+    var a = (st && st.account) || {};
+    return a.nickname || a.email || "U";
   }
   // 提示条基于 Bootstrap Toast：自带淡入淡出、自动隐藏与无障碍播报。
   var TOAST_ICON = { ok: "bi-check-circle-fill", err: "bi-exclamation-triangle-fill", info: "bi-info-circle-fill" };
@@ -1358,14 +1454,27 @@
     if (!st) return;
     var wsOk = st.app && st.app.connected;
     var acctOk = st.account && st.account.logged_in;
+    var acctName = acctOk ? (st.account.nickname || st.account.email) : "";
     var dWs = $("#dotWs"), dAcct = $("#dotAcct");
     if (dWs) { dWs.className = "dot " + (wsOk ? "on" : "off"); $("#sideWs").textContent = t("side.ws") + " " + (wsOk ? t("side.connected") : t("side.disconnected")); }
-    if (dAcct) { dAcct.className = "dot " + (acctOk ? "on" : "off"); $("#sideAcct").textContent = t("side.acct") + " " + (acctOk ? st.account.email : t("side.notlogged")); }
+    if (dAcct) { dAcct.className = "dot " + (acctOk ? "on" : "off"); $("#sideAcct").textContent = t("side.acct") + " " + (acctOk ? acctName : t("side.notlogged")); }
     var cw = $("#chipWs"), ca = $("#chipAcct");
-    if (cw) { cw.className = "chip " + (wsOk ? "chip-success" : "chip-danger"); cw.textContent = wsOk ? t("chip.app.on") : t("chip.app.off"); }
-    if (ca) { ca.className = "chip " + (acctOk ? "chip-success" : "chip-danger"); if (st.account.email) ca.textContent = st.account.email; else ca.textContent = t("chip.acct.off"); }
+    if (cw) {
+      cw.className = "chip " + (wsOk ? "chip-success" : "chip-danger");
+      cw.textContent = wsOk ? (st.app && st.app.name ? st.app.name : t("chip.app.on")) : t("chip.app.off");
+      cw.title = wsOk && st.app && st.app.name ? st.app.name : "";
+    }
+    if (ca) { ca.className = "chip " + (acctOk ? "chip-success" : "chip-danger"); if (acctName) ca.textContent = acctName; else ca.textContent = t("chip.acct.off"); }
     var av = $("#avatar");
-    if (av && !av.querySelector("svg, i")) av.textContent = (st.account.email || "U").charAt(0).toUpperCase();
+    if (av) {
+      var sig = (st.account && st.account.avatar_url || "") + "|" + (acctName || "");
+      if (av.dataset.sig !== sig) {
+        av.dataset.sig = sig;
+        av.className = "avatar top-avatar";
+        av.innerHTML = avatarInner(st.account && st.account.avatar_url, acctName || "U");
+      }
+      av.title = acctOk ? (acctName + (st.account.email && st.account.nickname ? " · " + st.account.email : "")) : "未登录账号";
+    }
   }
 
   function loadConnectStatus(cb) {
@@ -1665,8 +1774,8 @@
     state.account = d.account;
     var h = d.account.health || {};
     var health = accountHealthView(h, d.account);
-    box.innerHTML = '<div class="conn-state ' + (appOn ? "on" : "off") + '"><span class="dot ' + (appOn ? "on" : "off") + '"></span><div><b>应用通道</b><div class="muted" style="font-size:12px">' + esc((appOn ? "已连接 · " : "未连接") + (d.app.ws_url || "")) + "</div></div></div>"
-      + '<div class="conn-state mt-8 ' + (acctOn ? "on" : "off") + '"><span class="dot ' + (acctOn ? "on" : "off") + '"></span><div><b>账号通道</b><div class="muted" style="font-size:12px">' + esc(acctOn ? d.account.email : d.account.status || "未登录") + "</div></div></div>"
+    box.innerHTML = '<div class="conn-state ' + (appOn ? "on" : "off") + '"><span class="dot ' + (appOn ? "on" : "off") + '"></span><div><b>应用通道</b><div class="muted" style="font-size:12px">' + esc((appOn ? "已连接 · " : "未连接") + (d.app.name ? d.app.name + " · " : "") + (d.app.ws_url || "")) + "</div></div></div>"
+      + '<div class="conn-state mt-8 ' + (acctOn ? "on" : "off") + '"><span class="dot ' + (acctOn ? "on" : "off") + '"></span><div class="conn-account"><div class="conn-account-head">' + (acctOn ? avatarHTML(d.account.avatar_url, d.account.nickname || d.account.email, "conn-avatar") : "") + "<b>账号通道</b></div><div class=\"muted\" style=\"font-size:12px\">" + esc(acctOn ? (d.account.nickname ? d.account.nickname + " · " + d.account.email : d.account.email) : d.account.status || "未登录") + "</div></div></div>"
       + '<div class="health-card mt-12"><div class="health-head"><b>账号会话</b>' + health.badge + '</div>'
       + '<div class="muted" style="font-size:12px">' + esc(health.detail) + "</div>"
       + (h.message && health.key !== "unconfigured" ? '<div class="muted clamp2" style="font-size:12px;color:var(--err);margin-top:4px" title="' + esc(h.message) + '">' + esc(h.message) + "</div>" : "")
@@ -1752,7 +1861,9 @@
       box.innerHTML = list.map(function (c, i) {
         var name = c.name || c.title || c.id;
         var active = state.conv && state.conv.id === c.id;
-        return '<button type="button" class="conv-item' + (active ? " active" : "") + '" data-conv-index="' + i + '"><span class="conv-ico" data-ico="message">' + ico("message") + '</span><span class="cname">' + esc(name) + "</span></button>";
+        var av = c.avatar_url || c.avatar || "";
+        var lead = av ? avatarHTML(av, name, "conv-avatar") : '<span class="conv-ico" data-ico="message">' + ico("message") + "</span>";
+        return '<button type="button" class="conv-item' + (active ? " active" : "") + '" data-conv-index="' + i + '">' + lead + '<span class="cname">' + esc(name) + "</span></button>";
       }).join("");
       $$("[data-conv-index]", box).forEach(function (item) {
         item.addEventListener("click", function () { pickConv(Number(item.getAttribute("data-conv-index"))); });
@@ -1835,11 +1946,14 @@
       if (body.type === "text") content = body.content || "";
       else if (body.type === "image") content = "[图片]";
       else content = m.summary || JSON.stringify(body || "");
-      var out = (m.sender && m.sender.type) === "app" || (m.sender && m.sender.type) === "assistant";
+      var sender = m.sender || {};
+      var out = sender.type === "app" || sender.type === "assistant";
       var t = fmtTime(m.created_at);
       // 入站消息把原始 sender.type 映射为中文，避免直接暴露 user / system 等协议字段。
-      var who = out ? "Relay" : (SENDER_LABEL[(m.sender && m.sender.type) || ""] || (m.sender && m.sender.type) || "对方");
-      return '<div style="display:flex;flex-direction:column;align-items:' + (out ? "flex-end" : "flex-start") + '"><span class="msg-meta">' + esc(who) + " · " + esc(t) + '</span><div class="msg-bubble ' + (out ? "msg-out" : "msg-in") + '">' + esc(content) + "</div></div>";
+      var who = sender.nickname || sender.name || (out ? "Relay" : (SENDER_LABEL[sender.type || ""] || sender.type || "对方"));
+      var av = sender.avatar || sender.avatar_url || "";
+      return '<div class="msg-item ' + (out ? "msg-item-out" : "msg-item-in") + '">' + avatarHTML(av, who, "msg-avatar")
+        + '<div class="msg-main"><span class="msg-meta">' + esc(who) + " · " + esc(t) + '</span><div class="msg-bubble ' + (out ? "msg-out" : "msg-in") + '">' + esc(content) + "</div></div></div>";
     }).join("");
     box.scrollTop = box.scrollHeight;
   }
@@ -1884,6 +1998,19 @@
     js: '// [title: 示例插件]\n// [author: 我]\n// [rule: ^示例$]\n// [description: 示例插件]\nresult = "hello " + args;\n',
     python: '# [title: 示例插件]\n# [author: 我]\n# [rule: ^示例$]\n# [description: 示例插件]\nprint("hello " + __import__("os").environ.get("JIYING_ARGS", ""))\n'
   };
+  // 模板库降低上手成本：空白模板之外，给出可直接运行的发送与提醒示例。
+  var SCRIPT_TEMPLATES = [
+    { id: "js-basic", lang: "js", name: "demo.js", title: "JavaScript 空白模板" },
+    { id: "py-basic", lang: "python", name: "demo.py", title: "Python 空白模板" },
+    {
+      id: "js-send", lang: "js", name: "echo.js", title: "回发消息（JavaScript）",
+      code: "// [title: 回发消息]\n// [description: 把参数原样发回当前会话]\n// [rule: ^回发\\s+(.+)$]\nvar text = String(args || \"\").trim();\nif (!text) {\n  result = \"用法：回发 内容\";\n} else {\n  sendText(text);\n  result = \"已发送\";\n}\n"
+    },
+    {
+      id: "py-send", lang: "python", name: "remind.py", title: "回发消息（Python）",
+      code: "# [title: 定时提醒]\n# [description: 把参数作为提醒发回当前会话]\n# [rule: ^提醒\\s+(.+)$]\nimport os\nmsg = os.environ.get(\"JIYING_ARGS\", \"\").strip() or \"该处理这件事了\"\nprint(\"SEND:\" + msg)\n"
+    }
+  ];
   function renderScripts() {
     var cont = $("#view-scripts");
     cont.innerHTML = '<div class="page-head"><div><h2>插件</h2><p>已安装的插件资产，支持 JavaScript 与 Python；安装后会自动登记为可调用功能</p></div><div class="spacer"></div>'
@@ -1941,7 +2068,10 @@
     var name = isEdit ? prefill.name : "demo.js";
     var code = isEdit ? (prefill.content || "") : SCRIPT_TPL[lang];
     showModal(isEdit ? "编辑插件" : "新建插件",
-      '<div class="grid grid-2"><div class="field"><label>插件文件名</label><input class="input" id="sm_name" value="' + esc(name) + '" placeholder="demo.js"></div>'
+      (isEdit ? "" : '<div class="field"><label>模板</label><select class="select" id="sm_tpl">'
+        + SCRIPT_TEMPLATES.map(function (x) { return '<option value="' + esc(x.id) + '">' + esc(x.title) + "</option>"; }).join("")
+        + '</select><div class="hint">选一个接近需求的模板，再改文件名和代码即可安装。</div></div>')
+      + '<div class="grid grid-2"><div class="field"><label>插件文件名</label><input class="input" id="sm_name" value="' + esc(name) + '" placeholder="demo.js"></div>'
       + '<div class="field"><label>语言</label><select class="select" id="sm_lang"><option value="js">JavaScript</option><option value="python">Python</option></select></div></div>'
       + '<div class="field"><label>插件代码</label><textarea class="input code-editor" id="sm_code" rows="16" spellcheck="false"></textarea></div>'
       + '<p style="color:var(--muted);font-size:12px;margin:6px 0 0">JavaScript 用 <code>result</code> 返回结果；Python 用标准输出返回结果，以 <code>SEND:</code> 开头的行会作为会话消息回发。头部注释可用 <code>[title: ...]</code>、<code>[rule: ...]</code>、<code>[cron: ...]</code>、<code>[admin: true]</code> 声明元数据（兼容 AutMan），安装后自动登记到插件列表。</p>',
@@ -1950,6 +2080,15 @@
     codeEl.value = code;
     langEl.value = lang;
     bindCodeEditor(codeEl);
+    var tplEl = $("#sm_tpl");
+    if (tplEl) tplEl.addEventListener("change", function () {
+      var tpl = SCRIPT_TEMPLATES.filter(function (x) { return x.id === tplEl.value; })[0];
+      if (!tpl) return;
+      lang = tpl.lang;
+      langEl.value = tpl.lang;
+      nameEl.value = tpl.name;
+      codeEl.value = tpl.code || SCRIPT_TPL[tpl.lang];
+    });
     langEl.addEventListener("change", function () {
       var prevTpl = SCRIPT_TPL[lang];
       lang = this.value;
@@ -2478,6 +2617,42 @@
     }
     return raw;
   }
+  // 把常见 cron 规则翻译成一句话，列表里先看人话再看表达式。
+  function cronHuman(spec) {
+    spec = String(spec || "").trim();
+    var known = {
+      "*/1 * * * * *": "每秒", "* * * * * *": "每秒",
+      "0 * * * * *": "每分钟", "*/5 * * * * *": "每 5 分钟", "*/10 * * * * *": "每 10 分钟",
+      "*/15 * * * * *": "每 15 分钟", "*/30 * * * * *": "每 30 分钟",
+      "0 0 * * * *": "每小时整点", "0 0 9 * * *": "每天 09:00", "0 0 18 * * *": "每天 18:00",
+      "0 0 9 * * 1-5": "工作日 09:00", "0 0 9 * * 1": "每周一 09:00",
+      "@hourly": "每小时整点", "@daily": "每天 00:00", "@weekly": "每周一 00:00"
+    };
+    if (known[spec]) return known[spec];
+    var p = spec.split(/\s+/);
+    if (p.length !== 6) return spec;
+    var sec = p[0], min = p[1], hour = p[2], dom = p[3], mon = p[4], dow = p[5];
+    if (dom !== "*" || mon !== "*") return spec;
+    if (sec === "0" && /^\*\/\d+$/.test(min) && hour === "*" && dow === "*") return "每 " + min.slice(2) + " 分钟";
+    if (sec === "0" && min === "0" && /^\*\/\d+$/.test(hour) && dow === "*") return "每 " + hour.slice(2) + " 小时";
+    if (sec === "0" && /^\d+$/.test(min) && hour === "*" && dow === "*") return "每小时第 " + Number(min) + " 分";
+    if (sec === "0" && /^\d+$/.test(min) && /^\d+$/.test(hour)) {
+      var hm = ("0" + Number(hour)).slice(-2) + ":" + ("0" + Number(min)).slice(-2);
+      if (dow === "*") return "每天 " + hm;
+      if (dow === "1-5") return "工作日 " + hm;
+      if (/^[0-6]$/.test(dow)) return "每周" + ["日", "一", "二", "三", "四", "五", "六"][Number(dow)] + " " + hm;
+    }
+    return spec;
+  }
+  var CRON_PRESETS = [
+    ["*/5 * * * * *", "每 5 分钟"],
+    ["*/30 * * * * *", "每 30 分钟"],
+    ["0 0 * * * *", "每小时整点"],
+    ["0 0 9 * * *", "每天 09:00"],
+    ["0 0 18 * * *", "每天 18:00"],
+    ["0 0 9 * * 1-5", "工作日 09:00"],
+    ["0 0 9 * * 1", "每周一 09:00"]
+  ];
   function renderCron() {
     var cont = $("#view-cron");
     cont.innerHTML = '<div class="page-head"><div><h2>定时任务</h2><p>按 cron 表达式执行系统命令或已启用功能，结果写入执行记录</p></div><div class="spacer"></div>'
@@ -2509,7 +2684,7 @@
         var count = Number(c.run_count || 0);
         var owner = c.owner_role === "readonly" ? "" : "";
         return '<tr><td class="nowrap"><div>' + esc(c.name) + '</div><div class="muted mono" style="font-size:11px" title="' + esc(cronCommandLabel(c.command)) + '">' + esc(cronCommandLabel(c.command)) + "</div></td>"
-          + '<td class="nowrap"><code>' + esc(c.cron) + "</code></td>"
+          + '<td class="nowrap"><code>' + esc(c.cron) + '</code><div class="muted" style="font-size:11px">' + esc(cronHuman(c.cron)) + "</div></td>"
           + '<td class="nowrap mono">' + esc(c.next_run_at || "-") + "</td>"
           + "<td>" + badge + when + err + "</td>"
           + '<td class="mono nowrap">' + count + " / " + (fail ? '<span style="color:var(--err)">' + fail + "</span>" : "0") + "</td>"
@@ -2523,7 +2698,10 @@
   }
   function openCronModal() {
     showModal("新建定时任务", '<div class="field"><label>名称</label><input class="input" id="cm_name" placeholder="每日额度重置"></div>'
-      + '<div class="field"><label>Cron 表达式</label><input class="input" id="cm_cron" placeholder="0 5 * * * *"><div class="hint">秒 分 时 日 月 周，例如 <code>0 5 * * * *</code> 表示每小时第 5 分钟。</div></div>'
+      + '<div class="field"><label>执行频率</label><select class="select" id="cm_preset">'
+      + CRON_PRESETS.map(function (p) { return '<option value="' + esc(p[0]) + '">' + esc(p[1]) + "</option>"; }).join("")
+      + '<option value="custom">自定义</option></select><div class="hint" id="cm_preset_hint">' + esc(CRON_PRESETS[0][1]) + "执行一次</div></div>"
+      + '<div class="field" id="cm_cron_box" hidden><label>Cron 表达式</label><input class="input" id="cm_cron" placeholder="0 5 * * * *"><div class="hint">秒 分 时 日 月 周，例如 <code>0 5 * * * *</code> 表示每小时第 5 分钟。</div></div>'
       + '<div class="field"><label>执行类型</label><select class="select" id="cm_type"><option value="feature">已启用功能</option><option value="command">系统命令</option></select></div>'
       + '<div id="cm_feature_box"><div class="field"><label>功能名</label><input class="input" id="cm_feature" list="cm_features" placeholder="选择或输入已启用功能"><datalist id="cm_features"></datalist></div>'
       + '<div class="field"><label>功能参数（可选）</label><input class="input" id="cm_args" placeholder="例如：重置"></div>'
@@ -2532,6 +2710,16 @@
       + '<pre class="rl-codeblock" id="cm_preview" style="margin:0;max-height:120px"></pre>',
       '<button class="btn btn-ghost" onclick="Relay.closeModal()">取消</button><button class="btn btn-primary" id="cm_save">创建</button>');
     var typeEl = $("#cm_type"), fbox = $("#cm_feature_box"), cbox = $("#cm_command_box"), prev = $("#cm_preview");
+    var cronEl = $("#cm_cron"), presetEl = $("#cm_preset"), cronBox = $("#cm_cron_box"), presetHint = $("#cm_preset_hint");
+    cronEl.value = CRON_PRESETS[0][0];
+    function syncCron() {
+      var custom = presetEl.value === "custom";
+      cronBox.hidden = !custom;
+      if (!custom) cronEl.value = presetEl.value;
+      presetHint.textContent = (custom ? "按秒 分 时 日 月 周填写" : presetEl.options[presetEl.selectedIndex].text + "执行一次");
+    }
+    presetEl.addEventListener("change", syncCron);
+    syncCron();
     function syncType() {
       var isFeature = typeEl.value === "feature";
       fbox.hidden = !isFeature;
@@ -2565,8 +2753,8 @@
       dl.innerHTML = r.data.filter(function (f) { return f.enabled; }).map(function (f) { return '<option value="' + esc(f.name) + '">' + esc(f.kind || "") + "</option>"; }).join("");
     }).catch(function () {});
     $("#cm_save").addEventListener("click", function () {
-      var name = $("#cm_name").value.trim(), cron = $("#cm_cron").value.trim(), cmd = buildCronCommand();
-      if (!name || !cron || !cmd) { toast("请填写名称、表达式与执行内容", "err"); return; }
+      var name = $("#cm_name").value.trim(), cron = cronEl.value.trim(), cmd = buildCronCommand();
+      if (!name || !cron || !cmd) { toast("请填写名称、执行频率与执行内容", "err"); return; }
       api("/jiying/api/cron/add", { method: "POST", form: { name: name, cron: cron, command: cmd } }).then(function (r) {
         if (r.code === 200) { closeModal(); toast("已创建", "ok"); loadCrons(); }
         else toast(r.msg || "创建失败", "err");
@@ -3048,10 +3236,29 @@
   function loadPool() {
     api("/jiying/api/connections").then(function (r) {
       if (r.code !== 200) { toast(r.msg || "加载失败", "err"); return; }
-      renderPoolApps(r.data.apps || []);
-        renderPoolAccount(r.data.account || {});
-        renderPoolAccounts(r.data.accounts || []);
+      var apps = r.data.apps || [];
+      renderPoolApps(apps);
+      ensureAppProfiles(apps);
+      renderPoolAccount(r.data.account || {});
+      renderPoolAccounts(r.data.accounts || []);
     }).catch(function () { errorState($("#poolApps"), "link", "连接池状态加载失败", "网络异常，请检查服务状态。", loadPool); });
+  }
+  // 应用资料由服务端异步缓存；刚连接时按需补拉一次，成功后重绘。
+  function ensureAppProfiles(apps) {
+    var pending = false;
+    (apps || []).forEach(function (a) {
+      var id = String(a.app_id || "");
+      if (!a.online || !id || a.name || state.appProfiles[id]) return;
+      pending = true;
+      state.appProfiles[id] = { pending: true };
+      api("/jiying/api/apps/profile?app_id=" + encodeURIComponent(id), { silent: true }).then(function (r) {
+        if (r.code === 200 && r.data) state.appProfiles[id] = r.data;
+        else delete state.appProfiles[id];
+      }).catch(function () { delete state.appProfiles[id]; }).finally(function () {
+        if (state.view === "pool" && !$("#poolApps .rl-loading")) loadPool();
+      });
+    });
+    return pending;
   }
   function renderPoolApps(apps) {
     var box = $("#poolApps");
@@ -3059,11 +3266,15 @@
     if (!apps.length) { box.innerHTML = emptyState("link", "尚未接入应用", "接入后可在此查看通道在线状态，并按应用隔离运行。", '<button class="btn btn-primary btn-sm" id="poolEmptyAdd">接入应用</button>'); bindPoolEmptyAdd(); return; }
     box.innerHTML = apps.map(function (a) {
       var id = String(a.app_id || "");
+      var extra = state.appProfiles[id] && !state.appProfiles[id].pending ? state.appProfiles[id] : {};
+      var name = a.name || extra.name || "";
+      var avatar = a.avatar_url || extra.avatar_url || "";
+      var desc = a.description || extra.description || a.ws_url || "";
       var short = shortID(id);
-      return '<div class="list-item"><span class="dot ' + (a.online ? "on" : "off") + '"></span>'
-        + '<div class="grow"><div class="name" title="' + esc(id) + '">' + esc(short || "(未命名)") + (a.is_default ? ' <span class="badge badge-ok">默认</span>' : "") + "</div>"
-        + '<div class="desc mono">' + esc(a.ws_url || "-") + "</div></div>"
-          + '<div class="actions">' + (a.is_default ? "" : '<button class="btn btn-ghost btn-sm" onclick="Relay.defaultApp(' + jsArg(id) + ')">设为默认</button>') + '<button class="btn btn-outline-danger btn-sm" onclick="Relay.delApp(' + jsArg(id) + ')">移除</button></div></div>';
+      return '<div class="list-item"><span class="dot ' + (a.online ? "on" : "off") + '"></span>' + avatarHTML(avatar, name || short, "pool-avatar")
+        + '<div class="grow"><div class="name" title="' + esc(id) + '">' + esc(name || short || "(未命名)") + (a.is_default ? ' <span class="badge badge-ok">默认</span>' : "") + "</div>"
+        + '<div class="desc mono" title="' + esc(a.ws_url || "") + '">' + esc(desc || "-") + "</div></div>"
+        + '<div class="actions">' + (a.is_default ? "" : '<button class="btn btn-ghost btn-sm" onclick="Relay.defaultApp(' + jsArg(id) + ')">设为默认</button>') + '<button class="btn btn-outline-danger btn-sm" onclick="Relay.delApp(' + jsArg(id) + ')">移除</button></div></div>';
     }).join("");
   }
   function bindPoolEmptyAdd() {
@@ -3073,7 +3284,8 @@
   function renderPoolAccount(a) {
     var box = $("#poolAccountProfile");
     if (!box) return;
-    var avatar = a.avatar_url ? '<img class="avatar pool-avatar" src="' + esc(a.avatar_url) + '" alt="">' : '<div class="avatar pool-avatar">' + esc((a.email || "U").charAt(0).toUpperCase()) + "</div>";
+    var name = a.nickname || a.email || "U";
+    var avatar = avatarHTML(a.avatar_url, name, "pool-avatar");
     var st = String(a.status || "未登录");
     var badge = st.indexOf("已登录") >= 0 ? '<span class="badge badge-ok">已登录</span>' : '<span class="badge badge-off">未登录</span>';
     box.innerHTML = '<div class="rl-row">' + avatar
@@ -3379,6 +3591,151 @@
       });
     });
   }
+  /* ---------- AI 接入 ---------- */
+  function aiStep(no, title, desc) {
+    return '<div class="panel ai-step"><div class="panel-body"><span class="eyebrow">' + esc(no) + '</span><h3>' + esc(title) + "</h3><p>" + esc(desc) + "</p></div></div>";
+  }
+  function aiPromptText(token) {
+    var base = location.origin;
+    var key = token || "在「AI 接入」页创建后填入";
+    if (LANG === "en") {
+      key = token || "create one on the AI access page";
+      return "You are the AI operator for the Relay Jiying console. Use the REST API to complete my requests.\n\n"
+        + "Base URL: " + base + "\n"
+        + "Auth: Authorization: Bearer " + key + "\n"
+        + "Read first: " + base + "/jiying/api/ai/manifest (features, schedules, scopes, endpoints)\n"
+        + "Guide: " + base + "/jiying/ai.txt\n"
+        + "OpenAPI: " + base + "/jiying/openapi.json\n\n"
+        + "Rules:\n"
+        + "1. Read before writing; describe the intended change before making it.\n"
+        + "2. Ask for confirmation before deleting, disabling, signing out, changing roles or bulk sending.\n"
+        + "3. Use application/x-www-form-urlencoded. A response of {\"code\":200,\"data\":...} means success.\n"
+        + "4. Dry-run sends with dry_run=true; on failure read /jiying/api/logs.\n"
+        + "5. Never read or reveal keys, passwords or cookies.\n";
+    }
+    return "你是 Relay 即应控制台的 AI 操作助手。请通过 REST API 完成我的请求。\n\n"
+      + "Base URL: " + base + "\n"
+      + "认证: Authorization: Bearer " + key + "\n"
+      + "先读: " + base + "/jiying/api/ai/manifest（当前功能、定时任务、权限与端点）\n"
+      + "接入说明: " + base + "/jiying/ai.txt\n"
+      + "OpenAPI: " + base + "/jiying/openapi.json\n\n"
+      + "规则:\n"
+      + "1. 先读后写，写操作前说明将要做什么。\n"
+      + "2. 删除、停用、退出、改角色、批量发送必须先征得我确认。\n"
+      + "3. 参数用 application/x-www-form-urlencoded 传递；响应为 {\"code\":200,\"data\":...} 表示成功。\n"
+      + "4. 发送消息前先用 dry_run=true 预演；失败时读取 /jiying/api/logs 定位原因。\n"
+      + "5. 不要读取或输出任何密钥、密码、Cookie。\n";
+  }
+  function copyPlain(text, okMsg) {
+    var done = function () { toast(okMsg || "已复制", "ok"); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(function () { copyTextFallback(text, done); });
+      return;
+    }
+    copyTextFallback(text, done);
+  }
+  function renderAI() {
+    var cont = $("#view-ai");
+    var master = state.role === "master";
+    cont.innerHTML = '<div class="page-head"><div><span class="eyebrow">ACCESS / AI</span><h2>AI 接入</h2><p>创建 API Key，把控制台能力交给外部 AI 或脚本；接口文档无需登录即可阅读。</p></div><div class="spacer"></div>'
+      + '<a class="btn btn-ghost btn-sm" href="/jiying/ai.txt" target="_blank" rel="noopener">接入说明</a>'
+      + '<a class="btn btn-ghost btn-sm" href="/jiying/openapi.json" target="_blank" rel="noopener">OpenAPI</a></div>'
+      + '<div class="grid grid-3">'
+      + aiStep("01", "创建密钥", "为不同用途分别建钥匙，权限最小化。")
+      + aiStep("02", "复制说明", "说明包含地址、认证与常用流程，直接粘贴给 AI。")
+      + aiStep("03", "直接调用", "密钥放请求头，先读清单再执行操作。")
+      + "</div>"
+      + '<div class="panel mt-16"><div class="panel-head"><h3>API Key</h3><span class="hint key-warn">密钥只在创建时显示一次，妥善保存。</span></div><div class="panel-body">'
+      + '<div class="input-row" id="keyCreateRow"><input class="input" id="keyLabel" placeholder="备注，例如 巡检机器人" aria-label="备注" title="备注" maxlength="40">'
+      + '<select class="select" id="keyScope" aria-label="权限" title="权限" style="max-width:140px"><option value="ops">运营</option><option value="readonly">只读</option><option value="master">主人</option></select>'
+      + '<select class="select" id="keyDays" aria-label="有效期" title="有效期" style="max-width:120px"><option value="30">30 天</option><option value="7">7 天</option><option value="90">90 天</option><option value="0">永久</option></select>'
+      + '<button class="btn btn-primary" id="newKey">创建密钥</button></div>'
+      + '<div id="keyList" class="mt-16">' + loadingState() + "</div></div></div>"
+      + '<div class="panel mt-16"><div class="panel-head"><h3>给 AI 的说明书</h3><div class="spacer"></div><button class="btn btn-ghost btn-sm" id="copyPrompt">复制说明</button><button class="btn btn-ghost btn-sm" id="downloadGuide">下载 ai.txt</button></div><div class="panel-body"><pre class="ai-prompt mono" id="aiPrompt"></pre></div></div>';
+    $("#aiPrompt").textContent = aiPromptText("");
+    if (state.role && !master) $("#keyCreateRow").hidden = true;
+    $("#newKey").addEventListener("click", createAPIKey);
+    $("#copyPrompt").addEventListener("click", function () { copyPlain(aiPromptText(""), "已复制说明"); });
+    $("#downloadGuide").addEventListener("click", function () {
+      downloadBlob(new Blob([aiPromptText("")], { type: "text/plain;charset=utf-8" }), "relay-ai-guide.txt");
+    });
+    loadAPIKeys();
+  }
+  function apiKeyStatus(k) {
+    if (k.expires_at && Date.parse(k.expires_at) < Date.now()) return { cls: "badge-off", label: "已过期" };
+    return { cls: "badge-ok", label: "有效" };
+  }
+  function loadAPIKeys() {
+    api("/jiying/api/keys", { silent: true }).then(function (r) {
+      var box = $("#keyList");
+      if (!box) return;
+      if (r.code === 403) {
+        var row = $("#keyCreateRow");
+        if (row) row.hidden = true;
+        box.innerHTML = emptyState("shield", "仅主人可管理密钥。", "当前账号为只读或运营，可阅读文档但不能签发密钥。");
+        return;
+      }
+      var createRow = $("#keyCreateRow");
+      if (createRow) createRow.hidden = false;
+      if (r.code !== 200) {
+        errorState(box, "key", "密钥加载失败", r.msg || r.message || "请稍后重试。", loadAPIKeys);
+        return;
+      }
+      var keys = (r.data && r.data.keys) || [];
+      if (!keys.length) {
+        box.innerHTML = emptyState("key", "暂无 API Key", "新建一把密钥后即可让 AI 接入。", '<button class="btn btn-primary btn-sm" id="keyEmptyAdd">创建密钥</button>');
+        var add = $("#keyEmptyAdd");
+        if (add) add.addEventListener("click", function () {
+          var label = $("#keyLabel");
+          if (label) { label.focus(); label.scrollIntoView({ block: "center", behavior: "smooth" }); }
+        });
+        return;
+      }
+      box.innerHTML = '<div class="table-wrap"><table class="table align-middle"><thead><tr><th>备注</th><th class="nowrap">前缀</th><th class="nowrap">权限</th><th class="nowrap">创建于</th><th class="nowrap">最后使用</th><th class="nowrap">状态</th><th class="text-right">操作</th></tr></thead><tbody>'
+        + keys.map(function (k) {
+          var st = apiKeyStatus(k);
+          return "<tr><td>" + esc(k.label || "-") + '</td><td class="mono">' + esc(k.prefix || "") + '…</td><td>' + esc(EN_TEXT[k.scope === "master" ? "主人" : k.scope === "ops" ? "运营" : "只读"] || k.scope)
+            + "</td><td class=\"mono\">" + esc((k.created_at || "").slice(0, 10)) + "</td><td class=\"mono\">" + esc(k.last_used_at ? k.last_used_at.slice(0, 16).replace("T", " ") : "-")
+            + '</td><td><span class="badge ' + st.cls + '">' + esc(st.label) + '</span></td><td class="text-right"><button class="btn btn-outline-danger btn-sm" data-revoke="' + esc(k.id) + '" data-label="' + esc(k.label || "") + '">撤销</button></td></tr>';
+        }).join("") + "</tbody></table></div>";
+      $$("[data-revoke]", box).forEach(function (btn) {
+        btn.addEventListener("click", function () { revokeAPIKey(btn.getAttribute("data-revoke"), btn.getAttribute("data-label")); });
+      });
+    });
+  }
+  function createAPIKey() {
+    var label = ($("#keyLabel").value || "").trim();
+    if (!label) { toast("请输入备注", "err"); return; }
+    var btn = $("#newKey");
+    btn.disabled = true;
+    api("/jiying/api/keys", { method: "POST", form: { label: label, scope: $("#keyScope").value, expires_days: $("#keyDays").value } }).then(function (r) {
+      btn.disabled = false;
+      if (r.code !== 200) { toast(r.msg || r.message || "生成失败", "err"); return; }
+      $("#keyLabel").value = "";
+      loadAPIKeys();
+      showNewKey(r.data && r.data.token);
+    });
+  }
+  function revokeAPIKey(id, label) {
+    confirmDialog("撤销 API Key", "撤销后，使用「" + label + "」的调用会立即失效。", "撤销", function () {
+      api("/jiying/api/keys/delete", { method: "POST", form: { id: id } }).then(function (r) {
+        if (r.code === 200) { toast("已撤销", "ok"); loadAPIKeys(); }
+        else toast(r.msg || r.message || "撤销失败", "err");
+      });
+    });
+  }
+  function showNewKey(token) {
+    if (!token) return;
+    showModal("API Key 已创建",
+      '<p class="rl-confirm-msg">这是唯一一次显示明文，关闭后无法找回。</p>'
+      + '<div class="key-token mono" id="newKeyToken">' + esc(token) + "</div>"
+      + '<div class="input-row mt-16"><button class="btn btn-ghost btn-sm" id="copyToken">复制密钥</button>'
+      + '<button class="btn btn-ghost btn-sm" id="copyKeyPrompt">复制接入说明</button></div>',
+      '<button class="btn btn-primary" data-bs-dismiss="modal">我已保存</button>');
+    $("#copyToken").addEventListener("click", function () { copyPlain(token, "已复制"); });
+    $("#copyKeyPrompt").addEventListener("click", function () { copyPlain(aiPromptText(token), "已复制说明"); });
+  }
+
   function tile(label, val, sub) {
     return '<div class="stat-cell tile"><span class="t-lab">' + esc(label) + '</span><span class="t-val">' + esc(val) + "</span>" + (sub ? '<span class="t-sub">' + esc(sub) + "</span>" : "") + "</div>";
   }
@@ -3498,7 +3855,8 @@
     audit: renderAudit,
     observe: renderObserve,
     logs: renderLogs,
-    roles: renderRoles
+    roles: renderRoles,
+    ai: renderAI
   };
 
   // 需要定时轮询的视图：切换视图时自动启动，离开时由 switchView 清理。

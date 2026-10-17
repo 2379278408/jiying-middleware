@@ -36,6 +36,7 @@ func connectStatus(c *gin.Context) {
 	apps := AppPoolSnapshot()
 	acctConn := CurrentAccountConn()
 	acctCfg := UserLogin{BaseURL: acctConn.BaseURL, Email: acctConn.Email, Password: acctConn.Secret}
+	profile := cachedAccountProfile(c.Request.Context())
 	var def AppPoolItem
 	for _, a := range apps {
 		if a.IsDefault {
@@ -45,18 +46,23 @@ func connectStatus(c *gin.Context) {
 	}
 	jiyingJSON(c, gin.H{
 		"app": gin.H{
-			"configured": def.AppID != "",
-			"ws_url":     def.WSURL,
-			"app_id":     def.AppID,
-			"connected":  def.Online,
-			"count":      len(apps),
+			"configured":  def.AppID != "",
+			"ws_url":      def.WSURL,
+			"app_id":      def.AppID,
+			"name":        def.Name,
+			"avatar_url":  def.AvatarURL,
+			"description": def.Description,
+			"connected":   def.Online,
+			"count":       len(apps),
 		},
 		"apps": apps,
 		"account": gin.H{
 			"configured":    acctConn.configured(),
 			"code_login":    acctConn.CodeLogin,
 			"base_url":      maskURL(acctCfg.BaseURL),
-			"email":         acctCfg.Email,
+			"email":         firstNonEmpty(profile.Email, acctCfg.Email),
+			"nickname":      profile.Nickname,
+			"avatar_url":    profile.AvatarURL,
 			"secret_masked": maskSecret(acctCfg.Password),
 			"logged_in":     userLoggedIn(),
 			"status":        UserSessionStatus(),

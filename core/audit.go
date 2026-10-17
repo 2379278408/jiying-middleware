@@ -101,8 +101,13 @@ func truncateRunes(s string, n int) string {
 	return string(r[:n]) + "..."
 }
 
-// consoleUser 从控制台会话读取操作者，读不到时返回 unknown。
+// consoleUser 优先读取 API Key 身份，其次从控制台会话读取操作者。
 func consoleUser(c *gin.Context) string {
+	if v, ok := c.Get(ctxAPIKeyUser); ok {
+		if user, ok := v.(string); ok && user != "" {
+			return user
+		}
+	}
 	if SessionStore == nil {
 		return "unknown"
 	}

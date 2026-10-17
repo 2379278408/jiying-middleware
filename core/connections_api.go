@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -27,13 +28,14 @@ func registerConnectionsAPI() {
 	g.POST("/connections/account/select", requireRole(RoleOps), connectionsAccountSelect)
 	g.POST("/connections/account/delete", requireRole(RoleOps), connectionsAccountDelete)
 	g.POST("/connections/account/profile", connectionsAccountProfile)
+	g.GET("/apps/profile", connectionsAppProfile)
 }
 
 func connectionsSnapshot(c *gin.Context) {
 	apps := AppPoolSnapshot()
 	acct := CurrentAccountConfig()
 	acctConn := CurrentAccountConn()
-	profile := accountProfile(c.Request.Context())
+	profile := cachedAccountProfile(c.Request.Context())
 	jiyingJSON(c, gin.H{
 		"apps":     apps,
 		"accounts": AccountPoolSnapshot(),
@@ -92,7 +94,41 @@ func connectionsAccountProfile(c *gin.Context) {
 		jiyingErr(c, "账号资料获取失败")
 		return
 	}
+	storeAccountProfile(profile)
 	jiyingJSON(c, profile)
+}
+
+// connectionsAppProfile 主动拉取应用资料（名称、头像与描述），并刷新缓存。
+func connectionsAppProfile(c *gin.Context) {
+	appID := strings.TrimSpace(c.Query("app_id"))
+	client := clientForApp(appID)
+	if client == nil {
+		jiyingErr(c, "应用通道未接入")
+		return
+	}
+	if !client.Connected() {
+		jiyingErr(c, "应用通道未连接")
+		return
+	}
+	if appID == "" {
+		appID = CurrentAppConfig().AppID
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 8*time.Second)
+	defer cancel()
+	app, err := client.AppsGet(ctx, appID)
+	if err != nil {
+		jiyingErr(c, "应用资料获取失败: "+err.Error())
+		return
+	}
+	if app.ID != "" {
+		appConnPool.mu.Lock()
+		if rt, ok := appConnPool.items[appID]; ok {
+			rt.profile = app
+			rt.profileAt = time.Now()
+		}
+		appConnPool.mu.Unlock()
+	}
+	jiyingJSON(c, app)
 }
 
 func connectionsAppUpsert(c *gin.Context) {
@@ -145,6 +181,56 @@ func connectionsAppDefault(c *gin.Context) {
 	}
 	RecordAudit(consoleUser(c), "app.default", appID, "", "成功")
 	jiyingJSON(c, gin.H{"default_app_id": appID})
+}
+
+// accountProfileCache 缓存最近一次账号资料，避免每次状态轮询都请求 /api/client/me。
+var accountProfileCache = struct {
+	sync.Mutex
+	email   string
+	profile AccountProfile
+	at      time.Time
+}{}
+
+const accountProfileTTL = 5 * time.Minute
+
+func storeAccountProfile(profile AccountProfile) {
+	if profile.Email == "" {
+		return
+	}
+	accountProfileCache.Lock()
+	accountProfileCache.email = UserSessionEmail()
+	accountProfileCache.profile = profile
+	accountProfileCache.at = time.Now()
+	accountProfileCache.Unlock()
+}
+
+// invalidateAccountProfileCache 在登录、切号或退出时清空资料缓存。
+func invalidateAccountProfileCache() {
+	accountProfileCache.Lock()
+	accountProfileCache.email = ""
+	accountProfileCache.profile = AccountProfile{}
+	accountProfileCache.at = time.Time{}
+	accountProfileCache.Unlock()
+}
+
+// cachedAccountProfile 优先返回 5 分钟内的缓存，未命中时请求上游并回填。
+func cachedAccountProfile(ctx context.Context) AccountProfile {
+	if !userLoggedIn() {
+		return AccountProfile{}
+	}
+	email := UserSessionEmail()
+	accountProfileCache.Lock()
+	if accountProfileCache.email == email && time.Since(accountProfileCache.at) < accountProfileTTL {
+		profile := accountProfileCache.profile
+		accountProfileCache.Unlock()
+		return profile
+	}
+	accountProfileCache.Unlock()
+	profile := accountProfile(ctx)
+	if profile.Email != "" {
+		storeAccountProfile(profile)
+	}
+	return profile
 }
 
 // accountProfile 尽力读取个人账号资料，失败时返回零值而非报错。

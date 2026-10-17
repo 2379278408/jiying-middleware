@@ -17,6 +17,8 @@ func init() {
 	registerAuditAPI()
 	registerRolesAPI()
 	registerConnectionsAPI()
+	registerAPIKeysAPI()
+	registerAIDocs()
 	registerSkillsAPI()
 	registerAgentAPI()
 	registerMarketAPI()

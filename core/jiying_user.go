@@ -44,6 +44,7 @@ func SetUserSession(email, token string) {
 	userSession.email = email
 	userSession.token = token
 	userSession.Unlock()
+	invalidateAccountProfileCache()
 }
 
 func UserSessionStatus() string {
@@ -111,6 +112,7 @@ func loginAccount(ctx context.Context, cfg UserLogin, code bool) error {
 	userSession.token = token
 	userSession.client = client
 	userSession.Unlock()
+	invalidateAccountProfileCache()
 	saveUserToken(cfg.Email, token)
 	return nil
 }
@@ -217,6 +219,7 @@ func UserCall(ctx context.Context, method, path string, body any) ([]byte, error
 		email := userSession.email
 		userSession.token = ""
 		userSession.Unlock()
+		invalidateAccountProfileCache()
 		clearUserToken(email)
 		return out, fmt.Errorf("账号会话失效")
 	}

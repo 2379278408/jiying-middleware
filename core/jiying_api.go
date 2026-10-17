@@ -217,8 +217,15 @@ func validTraceID(id string) bool {
 	return true
 }
 
-// requireLogin 校验控制台会话；未登录直接以 401 中止，前端据此跳转登录页。
+// requireLogin 校验控制台会话或 API Key；未认证直接以 401 中止，前端据此跳转登录页。
 func requireLogin(c *gin.Context) {
+	if authenticateAPIKey(c) {
+		if c.IsAborted() {
+			return
+		}
+		c.Next()
+		return
+	}
 	if !CheckCookie(c) {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"code": 401, "message": "请先登录"})
 		return

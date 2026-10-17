@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // apppoolKey 是应用连接池在本地桶中的持久化键。
@@ -16,6 +17,9 @@ type appRuntime struct {
 	cfg    AppConn
 	client *JiyingClient
 	cancel context.CancelFunc
+	// profile 是应用资料缓存，由后台循环在连接可用后刷新；读取时需持有 appConnPool.mu。
+	profile   JiyingApp
+	profileAt time.Time
 }
 
 // appPool 管理多个应用通道连接，按 app_id 隔离租户。
@@ -105,11 +109,13 @@ func applyAppConns(list []AppConn) {
 		client := NewJiyingClient(JiyingConfig{WSURL: cfg.WSURL, AppID: cfg.AppID, Secret: cfg.AppSecret}, nil)
 		ctx, cancel := context.WithCancel(context.Background())
 		appConnPool.items[id] = &appRuntime{cfg: cfg, client: client, cancel: cancel}
-		go func(c *JiyingClient) {
+		go func(c *JiyingClient, cancel context.CancelFunc) {
 			if err := c.Run(ctx); err != nil && ctx.Err() == nil {
 				GetMyLog().Warn("即应应用通道退出: %v", err)
 			}
-		}(client)
+			cancel()
+		}(client, cancel)
+		go refreshAppProfile(ctx, client, id)
 	}
 	if len(order) > 0 {
 		appConnPool.defaultID = order[0]
@@ -171,6 +177,54 @@ func clientForConv(conversationID string) *JiyingClient {
 	return activeJiying
 }
 
+// clientForApp 返回指定应用的客户端；appID 为空时使用默认应用。
+func clientForApp(appID string) *JiyingClient {
+	appConnPool.mu.Lock()
+	defer appConnPool.mu.Unlock()
+	if appID == "" {
+		appID = appConnPool.defaultID
+	}
+	if rt, ok := appConnPool.items[appID]; ok {
+		return rt.client
+	}
+	if appID == "" {
+		return activeJiying
+	}
+	return nil
+}
+
+// refreshAppProfile 在连接可用后拉取应用资料并缓存，失败按短间隔重试，成功后每 10 分钟刷新。
+func refreshAppProfile(ctx context.Context, client *JiyingClient, appID string) {
+	delay := 3 * time.Second
+	for {
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		if !client.Connected() {
+			delay = 5 * time.Second
+			continue
+		}
+		callCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+		app, err := client.AppsGet(callCtx, appID)
+		cancel()
+		if err != nil || app.ID == "" {
+			delay = 10 * time.Second
+			continue
+		}
+		appConnPool.mu.Lock()
+		if rt, ok := appConnPool.items[appID]; ok {
+			rt.profile = app
+			rt.profileAt = time.Now()
+		}
+		appConnPool.mu.Unlock()
+		delay = 10 * time.Minute
+	}
+}
+
 // SendTextToConv 按会话归属选择应用通道发送文本。
 func SendTextToConv(ctx context.Context, conversationID, replyTo, text string) error {
 	c := clientForConv(conversationID)
@@ -182,10 +236,13 @@ func SendTextToConv(ctx context.Context, conversationID, replyTo, text string) e
 
 // AppPoolItem 是连接池对外展示的只读快照。
 type AppPoolItem struct {
-	AppID     string `json:"app_id"`
-	WSURL     string `json:"ws_url"`
-	Online    bool   `json:"online"`
-	IsDefault bool   `json:"is_default"`
+	AppID       string `json:"app_id"`
+	WSURL       string `json:"ws_url"`
+	Online      bool   `json:"online"`
+	IsDefault   bool   `json:"is_default"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+	AvatarURL   string `json:"avatar_url,omitempty"`
 }
 
 // AppPoolSnapshot 返回当前所有应用通道状态，密钥仅以掩码呈现。
@@ -195,10 +252,13 @@ func AppPoolSnapshot() []AppPoolItem {
 	out := make([]AppPoolItem, 0, len(appConnPool.items))
 	for id, rt := range appConnPool.items {
 		out = append(out, AppPoolItem{
-			AppID:     id,
-			WSURL:     maskURL(rt.cfg.WSURL),
-			Online:    rt.client.Connected(),
-			IsDefault: id == appConnPool.defaultID,
+			AppID:       id,
+			WSURL:       maskURL(rt.cfg.WSURL),
+			Online:      rt.client.Connected(),
+			IsDefault:   id == appConnPool.defaultID,
+			Name:        rt.profile.Name,
+			Description: rt.profile.Description,
+			AvatarURL:   rt.profile.Avatar,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
