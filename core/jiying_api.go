@@ -602,7 +602,7 @@ func jiyingAPICronAdd(c *gin.Context) {
 	}
 	if !isValidCronSpec(spec) {
 		RecordAudit(consoleUser(c), "cron.add", name, spec+" "+command, "失败: 表达式无效")
-		jiyingErr(c, "Cron 表达式无效，支持 5 段或 6 段（含秒）写法，如 */30 * * * * *")
+		jiyingErr(c, "Cron 表达式无效，支持 5 段或 6 段（含秒）写法，如 0 */30 * * * *（每 30 分钟）")
 		return
 	}
 	if parsed, isJSON, err := parseCronFeatureCommand(command); isJSON {
