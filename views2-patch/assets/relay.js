@@ -1989,6 +1989,7 @@
       + tile("已收消息", "…", "累计接收") + tile("任务队列", "…", "执行中")
       + tile("通道状态", "…", "应用 · 账号") + tile("限流拒绝", "…", "被拒绝任务")
       + "</div>"
+      + '<div class="panel mt-16"><div class="panel-head"><h3>RPC 调用</h3><span class="hint">按方法聚合 · 来自 /metrics</span></div><div class="panel-body" id="observeRpc"><div class="empty">加载中…</div></div></div>'
       + '<div class="panel mt-16"><div class="panel-head"><h3>原始指标</h3><span class="hint">Prometheus 文本格式</span></div><div class="panel-body"><pre class="mono rl-codeblock" id="observeRaw">加载中…</pre></div></div>';
     Relay.loadObserve();
   }
@@ -2090,6 +2091,49 @@
     if (m) return m + "m " + (sec % 60) + "s";
     return sec + "s";
   }
+  // 解析 /metrics 里的 RPC 聚合行，返回按方法名排序的表格行。
+  function rpcRows(txt) {
+    var rows = {};
+    function row(method) {
+      if (!rows[method]) rows[method] = { method: method, ok: 0, failed: 0, avg: null, codes: [] };
+      return rows[method];
+    }
+    txt.split("\n").forEach(function (line) {
+      var m = line.match(/^jiying_app_calls_total\{method="([^"]+)",outcome="(ok|error)"\}\s+([0-9.eE+-]+)$/);
+      if (m) {
+        var r = row(m[1]);
+        if (m[2] === "ok") r.ok += parseFloat(m[3]);
+        else r.failed += parseFloat(m[3]);
+        return;
+      }
+      m = line.match(/^jiying_app_call_errors_total\{method="([^"]+)",code="([^"]+)"\}\s+([0-9.eE+-]+)$/);
+      if (m) { row(m[1]).codes.push(m[2] + " × " + m[3]); return; }
+      m = line.match(/^jiying_app_call_duration_milliseconds_avg\{method="([^"]+)"\}\s+([0-9.eE+-]+)$/);
+      if (m) { row(m[1]).avg = parseFloat(m[2]); }
+    });
+    return Object.keys(rows).sort().map(function (k) { return rows[k]; });
+  }
+  function renderRpc(txt) {
+    var box = $("#observeRpc");
+    if (!box) return;
+    var rows = rpcRows(txt);
+    if (!rows.length) {
+      box.innerHTML = emptyState("activity", "暂无 RPC 调用", "应用通道产生调用后，这里会按方法显示成功率与耗时。");
+      return;
+    }
+    box.innerHTML = '<div class="table-wrap"><table class="table table-sm"><thead><tr>'
+      + '<th>方法</th><th class="text-end">成功</th><th class="text-end">失败</th><th class="text-end">平均耗时</th><th>错误码</th>'
+      + "</tr></thead><tbody>"
+      + rows.map(function (r) {
+        var avg = r.avg == null ? "—" : (r.avg < 10 ? r.avg.toFixed(1) : Math.round(r.avg)) + " ms";
+        return "<tr><td class=\"mono\">" + esc(r.method) + "</td>"
+          + '<td class="text-end mono">' + r.ok + "</td>"
+          + '<td class="text-end mono' + (r.failed ? " text-danger" : "") + '">' + r.failed + "</td>"
+          + '<td class="text-end mono">' + avg + "</td>"
+          + '<td class="mono muted">' + (r.codes.length ? esc(r.codes.join(" · ")) : "—") + "</td></tr>";
+      }).join("")
+      + "</tbody></table></div>";
+  }
   // 从 Prometheus 文本中取指标值：metric(name,{labels}) 精确匹配样本名。
   function metricVal(txt, name, labelMatch) {
     var re = new RegExp("^" + name + "(?:\\{[^}]*\\})?\\s+([0-9.eE+-]+)\\s*$", "m");
@@ -2109,6 +2153,7 @@
     fetch("/metrics").then(function (r) { return r.text(); }).then(function (txt) {
       var box = $("#observeRaw");
       if (box) box.textContent = txt || "（无指标）";
+      renderRpc(txt || "");
       var up = metricVal(txt, "jiying_uptime_seconds");
       if (up != null) { setTile(1, fmtDur(up), "进程已运行"); syncUptime(up); }
       var msg = metricVal(txt, "jiying_messages_total");
