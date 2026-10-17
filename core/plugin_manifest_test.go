@@ -10,6 +10,7 @@ const samplePluginJS = `// [title: 天气查询]
 // [author: demo]
 // [language: nodejs]
 // [class: 工具类]
+// [apps: app-a, app-b]
 // [service: 10086]
 // [disable: false]
 // [admin: true]
@@ -38,6 +39,9 @@ func TestParsePluginManifestJS(t *testing.T) {
 	}
 	if m.Class != "工具类" || m.Service != "10086" || m.Icon != "https://example.com/i.png" {
 		t.Fatalf("扩展字段解析错误: %+v", m)
+	}
+	if len(m.Apps) != 2 || m.Apps[0] != "app-a" || m.Apps[1] != "app-b" {
+		t.Fatalf("apps 解析错误: %v", m.Apps)
 	}
 	if len(m.Rules) != 2 || m.Rules[0] != `^天气\s+(\S+)$` || m.Rules[1] != "^查天气" {
 		t.Fatalf("规则应为多行累积: %v", m.Rules)

@@ -1607,3 +1607,84 @@ a:hover { color: var(--primary-hover); text-decoration: none; }
   font-size: 12.5px;
   user-select: all;
 }
+
+/* ---------- 插件目录树与多应用标签 ---------- */
+.avatar .av-fb { background: hsl(var(--av-h, 215) 38% 32%); }
+.plugin-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.plugin-tree-map { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; min-width: 0; }
+.ptm-node { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 3px; background: color-mix(in oklab, var(--panel) 85%, var(--bg)); white-space: nowrap; }
+.ptm-node b { color: var(--fg); font-family: var(--mono); font-size: 12px; }
+.ptm-node .ico { display: inline-flex; font-size: 12px; }
+.ptm-link { width: 20px; height: 1px; background: var(--line); position: relative; }
+.ptm-link::after { content: ""; position: absolute; right: -1px; top: -2px; width: 4px; height: 4px; border-radius: 50%; background: var(--line-strong, var(--line)); }
+.plugin-search { width: 230px; max-width: 100%; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 3px; overflow: hidden; }
+.seg button { border: 0; background: transparent; color: var(--muted); padding: 5px 11px; font-size: 12px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button.active { background: color-mix(in oklab, var(--primary) 14%, var(--panel)); color: var(--fg); }
+.plugin-folder { border-bottom: 1px solid color-mix(in oklab, var(--line) 60%, transparent); }
+.plugin-folder:last-child { border-bottom: 0; }
+.plugin-folder-head { width: 100%; display: flex; align-items: center; gap: 8px; padding: 10px 16px; border: 0; background: color-mix(in oklab, var(--panel) 88%, var(--bg)); color: var(--fg); cursor: pointer; text-align: left; }
+.plugin-folder-head:hover { background: color-mix(in oklab, var(--primary) 7%, var(--panel)); }
+.plugin-folder-head b { font-size: 13px; }
+.pf-chevron { display: inline-flex; font-size: 10px; color: var(--muted); transition: transform .16s ease; }
+.plugin-folder.folded .pf-chevron { transform: rotate(-90deg); }
+.pf-ico { display: inline-flex; color: var(--primary); }
+.pf-count { font-family: var(--mono); font-size: 11px; color: var(--muted); padding: 0 6px; border: 1px solid var(--line); border-radius: 99px; }
+.pf-line { flex: 1; height: 1px; margin-left: 4px; background: linear-gradient(90deg, var(--line), transparent); }
+.plugin-folder-body { padding: 2px 14px 10px 26px; position: relative; }
+.plugin-folder-body::before { content: ""; position: absolute; left: 17px; top: 0; bottom: 10px; border-left: 1px dashed color-mix(in oklab, var(--line) 80%, transparent); }
+.plugin-folder.folded .plugin-folder-body { display: none; }
+.plugin-row { border: 1px solid transparent; border-radius: 3px; }
+.plugin-row:hover { border-color: var(--line); background: color-mix(in oklab, var(--primary) 4%, transparent); }
+.plugin-flat { display: flex; align-items: flex-start; gap: 10px; }
+.plugin-flat .plugin-row { flex: 1; min-width: 0; }
+.plugin-class-tag { flex: 0 0 auto; margin-top: 13px; font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 2px; padding: 2px 6px; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+.app-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 190px; padding: 2px 7px 2px 2px; border: 1px solid var(--line); border-radius: 99px; background: color-mix(in oklab, var(--panel) 80%, var(--bg)); color: var(--muted); font-size: 11px; line-height: 16px; }
+.app-chip-all { padding: 2px 8px; }
+.app-chip-all .ico { display: inline-flex; font-size: 11px; }
+.app-chip-av { width: 16px; height: 16px; flex: 0 0 auto; border-radius: 50%; overflow: hidden; position: relative; display: inline-flex; align-items: center; justify-content: center; }
+.app-chip-av .avatar img { border-radius: 50%; }
+.app-chip-av-fb { background: color-mix(in oklab, var(--primary) 25%, var(--panel)); color: var(--fg); font-family: var(--mono); font-size: 9px; }
+@media (max-width: 760px) {
+  .plugin-tree-map { width: 100%; font-size: 11px; overflow-x: auto; padding-bottom: 2px; }
+  .plugin-search { flex: 1; width: auto; min-width: 150px; }
+  .plugin-toolbar { gap: 8px; }
+  .plugin-folder-body { padding-left: 18px; }
+  .plugin-folder-body::before { left: 10px; }
+  .plugin-flat { flex-direction: column; gap: 2px; }
+  .plugin-class-tag { margin: 6px 0 0 12px; }
+}
+
+/* ---------- 吉祥物挂件 ---------- */
+.dudu { position: fixed; right: 20px; bottom: 18px; z-index: 1080; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; pointer-events: none; }
+.dudu-card { pointer-events: auto; width: 112px; border: 1px solid var(--line); border-radius: 6px; background: linear-gradient(180deg, color-mix(in oklab, var(--panel) 94%, var(--bg)), color-mix(in oklab, var(--bg) 88%, var(--panel))); box-shadow: 0 12px 30px rgba(0,0,0,.28), inset 0 1px 0 color-mix(in oklab, #fff 8%, transparent); overflow: hidden; }
+.dudu-stage { display: block; width: 100%; height: 118px; padding: 4px 4px 0; border: 0; background: radial-gradient(circle at 50% 78%, color-mix(in oklab, var(--primary) 16%, transparent), transparent 62%), repeating-linear-gradient(0deg, transparent 0 11px, color-mix(in oklab, var(--line) 28%, transparent) 11px 12px), repeating-linear-gradient(90deg, transparent 0 11px, color-mix(in oklab, var(--line) 18%, transparent) 11px 12px); cursor: pointer; }
+.dudu-stage img { width: 100%; height: 100%; object-fit: contain; display: block; filter: drop-shadow(0 6px 10px rgba(0,0,0,.28)); animation: dudu-bob 3.8s ease-in-out infinite; }
+.dudu.acting .dudu-stage img { animation: none; }
+.dudu-bar { display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 4px 6px 5px 9px; border-top: 1px solid var(--line); background: color-mix(in oklab, var(--panel) 92%, var(--bg)); }
+.dudu-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 2px color-mix(in oklab, var(--ok) 18%, transparent); animation: dudu-pulse 2.4s ease-in-out infinite; }
+.dudu-x { width: 18px; height: 18px; padding: 0; border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--muted); font-size: 14px; line-height: 1; cursor: pointer; }
+.dudu-x:hover { color: var(--fg); border-color: var(--line); background: color-mix(in oklab, var(--fg) 6%, transparent); }
+.dudu-bubble { pointer-events: none; max-width: 200px; padding: 7px 10px; border: 1px solid color-mix(in oklab, var(--primary) 34%, var(--line)); border-radius: 5px; background: color-mix(in oklab, var(--panel) 96%, var(--bg)); color: var(--fg); font-size: 12px; line-height: 1.45; box-shadow: 0 8px 20px rgba(0,0,0,.22); position: relative; }
+.dudu-bubble::after { content: ""; position: absolute; right: 18px; bottom: -5px; width: 8px; height: 8px; transform: rotate(45deg); border-right: 1px solid color-mix(in oklab, var(--primary) 34%, var(--line)); border-bottom: 1px solid color-mix(in oklab, var(--primary) 34%, var(--line)); background: inherit; }
+.dudu-bubble.pop { animation: dudu-pop .22s ease; }
+.dudu-restore { position: fixed; right: 20px; bottom: 18px; z-index: 1080; width: 46px; height: 46px; padding: 2px; border: 1px solid var(--line); border-radius: 50%; background: color-mix(in oklab, var(--panel) 96%, var(--bg)); box-shadow: 0 8px 20px rgba(0,0,0,.26); cursor: pointer; overflow: hidden; }
+.dudu-restore img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.dudu-restore:hover { border-color: color-mix(in oklab, var(--primary) 45%, var(--line)); transform: translateY(-1px); }
+@keyframes dudu-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+@keyframes dudu-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+@keyframes dudu-pop { from { opacity: 0; transform: translateY(4px) scale(.97); } to { opacity: 1; transform: none; } }
+@media (max-width: 760px) {
+  .dudu { right: 12px; bottom: 12px; }
+  .dudu-card { width: 92px; }
+  .dudu-stage { height: 96px; }
+  .dudu-bubble { max-width: 160px; font-size: 11.5px; }
+  .dudu-restore { right: 12px; bottom: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dudu-stage img, .dudu-dot { animation: none; }
+  .dudu-bubble.pop { animation: none; }
+}
+.dudu[hidden], .dudu-restore[hidden] { display: none !important; }

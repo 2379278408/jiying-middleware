@@ -88,7 +88,7 @@ func BuildToolContracts(userID string) []ToolContract {
 	})
 	out := make([]ToolContract, 0, len(items))
 	for i, f := range items {
-		if f == nil || !f.Enabled || !featureAllowedFor(userID, f) {
+		if f == nil || !f.Enabled || !featureAllowedFor(userID, f) || !featureAllowedForApp(f, CurrentAppConfig().AppID) {
 			continue
 		}
 		out = append(out, buildToolContract(agentToolName(i), f))

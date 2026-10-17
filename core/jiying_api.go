@@ -408,6 +408,7 @@ func jiyingAPIScripts(c *gin.Context) {
 		Version     string              `json:"version,omitempty"`
 		Author      string              `json:"author,omitempty"`
 		Class       string              `json:"class,omitempty"`
+		Apps        []string            `json:"apps,omitempty"`
 		Description string              `json:"description,omitempty"`
 		Rules       []string            `json:"rules,omitempty"`
 		Cron        []string            `json:"cron,omitempty"`
@@ -445,6 +446,7 @@ func jiyingAPIScripts(c *gin.Context) {
 				Version:     m.Version,
 				Author:      m.Author,
 				Class:       m.Class,
+				Apps:        m.Apps,
 				Description: m.Description,
 				Rules:       m.Rules,
 				Cron:        m.Cron,
@@ -489,7 +491,8 @@ func jiyingAPIScriptInstall(c *gin.Context) {
 	}
 	base := filepathBase(name)
 	title, scope := scriptFeatureNameScope(base, code)
-	_ = UpsertFeature(Feature{Name: title, Kind: "script", Target: base, Scope: scope, Identity: "app", Enabled: true})
+	m := ParsePluginManifest(code)
+	_ = UpsertFeature(Feature{Name: title, Kind: "script", Target: base, Scope: scope, Identity: "app", Enabled: true, Class: m.Class, Apps: m.Apps})
 	RecordAudit(consoleUser(c), "script.install", base, fmt.Sprintf("%d 字节", len(code)), "成功")
 	jiyingJSON(c, "脚本已安装 "+base)
 }

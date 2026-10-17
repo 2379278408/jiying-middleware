@@ -15,6 +15,7 @@ type PluginManifest struct {
 	Language    string              `json:"language"`
 	Class       string              `json:"class"`
 	Service     string              `json:"service"`
+	Apps        []string            `json:"apps,omitempty"`
 	Disable     *bool               `json:"disable,omitempty"`
 	Admin       *bool               `json:"admin,omitempty"`
 	Rules       []string            `json:"rules"`
@@ -62,6 +63,8 @@ func ParsePluginManifest(content string) PluginManifest {
 			m.Class = strings.TrimSpace(value)
 		case "service":
 			m.Service = strings.TrimSpace(value)
+		case "app", "apps":
+			m.Apps = append(m.Apps, splitManifestList(value)...)
 		case "disable":
 			if b, ok := parseManifestBool(value); ok {
 				m.Disable = &b

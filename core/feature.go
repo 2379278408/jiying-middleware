@@ -17,13 +17,15 @@ import (
 )
 
 type Feature struct {
-	Name     string `json:"name"`
-	Kind     string `json:"kind"`
-	Target   string `json:"target"`
-	Scope    string `json:"scope"`
-	Confirm  bool   `json:"confirm"`
-	Identity string `json:"identity"`
-	Enabled  bool   `json:"enabled"`
+	Name     string   `json:"name"`
+	Kind     string   `json:"kind"`
+	Target   string   `json:"target"`
+	Scope    string   `json:"scope"`
+	Confirm  bool     `json:"confirm"`
+	Identity string   `json:"identity"`
+	Enabled  bool     `json:"enabled"`
+	Class    string   `json:"class,omitempty"`
+	Apps     []string `json:"apps,omitempty"`
 }
 
 type featureTable struct {
@@ -62,7 +64,43 @@ func (t *featureTable) scanScripts() {
 			continue
 		}
 		t.ensure(name, "script", e.Name(), scope, false, "app")
+		m := ParsePluginManifest(string(data))
+		t.setScriptMeta(name, m.Class, m.Apps)
 	}
+}
+
+// setScriptMeta 把插件清单元数据同步到功能记录；插件文件更新后重启即可生效。
+func (t *featureTable) setScriptMeta(name, class string, apps []string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	f, ok := t.items[name]
+	if !ok || f == nil {
+		return
+	}
+	if f.Class == class && sameStringSet(f.Apps, apps) {
+		return
+	}
+	f.Class = class
+	f.Apps = append([]string(nil), apps...)
+	t.saveLocked()
+}
+
+// sameStringSet 对比两个应用白名单，忽略顺序与重复项，避免轮询时反复写盘。
+func sameStringSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := make(map[string]int, len(a))
+	for _, v := range a {
+		seen[v]++
+	}
+	for _, v := range b {
+		seen[v]--
+		if seen[v] < 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func (t *featureTable) ensure(name, kind, target, scope string, confirm bool, identity string) {
@@ -260,6 +298,21 @@ func featureAllowedFor(userID string, f *Feature) bool {
 	return true
 }
 
+// featureAllowedForApp 判断插件是否服务于当前应用；未声明应用白名单表示适用于所有应用。
+// 应用白名单来自插件头部 [apps: app-id-1, app-id-2]，* 表示全部应用。
+func featureAllowedForApp(f *Feature, appID string) bool {
+	if f == nil || len(f.Apps) == 0 {
+		return true
+	}
+	appID = strings.TrimSpace(appID)
+	for _, want := range f.Apps {
+		if want == "*" || strings.EqualFold(want, appID) {
+			return true
+		}
+	}
+	return false
+}
+
 func executeFeature(ctx context.Context, name, args, userID, chatID string) (string, error) {
 	if strings.HasPrefix(name, "cron:") {
 		label := strings.TrimPrefix(name, "cron:")
@@ -277,6 +330,9 @@ func executeFeature(ctx context.Context, name, args, userID, chatID string) (str
 	}
 	if !featureAllowedFor(userID, f) {
 		return "", fmt.Errorf("无权限")
+	}
+	if !featureAllowedForApp(f, CurrentAppConfig().AppID) {
+		return "", fmt.Errorf("该插件未授权当前应用")
 	}
 	switch f.Kind {
 	case "builtin":

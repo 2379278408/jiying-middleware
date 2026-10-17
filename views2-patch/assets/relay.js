@@ -467,6 +467,14 @@
     "机器人": "Bot",
     "暂无插件": "No plugins",
     "插件放在 scripts 目录下，安装后会自动登记为可调用功能。": "Plugins live in the scripts directory and are registered as callable features after installation.",
+    "按分类归档的插件资产，支持一个插件服务多个应用；安装后会自动登记为可调用功能": "Plugins filed by category. One plugin can serve multiple apps and becomes a callable feature after installation.",
+    "分类": "Category",
+    "目录": "Folders",
+    "列表": "List",
+    "全部应用": "All apps",
+    "未分类": "Uncategorized",
+    "搜索插件 / 分类 / 应用": "Search plugins / categories / apps",
+    "搜索插件": "Search plugins",
     "规则": "Rule",
     "平台": "Platform",
     "编辑插件": "Edit plugin",
@@ -1010,6 +1018,9 @@
     link: "bi-link-45deg",
     code: "bi-code-slash",
     puzzle: "bi-puzzle",
+    folder: "bi-folder2-open",
+    "chevron-down": "bi-chevron-down",
+    search: "bi-search",
     toggles: "bi-toggles",
     robot: "bi-robot",
     clock: "bi-clock-history",
@@ -1111,7 +1122,9 @@
     if (b && retry) b.addEventListener("click", retry);
   }
 
-  var state = { view: "home", cerr: null, convs: [], conv: null, msgs: [], interval: null, baseUptime: null, uptimeAt: 0, uptimeTimer: null, chatEpoch: 0, chatRequest: 0, logLines: [], logShown: [], logPending: "", logTimer: null, logLevel: "all", logPinned: true, logFromBottom: 0, logLoadedAt: "", logDay: "", tasks: [], tasksErr: "", role: "", auditRows: [], auditErr: "", executions: [], executionsErr: "", execFilter: { kind: "", status: "", name: "" }, chatCaps: null, account: null, appProfiles: {} };
+  var state = { view: "home", cerr: null, convs: [], conv: null, msgs: [], interval: null, baseUptime: null, uptimeAt: 0, uptimeTimer: null, chatEpoch: 0, chatRequest: 0, chatConvID: "", logLines: [], logShown: [], logPending: "", logTimer: null, logLevel: "all", logPinned: true, logFromBottom: 0, logLoadedAt: "", logDay: "", tasks: [], tasksErr: "", role: "", auditRows: [], auditErr: "", executions: [], executionsErr: "", execFilter: { kind: "", status: "", name: "" }, chatCaps: null, account: null, app: null, appProfiles: {}, appNames: {}, scriptView: "tree", scriptFolders: {} };
+  var VIEW_KEY = "relay-view";
+  var PROFILE_KEY = "relay-profile";
   var ROLE_LABEL = { master: "主人", ops: "运营", readonly: "只读" };
 
   function $(sel, root) { return (root || document).querySelector(sel); }
@@ -1132,10 +1145,18 @@
     id = String(id || "");
     return id.length > 18 ? id.slice(0, 8) + "…" + id.slice(-4) : id;
   }
-  // 头像统一渲染：有图片时覆盖首字母，加载失败自动回退，避免破图。
+  // 头像统一渲染：有图片时覆盖首字母；加载失败保留同色首字母，避免破图与空白。
+  // 首字母底色由名称稳定散列，同名账号在不同页面保持同一颜色。
+  function avatarHue(name) {
+    var h = 0, s = String(name || "U");
+    for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+    return h;
+  }
   function avatarInner(url, name) {
-    var ch = esc(String(name || "U").trim().charAt(0).toUpperCase() || "U");
-    return '<span class="av-fb">' + ch + "</span>" + (url ? '<img src="' + esc(url) + '" alt="" loading="lazy" onerror="this.remove()">' : "");
+    var label = String(name || "U").trim() || "U";
+    var ch = esc(label.charAt(0).toUpperCase());
+    return '<span class="av-fb" style="--av-h:' + avatarHue(label) + '">' + ch + "</span>"
+      + (url ? '<img src="' + esc(url) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">' : "");
   }
   function avatarHTML(url, name, cls) {
     var klass = "avatar" + (cls ? " " + cls : "");
@@ -1289,6 +1310,17 @@
     var all = o.pinned.concat(o.rest);
     return all.length ? all[0].id : "home";
   }
+  // 记住上次停留的页面：刷新或重新登录后回到原页面，而不是每次都跳回工作台。
+  function savedViewId() {
+    try {
+      var v = localStorage.getItem(VIEW_KEY);
+      if (v && NAV.some(function (x) { return x.id === v; })) return v;
+    } catch (e) { /* 隐私模式回退默认页 */ }
+    return "";
+  }
+  function rememberView(id) {
+    try { localStorage.setItem(VIEW_KEY, id); } catch (e) { /* 忽略存储失败 */ }
+  }
   function renderNav() {
     var nav = $("#nav");
     if (!nav) return;
@@ -1307,6 +1339,7 @@
     nav.innerHTML = html;
      $$("#nav [data-view]").forEach(function (a) {
       a.addEventListener("click", function () { switchView(a.getAttribute("data-view")); closeNav(); });
+      a.classList.toggle("active", a.getAttribute("data-view") === state.view);
     });
     var filter = $("#navFilter");
     if (filter) {
@@ -1462,6 +1495,7 @@
      $$("#nav [data-view]").forEach(function (a) { a.classList.toggle("active", a.getAttribute("data-view") === id); });
     $$(".page").forEach(function (p) { p.hidden = p.id !== "view-" + id; });
     state.view = id;
+    rememberView(id);
     var n = NAV.filter(function (x) { return x.id === id; })[0];
     $("#crumbs").textContent = n ? "Relay · " + t(n.name) : "Relay";
     clearInterval(state.interval);
@@ -1485,10 +1519,44 @@
     });
   }
 
+  function cacheProfile(st) {
+    if (!st) return;
+    try {
+      localStorage.setItem(PROFILE_KEY, JSON.stringify({
+        name: (st.account && (st.account.nickname || st.account.email)) || "",
+        email: (st.account && st.account.email) || "",
+        avatar: (st.account && st.account.avatar_url) || "",
+        app_name: (st.app && st.app.name) || "",
+        app_avatar: (st.app && st.app.avatar_url) || "",
+        at: Date.now()
+      }));
+    } catch (e) { /* 隐私模式下忽略 */ }
+  }
+  // 先用本机缓存渲染顶栏，刷新或网络抖动时头像不会闪烁成默认图标。
+  function applyCachedProfile() {
+    var cached = null;
+    try { cached = JSON.parse(localStorage.getItem(PROFILE_KEY) || "null"); } catch (e) { cached = null; }
+    if (!cached) return;
+    var av = $("#avatar");
+    if (av && cached.avatar) {
+      av.className = "avatar top-avatar";
+      av.innerHTML = avatarInner(cached.avatar, cached.name || cached.email || "U");
+      av.dataset.sig = cached.avatar + "|" + (cached.name || "");
+    }
+    var un = $("#userName");
+    if (un && cached.name && un.textContent === "管理员") un.textContent = cached.name;
+  }
   function refreshConnUI(st) {
     if (!st) return;
+    state.account = st.account || null;
+    state.app = st.app || null;
+    cacheProfile(st);
     var wsOk = st.app && st.app.connected;
     var acctOk = st.account && st.account.logged_in;
+    if (mascotState.ws === false && wsOk) mascotReact("ok", "应用通道已连接");
+    if (mascotState.acct === false && acctOk) mascotReact("ok", "账号通道已登录");
+    mascotState.ws = !!wsOk;
+    mascotState.acct = !!acctOk;
     var acctName = acctOk ? (st.account.nickname || st.account.email) : "";
     var dWs = $("#dotWs"), dAcct = $("#dotAcct");
     if (dWs) { dWs.className = "dot " + (wsOk ? "on" : "off"); $("#sideWs").textContent = t("side.ws") + " " + (wsOk ? t("side.connected") : t("side.disconnected")); }
@@ -1838,8 +1906,10 @@
     state.interval = setInterval(function () { if (state.conv) loadChat(); }, 8000);
   }
   function renderChat() {
+    // 进入消息页时保留上次选中的会话，状态轮询和切换页面不再把对话框清空。
     state.chatEpoch += 1;
     state.chatRequest += 1;
+    var keepID = state.chatConvID || (state.conv && state.conv.id) || "";
     state.convs = []; state.conv = null; state.msgs = [];
     var cont = $("#view-chat");
     cont.innerHTML = '<div class="page-head"><div><span class="eyebrow">MESSAGES / 03</span><h2>消息收发</h2><p>选择会话查看消息并发送内容</p></div></div>'
@@ -1850,7 +1920,7 @@
       + '<div class="muted" id="chatCap" style="font-size:12px;margin-top:8px">选择会话后显示可用发送身份</div>'
       + '<div class="input-row mt-8"><select class="select" id="chatIdentity" style="width:126px" title="发送身份"><option value="auto">身份 · 自动</option><option value="app">身份 · 应用</option><option value="user">身份 · 用户</option></select><input class="input" id="chatInput" placeholder="输入消息，回车或点击发送"><button class="btn btn-ghost" id="chatPreview">预演</button><button class="btn btn-primary" id="chatSend">发送</button></div>'
       + "</div></div></div>";
-    loadConvs();
+    loadConvs(keepID);
     loadChatAccounts();
     $("#chatSend").addEventListener("click", function () { sendChat(false); });
     $("#chatPreview").addEventListener("click", function () { sendChat(true); });
@@ -1876,14 +1946,14 @@
         if (!select.value) return;
         select.disabled = true;
         api("/jiying/api/connections/account/select", { method: "POST", form: { email: select.value } }).then(function (result) {
-           if (result.code === 200) { toast("已切换账号", "ok"); state.chatEpoch += 1; state.conv = null; state.msgs = []; loadConvs(); }
+           if (result.code === 200) { toast("已切换账号", "ok"); state.chatEpoch += 1; state.chatConvID = ""; state.conv = null; state.msgs = []; loadConvs(); }
           else toast(result.msg || "账号切换失败", "err");
         }).finally(function () { select.disabled = false; });
       });
     });
   }
 
-  function loadConvs() {
+  function loadConvs(restoreID) {
     var epoch = state.chatEpoch;
     api("/jiying/api/conversations").then(function (r) {
       if (epoch !== state.chatEpoch) return;
@@ -1896,22 +1966,32 @@
       box.innerHTML = list.map(function (c, i) {
         var name = c.name || c.title || c.id;
         var active = state.conv && state.conv.id === c.id;
-        var av = c.avatar_url || c.avatar || "";
+        var av = c.avatar_url || c.avatar || (state.app && state.app.avatar_url) || "";
         var lead = av ? avatarHTML(av, name, "conv-avatar") : '<span class="conv-ico" data-ico="message">' + ico("message") + "</span>";
         return '<button type="button" class="conv-item' + (active ? " active" : "") + '" data-conv-index="' + i + '">' + lead + '<span class="cname">' + esc(name) + "</span></button>";
       }).join("");
       $$("[data-conv-index]", box).forEach(function (item) {
         item.addEventListener("click", function () { pickConv(Number(item.getAttribute("data-conv-index"))); });
       });
+      var want = restoreID || state.chatConvID;
+      if (want) {
+        for (var k = 0; k < list.length; k++) {
+          if (String(list[k].id) === String(want)) { pickConv(k); break; }
+        }
+      }
     hydrateIcons();
     }).catch(function () { errorState($("#convList"), "message", "会话列表加载失败", "网络异常，请检查服务状态。", loadConvs); });
   }
 
   function pickConv(i) {
     var c = state.convs[i];
+    if (!c) return;
     state.conv = c;
+    state.chatConvID = c.id;
     state.msgs = [];
-    loadConvs();
+    $$(".conv-item").forEach(function (item) {
+      item.classList.toggle("active", Number(item.getAttribute("data-conv-index")) === i);
+    });
     $("#chatTitle").textContent = c.name || "会话";
     loadChat();
     loadChatCapabilities();
@@ -1985,8 +2065,10 @@
       var out = sender.type === "app" || sender.type === "assistant";
       var t = fmtTime(m.created_at);
       // 入站消息把原始 sender.type 映射为中文，避免直接暴露 user / system 等协议字段。
-      var who = sender.nickname || sender.name || (out ? "Relay" : (SENDER_LABEL[sender.type || ""] || sender.type || "对方"));
-      var av = sender.avatar || sender.avatar_url || "";
+      var acct = state.account || {};
+      var app = state.app || {};
+      var who = sender.nickname || sender.name || (out ? (app.name || "Relay") : (SENDER_LABEL[sender.type || ""] || sender.type || (acct.nickname || acct.email) || "对方"));
+      var av = sender.avatar || sender.avatar_url || (out ? (app.avatar_url || "") : "");
       return '<div class="msg-item ' + (out ? "msg-item-out" : "msg-item-in") + '">' + avatarHTML(av, who, "msg-avatar")
         + '<div class="msg-main"><span class="msg-meta">' + esc(who) + " · " + esc(t) + '</span><div class="msg-bubble ' + (out ? "msg-out" : "msg-in") + '">' + esc(content) + "</div></div></div>";
     }).join("");
@@ -2048,44 +2130,159 @@
   ];
   function renderScripts() {
     var cont = $("#view-scripts");
-    cont.innerHTML = '<div class="page-head"><div><h2>插件</h2><p>已安装的插件资产，支持 JavaScript 与 Python；安装后会自动登记为可调用功能</p></div><div class="spacer"></div>'
+    cont.innerHTML = '<div class="page-head"><div><h2>插件</h2><p>按分类归档的插件资产，支持一个插件服务多个应用；安装后会自动登记为可调用功能</p></div><div class="spacer"></div>'
       + '<button class="btn btn-ghost btn-sm" onclick="Relay.go(\'features\')">功能管理 →</button>'
       + '<button class="btn btn-primary" id="newScript">新建插件</button></div>'
-      + '<div class="panel"><div class="panel-body" id="scriptList">' + loadingState() + '</div></div>'
+      + '<div class="panel"><div class="plugin-toolbar">'
+      + '<div class="plugin-tree-map" id="scriptTreeMap"></div>'
+      + '<div class="spacer"></div>'
+      + '<input class="input plugin-search" id="scriptSearch" type="search" placeholder="搜索插件 / 分类 / 应用" aria-label="搜索插件">'
+      + '<div class="seg" id="scriptViewToggle" role="group" aria-label="插件视图"><button type="button" data-sview="tree">目录</button><button type="button" data-sview="list">列表</button></div>'
+      + '</div><div class="panel-body" id="scriptList">' + loadingState() + '</div></div>'
       + '<div class="panel mt-16"><div class="panel-head"><h3>技能</h3><span class="hint">可被插件 require 复用的 JS 模块，或 Markdown 说明；安装前会隔离试跑</span><div class="spacer"></div><button class="btn btn-primary btn-sm" id="newSkill">安装技能</button></div><div class="panel-body" id="skillList">' + loadingState() + '</div></div>';
     var n = $("#newScript");
     if (n) n.addEventListener("click", function () { openScriptModal(null); });
     var ns = $("#newSkill");
     if (ns) ns.addEventListener("click", openSkillModal);
+    var search = $("#scriptSearch");
+    if (search) search.addEventListener("input", function () { paintScripts(); });
+    $$("#scriptViewToggle [data-sview]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        state.scriptView = b.getAttribute("data-sview");
+        paintScripts();
+      });
+    });
+    bindScriptFolders();
     loadScripts();
     loadSkills();
   }
+  var SCRIPT_CACHE = [];
   function loadScripts() {
     api("/jiying/api/scripts").then(function (r) {
       var box = $("#scriptList");
       if (!box) return;
       if (r.code !== 200) { errorState(box, "puzzle", "插件列表加载失败", r.msg || r.message, loadScripts); return; }
-      if (!r.data || !r.data.length) { box.innerHTML = emptyState("puzzle", "暂无插件", "插件放在 scripts 目录下，安装后会自动登记为可调用功能。", '<button class="btn btn-primary btn-sm" id="scriptEmptyAdd">新建插件</button>'); var b = $("#scriptEmptyAdd"); if (b) b.addEventListener("click", function () { openScriptModal(null); }); return; }
-      box.innerHTML = '<div class="list">' + r.data.map(function (s) {
-        var lang = s.lang === "python" ? "python" : "js";
-        var meta = '<span class="badge badge-off">' + (SCRIPT_LANG_LABEL[lang] || lang) + '</span>';
-        if (s.version) meta += ' <span class="badge badge-info">v' + esc(s.version) + '</span>';
-        if (s.admin) meta += ' <span class="badge badge-warn">主控</span>';
-        var detail = [];
-        if (s.description) detail.push(esc(s.description));
-        detail.push((s.size || 0) + " B");
-        if (s.rules && s.rules.length) detail.push("规则 " + esc(s.rules.join(" / ")));
-        if (s.platform && s.platform.length) detail.push("平台 " + esc(s.platform.join(" ")));
-        return '<div class="list-item"><div class="ico li-ico">' + pluginIcon(s.icon) + '</div>'
-          + '<div class="grow"><div class="name">' + esc(s.title || s.name) + ' <span class="badge badge-off">' + esc(s.name) + '</span> ' + meta + '</div><div class="desc">' + detail.join(" · ") + '</div></div>'
-          + '<div class="actions">'
-          + (s.config_schema && s.config_schema.length ? '<button class="btn btn-ghost btn-sm" onclick="Relay.scriptConfig(' + jsArg(encodeURIComponent(s.name)) + ')">配置</button>' : "")
-          + '<button class="btn btn-ghost btn-sm" onclick="Relay.editScript(' + jsArg(encodeURIComponent(s.name)) + ')">编辑</button>'
-          + '<button class="btn btn-ghost btn-sm" onclick="Relay.runScript(' + jsArg(encodeURIComponent(s.name)) + ')">运行</button>'
-          + '<button class="btn btn-outline-danger btn-sm" onclick="Relay.delScript(' + jsArg(encodeURIComponent(s.name)) + ')">删除</button></div></div>';
+      SCRIPT_CACHE = r.data || [];
+      if (!SCRIPT_CACHE.length) {
+        box.innerHTML = emptyState("puzzle", "暂无插件", "插件放在 scripts 目录下，安装后会自动登记为可调用功能。", '<button class="btn btn-primary btn-sm" id="scriptEmptyAdd">新建插件</button>');
+        var b = $("#scriptEmptyAdd");
+        if (b) b.addEventListener("click", function () { openScriptModal(null); });
+        paintScriptTreeMap();
+        return;
+      }
+      loadScriptAppMap(function () { paintScripts(); });
+      paintScripts();
+    }).catch(function () { errorState($("#scriptList"), "puzzle", "插件列表加载失败", "网络异常，请检查服务状态。", loadScripts); });
+  }
+  // 应用名与头像来自连接池；只拉一次，插件列表即可把应用 ID 显示成人名与头像。
+  function loadScriptAppMap(cb) {
+    if (state.appNamesLoaded) { if (cb) cb(); return; }
+    api("/jiying/api/connections", { silent: true }).then(function (r) {
+      var apps = (r && r.data && r.data.apps) || [];
+      apps.forEach(function (a) {
+        var id = String(a.app_id || "");
+        if (!id) return;
+        state.appNames[id] = { name: a.name || state.appProfiles[id] && state.appProfiles[id].name || shortID(id), avatar: a.avatar_url || state.appProfiles[id] && state.appProfiles[id].avatar_url || "" };
+      });
+      state.appNamesLoaded = true;
+      if (cb) cb();
+    }).catch(function () { state.appNamesLoaded = true; if (cb) cb(); });
+  }
+  function scriptClass(s) {
+    var c = String((s && s.class) || "").trim();
+    return c || "未分类";
+  }
+  function scriptFilterText(s) {
+    var apps = (s.apps || []).map(function (id) { var a = state.appNames[id]; return (a && a.name) || id; });
+    return [s.title, s.name, s.class, s.description, (s.rules || []).join(" "), (s.platform || []).join(" "), apps.join(" ")].join(" ").toLowerCase();
+  }
+  function scriptAppChips(s) {
+    var apps = s.apps || [];
+    if (!apps.length || apps.indexOf("*") >= 0) return '<span class="app-chip app-chip-all"><span class="ico">' + ico("layers") + '</span>全部应用</span>';
+    return apps.map(function (id) {
+      var a = state.appNames[id] || {};
+      var name = a.name || shortID(id);
+      var av = a.avatar ? '<span class="app-chip-av">' + avatarInner(a.avatar, name) + "</span>" : '<span class="app-chip-av app-chip-av-fb">' + esc(name.charAt(0).toUpperCase()) + "</span>";
+      return '<span class="app-chip" title="' + esc(id) + '">' + av + esc(name) + "</span>";
+    }).join("");
+  }
+  function scriptRow(s) {
+    var lang = s.lang === "python" ? "python" : "js";
+    var meta = '<span class="badge badge-off">' + (SCRIPT_LANG_LABEL[lang] || lang) + '</span>';
+    if (s.version) meta += ' <span class="badge badge-info">v' + esc(s.version) + '</span>';
+    if (s.admin) meta += ' <span class="badge badge-warn">主控</span>';
+    var detail = [];
+    if (s.description) detail.push(esc(s.description));
+    detail.push((s.size || 0) + " B");
+    if (s.rules && s.rules.length) detail.push("规则 " + esc(s.rules.join(" / ")));
+    return '<div class="list-item plugin-row" data-name="' + esc(s.name) + '"><div class="ico li-ico">' + pluginIcon(s.icon) + '</div>'
+      + '<div class="grow"><div class="name">' + esc(s.title || s.name) + ' <span class="badge badge-off">' + esc(s.name) + '</span> ' + meta + '</div>'
+      + '<div class="desc">' + detail.join(" · ") + '</div><div class="app-chips">' + scriptAppChips(s) + "</div></div>"
+      + '<div class="actions">'
+      + (s.config_schema && s.config_schema.length ? '<button class="btn btn-ghost btn-sm" onclick="Relay.scriptConfig(' + jsArg(encodeURIComponent(s.name)) + ')">配置</button>' : "")
+      + '<button class="btn btn-ghost btn-sm" onclick="Relay.editScript(' + jsArg(encodeURIComponent(s.name)) + ')">编辑</button>'
+      + '<button class="btn btn-ghost btn-sm" onclick="Relay.runScript(' + jsArg(encodeURIComponent(s.name)) + ')">运行</button>'
+      + '<button class="btn btn-outline-danger btn-sm" onclick="Relay.delScript(' + jsArg(encodeURIComponent(s.name)) + ')">删除</button></div></div>';
+  }
+  function scriptGroups(list) {
+    var groups = {};
+    list.forEach(function (s) { var c = scriptClass(s); (groups[c] = groups[c] || []).push(s); });
+    return groups;
+  }
+  function paintScriptTreeMap() {
+    var el = $("#scriptTreeMap");
+    if (!el) return;
+    var groups = scriptGroups(SCRIPT_CACHE || []);
+    var classes = Object.keys(groups).sort(function (a, b) { return a.localeCompare(b, "zh"); });
+    var appSet = {};
+    (SCRIPT_CACHE || []).forEach(function (s) { (s.apps || []).forEach(function (id) { if (id !== "*") appSet[id] = 1; }); });
+    el.innerHTML = '<span class="ptm-node"><span class="ico">' + ico("puzzle") + "</span><b>" + (SCRIPT_CACHE || []).length + "</b> 插件</span>"
+      + '<span class="ptm-link" aria-hidden="true"></span>'
+      + '<span class="ptm-node"><span class="ico">' + ico("folder") + "</span><b>" + classes.length + "</b> 分类</span>"
+      + '<span class="ptm-link" aria-hidden="true"></span>'
+      + '<span class="ptm-node"><span class="ico">' + ico("layers") + "</span><b>" + Object.keys(appSet).length + "</b> 应用</span>";
+  }
+  function paintScripts() {
+    var box = $("#scriptList");
+    if (!box) return;
+    var kw = (($("#scriptSearch") || {}).value || "").trim().toLowerCase();
+    var list = (SCRIPT_CACHE || []).filter(function (s) { return !kw || scriptFilterText(s).indexOf(kw) >= 0; });
+    $$("#scriptViewToggle [data-sview]").forEach(function (b) { b.classList.toggle("active", b.getAttribute("data-sview") === state.scriptView); });
+    paintScriptTreeMap();
+    if (!list.length) {
+      box.innerHTML = emptyState("search", kw ? "没有匹配的插件" : "暂无插件", kw ? "换个关键词，或清空搜索查看全部插件。" : "插件放在 scripts 目录下，安装后会自动登记为可调用功能。");
+      return;
+    }
+    if (state.scriptView === "list") {
+      box.innerHTML = '<div class="list">' + list.slice().sort(function (a, b) { return scriptClass(a).localeCompare(scriptClass(b), "zh") || String(a.name).localeCompare(String(b.name)); }).map(function (s) {
+        return '<div class="plugin-flat"><span class="plugin-class-tag">' + esc(scriptClass(s)) + "</span>" + scriptRow(s) + "</div>";
       }).join("") + "</div>";
       hydrateIcons();
-    }).catch(function () { errorState($("#scriptList"), "puzzle", "插件列表加载失败", "网络异常，请检查服务状态。", loadScripts); });
+      return;
+    }
+    var groups = scriptGroups(list);
+    var classes = Object.keys(groups).sort(function (a, b) { return a.localeCompare(b, "zh"); });
+    box.innerHTML = classes.map(function (cls) {
+      var folded = state.scriptFolders[cls] === false;
+      var items = groups[cls].slice().sort(function (a, b) { return String(a.name).localeCompare(String(b.name)); });
+      return '<section class="plugin-folder' + (folded ? " folded" : "") + '" data-folder="' + esc(cls) + '">'
+        + '<button type="button" class="plugin-folder-head" aria-expanded="' + (folded ? "false" : "true") + '"><span class="pf-chevron">' + ico("chevron-down") + '</span><span class="pf-ico">' + ico("folder") + '</span><b>' + esc(cls) + '</b><span class="pf-count">' + items.length + '</span><span class="pf-line" aria-hidden="true"></span></button>'
+        + '<div class="plugin-folder-body"><div class="list">' + items.map(scriptRow).join("") + "</div></div></section>";
+    }).join("");
+    bindScriptFolders();
+    hydrateIcons();
+  }
+  function bindScriptFolders() {
+    $$("#scriptList .plugin-folder-head").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var sec = b.parentNode;
+        var cls = sec.getAttribute("data-folder");
+        var folded = !sec.classList.contains("folded");
+        sec.classList.toggle("folded", folded);
+        b.setAttribute("aria-expanded", folded ? "false" : "true");
+        state.scriptFolders[cls] = !folded;
+      });
+    });
   }
   function bindCodeEditor(el) {
     el.addEventListener("keydown", function (e) {
@@ -2365,7 +2562,9 @@
       + '<div class="grow"><div class="name">' + esc(f.name) + " " + metaBadge(kind) + " "
       + metaBadge(FEATURE_SCOPE[f.scope] || f.scope, f.scope === "public" ? "badge-info" : "badge-off") + " "
       + metaBadge(FEATURE_IDENTITY[f.identity] || f.identity, "badge-off")
+      + (f.class ? " " + metaBadge(f.class, "badge-info") : "")
       + (f.confirm ? " " + metaBadge("需确认", "badge-warn") : "") + "</div>"
+      + (f.kind === "script" ? '<div class="app-chips">' + scriptAppChips(f) + "</div>" : "")
       + '<div class="desc mono clip" title="' + esc(f.target) + '">' + esc(f.target || "-") + "</div></div>"
       + '<div class="actions">' + featureSwitch(f)
       + (f.kind === "script" ? '<button class="btn btn-ghost btn-sm" onclick="Relay.editPluginOf(' + jsArg(encodeURIComponent(f.target || "")) + ')">编辑插件</button>' : "")
@@ -2373,6 +2572,7 @@
       + '<button class="btn btn-outline-danger btn-sm" onclick="Relay.delFeature(decodeURIComponent(' + jsArg(enc) + '), ' + jsArg(f.kind || "") + ')">删除</button></div></div>';
   }
   function loadFeatures() {
+    loadScriptAppMap(function () { if (state.view === "features") paintFeatureList(); });
     api("/jiying/api/features").then(function (r) {
       var box = $("#featureList");
       if (!box) return;
@@ -2384,10 +2584,18 @@
         if (b) b.addEventListener("click", openFeatureModal);
         return;
       }
-      list.sort(function (a, b) { return String(a.kind).localeCompare(String(b.kind)) || String(a.name).localeCompare(String(b.name), "zh"); });
-      box.innerHTML = '<div class="list">' + list.map(featureRow).join("") + "</div>";
-      hydrateIcons();
+      state.featureRows = list;
+      paintFeatureList();
     }).catch(function () { errorState($("#featureList"), "toggles", "功能列表加载失败", "网络异常，请检查服务状态。", loadFeatures); });
+  }
+  function paintFeatureList() {
+    var box = $("#featureList");
+    if (!box || !state.featureRows) return;
+    var list = state.featureRows.slice().sort(function (a, b) {
+      return String(a.class || "").localeCompare(String(b.class || ""), "zh") || String(a.kind).localeCompare(String(b.kind)) || String(a.name).localeCompare(String(b.name), "zh");
+    });
+    box.innerHTML = '<div class="list">' + list.map(featureRow).join("") + "</div>";
+    hydrateIcons();
   }
   function setFeature(name, on) {
     api("/jiying/api/feature/toggle", { method: "POST", form: { name: name, enabled: on ? "true" : "false" } }).then(function (r) {
@@ -3963,6 +4171,130 @@
   var POLL_MS = { home: 10000, features: 10000, observe: 5000, executions: 8000 };
 
   /* ---------- 启动 ---------- */
+  /* ---------- 吉祥物挂件 ---------- */
+  // 素材为 18 帧交付动画 + 8 方向像素切片。
+  // 默认开启，关闭后只留一个可恢复的小标签；偏好写入本机，不经过服务端。
+  var MASCOT_KEY = "relay-mascot";
+  var MASCOT_BASE = "/assets/mascot/";
+  var MASCOT_SLICES = ["front", "front_right", "right", "back_right", "back", "back_left", "left", "front_left"];
+  var mascotState = { ready: false, acting: false, timer: null, ws: null, acct: null };
+  function mascotEnabled() {
+    try { return localStorage.getItem(MASCOT_KEY) !== "0"; } catch (e) { return true; }
+  }
+  function setMascotEnabled(on) {
+    try { localStorage.setItem(MASCOT_KEY, on ? "1" : "0"); } catch (e) { /* 忽略存储失败 */ }
+  }
+  function mascotT(zh, en) { return LANG === "en" ? en : zh; }
+  // 点击挂件时轮换的短句，避免每次都同一句。
+  var MASCOT_LINES = [
+    ["手机给你，验收一下", "Here you go. Take a look"],
+    ["活儿干完了，随时喊我", "All done. Call me anytime"],
+    ["消息我盯着，放心", "I'm watching the messages"],
+    ["插件装好了，试试看", "Plugins are ready. Try them"],
+    ["出错别慌，我在这儿", "Don't panic. I'm here"],
+    ["通道畅通，消息不丢", "Channel is clear. No lost messages"],
+    ["今天也要顺利交付", "Smooth delivery today"]
+  ];
+  var mascotLineIndex = 0;
+  function mascotNextLine() {
+    var line = MASCOT_LINES[mascotLineIndex % MASCOT_LINES.length];
+    mascotLineIndex++;
+    return mascotT(line[0], line[1]);
+  }
+  function mascotSlice(dir) {
+    var img = $("#duduImg");
+    if (!img || !dir || mascotState.acting) return;
+    img.src = MASCOT_BASE + "slices/" + dir + ".webp";
+  }
+  function mascotShow(on) {
+    var box = $("#dudu"), restore = $("#duduRestore");
+    if (box) box.hidden = !on;
+    if (restore) restore.hidden = on;
+    setMascotEnabled(on);
+    if (on) setTimeout(function () { mascotPlay(mascotT("我在这儿，有事叫我", "Right here if you need me"), 3800); }, 220);
+  }
+  // 播放交付动画：GIF 重新挂载以从头播放，结束后回到正面静态切片。
+  function mascotPlay(text, ms) {
+    if (!mascotState.ready || !mascotEnabled()) return;
+    var box = $("#dudu"), img = $("#duduImg"), bubble = $("#duduBubble");
+    if (!box || !img) return;
+    mascotState.acting = true;
+    box.classList.add("acting");
+    if (bubble) {
+      bubble.textContent = text || mascotT("交给我", "On it");
+      bubble.hidden = false;
+      bubble.classList.remove("pop");
+      void bubble.offsetWidth;
+      bubble.classList.add("pop");
+    }
+    img.src = MASCOT_BASE + "dudu-take-phone.gif?t=" + Date.now();
+    clearTimeout(mascotState.timer);
+    mascotState.timer = setTimeout(function () {
+      mascotState.acting = false;
+      box.classList.remove("acting");
+      img.src = MASCOT_BASE + "slices/front.webp";
+      if (bubble) bubble.hidden = true;
+    }, ms || 7200);
+  }
+  function mascotReact(kind, msg) {
+    if (!mascotState.ready || kind === "err" || !mascotEnabled()) return;
+    var line = mascotT("搞定，交给我", "Done. Leave it to me");
+    if (/连接|接入|通道/.test(msg || "")) line = mascotT("通道已接通", "Channel connected");
+    else if (/保存|创建|安装|更新|成功/.test(msg || "")) line = mascotT("已经办好了", "All set");
+    else if (/删除|停用|撤销/.test(msg || "")) line = mascotT("清理完毕", "Cleaned up");
+    mascotPlay(line, 6800);
+  }
+  function installMascot() {
+    if (document.getElementById("dudu")) return;
+    var wrap = document.createElement("div");
+    wrap.id = "dudu";
+    wrap.className = "dudu";
+    wrap.setAttribute("data-no-i18n", "");
+    wrap.innerHTML = '<div class="dudu-bubble" id="duduBubble" role="status" aria-live="polite" hidden></div>'
+      + '<div class="dudu-card">'
+      + '<button type="button" class="dudu-stage" id="duduStage" title="' + esc(mascotT("点一下看我表演", "Click for a trick")) + '" aria-label="' + esc(mascotT("点击播放交付动画", "Play the handoff animation")) + '"><img id="duduImg" src="' + MASCOT_BASE + 'slices/front.webp" alt="' + esc(mascotT("吉祥物", "Mascot")) + '" draggable="false"></button>'
+      + '<div class="dudu-bar"><span class="dudu-dot" aria-hidden="true"></span>'
+      + '<button type="button" class="dudu-x" id="duduClose" title="' + esc(mascotT("关闭挂件", "Hide mascot")) + '" aria-label="' + esc(mascotT("关闭挂件", "Hide mascot")) + '">×</button></div>'
+      + '</div>';
+    document.body.appendChild(wrap);
+    var restore = document.createElement("button");
+    restore.type = "button";
+    restore.id = "duduRestore";
+    restore.className = "dudu-restore";
+    restore.hidden = true;
+    restore.title = mascotT("叫回挂件", "Bring mascot back");
+    restore.setAttribute("aria-label", mascotT("显示挂件", "Show mascot"));
+    restore.innerHTML = '<img src="' + MASCOT_BASE + 'slices/front.webp" alt="">';
+    document.body.appendChild(restore);
+    mascotState.ready = true;
+    var stage = $("#duduStage");
+    if (stage) {
+      stage.addEventListener("click", function () { mascotPlay(mascotNextLine(), 7200); });
+      stage.addEventListener("pointermove", function (e) {
+        if (mascotState.acting || window.innerWidth < 760) return;
+        var r = stage.getBoundingClientRect();
+        var dx = e.clientX - (r.left + r.width / 2);
+        var dy = e.clientY - (r.top + r.height / 2);
+        var ang = (Math.atan2(dy, dx) * 180 / Math.PI + 360 + 22.5) % 360;
+        mascotSlice(MASCOT_SLICES[Math.floor(ang / 45) % 8]);
+      });
+      stage.addEventListener("pointerleave", function () { mascotSlice("front"); });
+    }
+    var close = $("#duduClose");
+    if (close) close.addEventListener("click", function () { mascotShow(false); });
+    restore.addEventListener("click", function () { mascotShow(true); });
+    // 预载 8 个方向，鼠标环绕时切换不闪白。
+    MASCOT_SLICES.forEach(function (d) { var im = new Image(); im.src = MASCOT_BASE + "slices/" + d + ".webp"; });
+    if (!mascotEnabled()) mascotShow(false);
+    else {
+      wrap.hidden = false;
+      restore.hidden = true;
+      setTimeout(function () {
+        if (location.pathname.indexOf("login.html") >= 0) mascotPlay(mascotT("登录后，活都交给我", "Sign in and leave the work to me"), 7200);
+      }, 900);
+    }
+  }
+
   function init() {
     installErrorSink();
     installTheme();
@@ -3975,6 +4307,7 @@
     hydrateIcons();
     var lb = $("#langBtn");
     if (lb) lb.addEventListener("click", toggleLang);
+    installMascot();
     if (location.pathname.endsWith("/login.html") || location.pathname === "/login.html") return;
     hydrateIcons();
     renderNav();
@@ -4015,6 +4348,7 @@
         if (location.pathname.indexOf("login.html") < 0) location.href = "login.html";
         return;
       }
+      applyCachedProfile();
       loadConnectStatus();
       // 顶栏显示当前角色等级，便于用户判断自己可执行的操作范围。
       api("/jiying/api/roles", { silent: true }).then(function (rr) {
@@ -4028,7 +4362,9 @@
           else if (state.view === "ai" && !roleAllowed("ops")) renderAI();
         }
       });
-      switchView(defaultViewId());
+      var wanted = savedViewId();
+      var target = wanted && NAV.filter(function (x) { return x.id === wanted; })[0];
+      switchView(target && roleAllowed(target.minRole) ? wanted : defaultViewId());
       setInterval(function () { loadConnectStatus(); }, 15000);
     }).catch(function () { location.href = "login.html"; });
   }

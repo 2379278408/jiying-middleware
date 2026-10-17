@@ -1,0 +1,45 @@
+{
+  "type": "character",
+  "character_id": "cae6cff0-aab2-4bc9-931d-839513cc37cb",
+  "task_id": "cae6cff0-aab2-4bc9-931d-839513cc37cb",
+  "character_name": "嘟嘟",
+  "art_style": "pixel",
+  "prompt": "## 角色：嘟嘟（复古像素风全身角色）\n\n### 整体定位\n嘟嘟是一只毛绒玩偶感的黑猫小怪，复古像素游戏角色，Q 版三头身，圆润软糯，气质呆萌可爱、无害、想让人抱一抱。全身直立，适合后续制作待机与行走动画。\n\n### 体型轮廓\n三头身，头大身小，圆头圆身，四肢短粗，脚掌圆厚。剪影圆润饱满，无尖锐棱角。脚底两个平行着地点作为稳定锚点，身体重心居中，双腿对称承重。\n\n### 面部与发型\n脸为纯黑绒毛质感，两只大号椭圆绿色眼睛（亮绿瞳孔带高光，像素化点状反光），脸颊两侧粉色椭圆腮红斑点，无可见嘴部或仅有极小的白色像素孔鼻。表情呆萌地向前看，眼睛正对镜头。\n\n### 服装装备\n- 头部：虎纹连帽，黑白条纹绒毛，罩住头顶与两侧，帽顶露出一小撮蓬松棕色卷毛，头顶两侧有小圆耳。\n- 上身：橙黄色针织连帽衫，短袖口，前襟有系带细节，衣物质感厚实毛绒。\n- 胸前：黄色圆形肚兜/围兜，外围一圈白色蓬松毛边，位于胸口正中。\n- 无武器；可有小零食袋作为可选道具，但默认不显示，保持双手干净。\n\n### 姿势\n全身正面略偏三分之二视角，双脚站稳，双臂自然垂在身侧，手掌松开向前，尾巴从身后侧边露出一点点并微微上翘。\n\n### 色彩重点\n主色：黑（绒毛）＋虎纹黑白条纹＋橙黄（衣服）＋嫩黄（肚兜）。辅色：亮绿（眼睛）、粉色（腮红）、少量棕（头顶卷毛）。明暗分块清晰，像素色板限定在 16-24 色，边缘像素整齐不模糊。\n\n### 画面要求\n复古像素艺术，低分辨率像素颗粒清晰，无抗锯齿与渐变模糊，纯色透明背景。角色比例稳定、身体中心稳定、脚底锚点稳定，可用于游戏动画帧。\n\n### 限制\n不要场景背景，不要地面与阴影投影，不要额外角色或宠物，不要文字、水印、UI、边框与签名。",
+  "created_at": "2026-10-17T12:17:51.359214Z",
+  "source_image": "source/source.png",
+  "preview_gif": "preview.gif",
+  "slices": [
+    {
+      "direction": "front",
+      "file": "slices/front.webp"
+    },
+    {
+      "direction": "front_right",
+      "file": "slices/front_right.webp"
+    },
+    {
+      "direction": "right",
+      "file": "slices/right.webp"
+    },
+    {
+      "direction": "back_right",
+      "file": "slices/back_right.webp"
+    },
+    {
+      "direction": "back",
+      "file": "slices/back.webp"
+    },
+    {
+      "direction": "back_left",
+      "file": "slices/back_left.webp"
+    },
+    {
+      "direction": "left",
+      "file": "slices/left.webp"
+    },
+    {
+      "direction": "front_left",
+      "file": "slices/front_left.webp"
+    }
+  ]
+}
