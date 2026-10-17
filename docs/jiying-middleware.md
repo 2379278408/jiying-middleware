@@ -209,3 +209,41 @@
 - 状态：chip / badge 统一为直角 + 前置状态点，颜色由语义色按 `color-mix` 生成浅底与描边。
 - 交互：保留 `/` 聚焦菜单筛选，新增 `Ctrl/Cmd+K`；窄栏可收起，860px 以下切换为抽屉并带遮罩。
 - 无障碍：保留 `prefers-reduced-motion` 关闭入场动画，所有可聚焦控件使用 `:focus-visible` 描边。
+
+## 当前实现补充（2026-10-17）
+
+### 执行记录与定时任务
+
+- 执行账本：`core/executions.go` 记录定时、手动与流程执行，内存保留最近 500 条，并异步单槽落盘到 `executions.json`（权限 `0600`，临时文件 + rename）；记录字段包含 `id` / `kind` / `name` / `command` / `status` / `started_at` / `finished_at` / `duration_ms` / `owner` / `trace_id` / `detail` / `error`。状态取 `success` / `failed` / `timeout` / `skipped` / `running`。
+- 查询接口：`GET /jiying/api/executions?kind=&status=&name=&limit=`，按类型、状态与名称过滤；执行详情可在控制台打开并跳转运行日志按 `trace_id` 查找。
+- 定时执行：`runCronCmd` 按任务 `owner_role` / `owner` 解析执行身份，写入开始与结束记录，并真实回写 `last_run` / `last_success` / `last_status` / `last_error` / `run_count` / `fail_count`；连续失败 3 次自动停用任务（`status=false`），panic 会被捕获并记为失败。
+- 下次运行：`GET /jiying/api/crons` 按 cron 表达式计算并返回 `next_run_at`，控制台直接展示；`POST /jiying/api/cron/run` 可立即触发一次，执行异步进行，结果进入执行记录。
+- 命令格式：定时任务接受纯系统命令名，或 JSON 功能命令 `{"type":"feature","feature":"功能名","args":"参数","conversation_id":"会话 ID"}`；`type=command` 可显式包装系统命令。功能模式会校验功能存在与 `conversation_id` 合法性，执行超时 2 分钟。系统命令若标记 `Admin`，仅 `system` / 主人 / `admin` 可运行，避免通过定时任务提权。
+
+### 账号会话持久化与健康
+
+- 登录 token 按邮箱加密落盘到 `user_sessions.json`（复用 `sealSecret` / `openSecret`，`0600`，临时文件 + rename）；重启后自动恢复，无需重复验证码。
+- 账号健康状态为 `valid` / `expired` / `unknown` / `unconfigured`，记录最近成功、检查时间与原因；启动时恢复并每小时调用 `GET /api/client/me` 检查一次。网络错误只标记 `unknown`，仅 401 才判定失效。
+- 接口：`GET /jiying/api/connect/account/health` 读取快照，`POST /jiying/api/connect/account/health/check` 主动检查；`connect/status` 的 `account.health` 同步返回，并带 `code_login` 标识验证码账号。
+- 失效处理：`UserCall` 遇到 `CodeLogin` 返回 `errAccountNeedsCode`，不再静默降级；登录成功即保存 token，401 时清除落盘 token。验证码账号不会自动登录，切号优先使用已落盘 token。
+
+### 统一发送与身份
+
+- `POST /jiying/api/send/unified` 统一发送文本，参数 `conversation_id` / `text` / `identity`（`auto` / `user` / `app`）/ `reply_to` / `dry_run`。`auto` 优先应用通道，探测失败直接报错，不默认降级为用户身份。
+- `GET /jiying/api/conversation/capabilities?conversation_id=` 返回 `can_send_as_user` / `can_send_as_app` / `reason`，控制台据此禁用不可用身份并展示原因。
+- 用户身份发送走 `POST /api/client/conversations/{id}/messages`，请求体为 `{client_message_id, body:{type:"text",content}}`；应用身份走既有应用通道。`dry_run=true` 只解析身份与校验参数，不发送、不计数、不写消息，仅落一条 `message.dry_run` 审计。
+
+### 控制台面板（2026-10-17）
+
+- 新增「执行记录」页：按类型 / 状态 / 名称过滤，展示开始时间、类型、名称、状态、耗时与摘要；点击行打开详情，可复制字段并跳转运行日志。定时任务页的「记录」按钮会带上任务名跳转并自动筛选。
+- 定时任务页改版：展示下次运行、上次结果（含错误摘要）、运行 / 失败次数与启停状态；支持立即运行、查看记录、启停与删除。新建弹窗可选「已启用功能」或「系统命令」，功能模式提供功能名、参数与会话 ID，并实时预览最终命令 JSON；创建失败保留已填内容。
+- 接入页新增账号会话卡片：展示 `valid` / `expired` / `unknown` / `unconfigured`、最近成功与检查时间，提供「立即检查」「重新登录」「退出账号」；验证码账号重新登录会切到验证码页签。
+- 消息收发页新增发送身份选择（自动 / 应用 / 用户）与「预演」：选中会话后加载可用身份，不可用选项置灰并显示原因；预演弹窗展示会话、解析身份与内容，不产生实际消息。
+- 英文模式覆盖以上新增页面与弹窗；执行摘要、账号健康与身份原因等动态文案通过正则规则翻译，用户数据（任务名、功能名、错误原文）保持原样。
+
+### 运行日志查看器（2026-10-17）
+
+- 结构化解析：按 `[[ 时间 ] [ 级别 ] [ 来源 ] 消息]` 拆分为行号、时间、级别、来源与正文；gin access 行进一步拆出方法、路径、状态码、耗时与 `trace=`，状态码按 2xx / 3xx / 4xx / 5xx 着色。
+- 过滤与检索：级别 chips（全部 / 异常 / 错误 / 警告 / 信息 / 调试）带计数，可与关键字搜索叠加；命中关键字用 `<mark>` 高亮，点击 access 行的 trace 按钮按 `trace_id` 反查并保留当前级别筛选。
+- 交互：支持自动换行（本机记忆 `relay-log-wrap`）、手动刷新与自动刷新切换、双击行复制原始文本、导出当前筛选结果；轮询刷新时保持滚动位置，贴底时自动跟随，并提供「回到底部」悬浮按钮。
+- 状态与无障碍：加载骨架、空态、错误态均可重试；工具栏 meta 显示匹配行数与最后刷新时间；窄屏下工具栏与行内字段自动换行，日期、行数与筛选在 390px 宽度仍可用。

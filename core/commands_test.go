@@ -3,27 +3,27 @@ package core
 import "testing"
 
 func TestAddCommandDedup(t *testing.T) {
-	before := len(Functions)
-	Functions = Functions[:0]
+	backup := Functions
+	Functions = nil
+	t.Cleanup(func() { Functions = backup })
 	_ = AddCommand(5, &Function{Title: "命令A", Handle: "icmd_a", Priority: 9})
 	_ = AddCommand(5, &Function{Title: "命令B", Handle: "icmd_b", Priority: 3})
 	_ = AddCommand(5, &Function{Title: "命令A", Handle: "icmd_a2", Priority: 9})
-	if len(Functions) != before+2 {
-		t.Fatalf("重复标题应被跳过，实际 len=%d 期望 %d", len(Functions), before+2)
+	if len(Functions) != 2 {
+		t.Fatalf("重复标题应被跳过，实际 len=%d 期望 2", len(Functions))
 	}
-	Functions = Functions[:before]
 }
 
 func TestAddCommandPriorityOrder(t *testing.T) {
-	before := len(Functions)
-	Functions = Functions[:0]
+	backup := Functions
+	Functions = nil
+	t.Cleanup(func() { Functions = backup })
 	_ = AddCommand(0, &Function{Title: "低", Priority: 1})
 	_ = AddCommand(0, &Function{Title: "高", Priority: 99})
 	_ = AddCommand(0, &Function{Title: "中", Priority: 50})
 	if Functions[0].Title != "高" || Functions[2].Title != "低" {
 		t.Fatalf("优先级排序错误: %v,%v,%v", Functions[0].Title, Functions[1].Title, Functions[2].Title)
 	}
-	Functions = Functions[:before]
 }
 
 func TestCronCmdContainer(t *testing.T) {

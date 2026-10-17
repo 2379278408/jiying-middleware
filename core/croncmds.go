@@ -39,6 +39,12 @@ type CronCmd struct {
 
 	IsOnce          bool   `json:"is_once,omitempty"`
 	LastRunningTime string `json:"last_running_time,omitempty"`
+	LastStatus      string `json:"last_status,omitempty"`
+	LastError       string `json:"last_error,omitempty"`
+	NextRunAt       string `json:"next_run_at,omitempty"`
+	OwnerRole       string `json:"owner_role,omitempty"`
+	RunCount        int    `json:"run_count"`
+	FailCount       int    `json:"fail_count"`
 	CronEntityId    cron.EntryID
 }
 
@@ -229,31 +235,70 @@ func (c *cronCmdContainer) reportAll() {
 }
 
 func runCronCmd(cmd *CronCmd) {
+	if cmd == nil {
+		return
+	}
+	owner := strings.TrimSpace(cmd.Owner)
+	execUser := "system"
+	if cmd.OwnerRole == RoleOps || cmd.OwnerRole == RoleReadonly || (cmd.OwnerRole == "" && owner != "" && owner != "system") {
+		execUser = owner
+	}
+	execID := beginExecution(executionKindCron, cmd.Name, cmd.Command, owner)
+	status, detail, errText := executionSuccess, "", ""
 	defer func() {
 		if r := recover(); r != nil {
+			status = executionFailed
+			errText = fmt.Sprintf("执行异常: %v", r)
 			GetMyLog().Warn("定时任务 %s 执行异常: %v", cmd.ID, r)
+		}
+		cmd.LastRun = time.Now().Format("2006-01-02 15:04:05")
+		cmd.RunCount++
+		if status == executionSuccess {
+			cmd.LastSuccess = cmd.LastRun
+			cmd.LastStatus = executionSuccess
+			cmd.LastError = ""
+			cmd.FailCount = 0
+		} else {
+			cmd.FailCount++
+			cmd.LastStatus = executionFailed
+			cmd.LastError = truncateText(errText, 300)
+			if cmd.FailCount >= 3 {
+				cmd.Status = false
+				cmd.LastError = "连续失败 3 次，已暂停: " + cmd.LastError
+			}
+		}
+		ccs.save(cmd)
+		finishExecution(execID, status, detail, errText)
+		if status != executionSuccess {
+			GetMyLog().Warn("定时任务 %s 执行失败: %s", cmd.Name, errText)
 		}
 	}()
 	cmd.LastRunningTime = time.Now().Format("2006-01-02 15:04:05")
 	if cmd.IsOnce {
 		defer ccs.cleanOnceTasks()
 	}
-	if cmd.Command != "" {
-		GetMyLog().Info("定时任务 %s 执行: %s", cmd.Name, cmd.Command)
-		dispatchLocalCommand(cmd.Command)
+	if strings.TrimSpace(cmd.Command) == "" {
+		status = executionSkipped
+		return
 	}
-	cmd.LastRun = time.Now().Format("2006-01-02 15:04:05")
-	cmd.LastSuccess = time.Now().Format("2006-01-02 15:04:05")
-	ccs.save(cmd)
+	GetMyLog().Info("定时任务 %s 执行: %s", cmd.Name, cmd.Command)
+	out, err := dispatchLocalCommandFor(cmd.Command, execUser)
+	detail = out
+	if err != nil {
+		status = executionFailed
+		errText = err.Error()
+		return
+	}
 }
 
 func addCronCmd(label, cronSpec, command string) {
 	ccs.add(&CronCmd{
-		Name:    label,
-		Cron:    cronSpec,
-		Command: command,
-		Status:  true,
-		Type:    []string{"system"},
+		Name:      label,
+		Cron:      cronSpec,
+		Command:   command,
+		Status:    true,
+		Type:      []string{"system"},
+		OwnerRole: RoleMaster,
 	})
 }
 
@@ -269,14 +314,34 @@ func isValidCronSpec(spec string) bool {
 func CronCmdsSnapshot() []*CronCmd {
 	ccs.RLock()
 	defer ccs.RUnlock()
+	now := time.Now()
 	out := make([]*CronCmd, 0, len(ccs.Pts))
 	for _, p := range ccs.Pts {
 		if p == nil {
 			continue
 		}
-		out = append(out, p)
+		cp := *p
+		if cp.Status {
+			cp.NextRunAt = nextCronRun(cp.Cron, now)
+		} else {
+			cp.NextRunAt = ""
+		}
+		out = append(out, &cp)
 	}
 	return out
+}
+
+// nextCronRun 计算下一次触发时间；表达式无效或已无后续时返回空串。
+func nextCronRun(spec string, now time.Time) string {
+	sched, err := cronSpecParser.Parse(strings.TrimSpace(spec))
+	if err != nil {
+		return ""
+	}
+	next := sched.Next(now)
+	if next.IsZero() {
+		return ""
+	}
+	return next.Format("2006-01-02 15:04:05")
 }
 
 func RunCronCmdsByIds(ids []string) int {

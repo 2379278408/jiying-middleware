@@ -284,7 +284,7 @@ func cmdCronAdd() {
 	chat := fmt.Sprint(s.GetParentID())
 	id := ccs.add(&CronCmd{
 		Name: name, Cron: cronSpec, Command: command, Status: true,
-		GroupManager: []string{chat},
+		GroupManager: []string{chat}, OwnerRole: RoleMaster, Owner: "system",
 	})
 	ReplyCurrent("已增加定时 " + id + " " + name)
 }

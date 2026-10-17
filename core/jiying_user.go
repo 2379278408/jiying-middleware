@@ -111,6 +111,7 @@ func loginAccount(ctx context.Context, cfg UserLogin, code bool) error {
 	userSession.token = token
 	userSession.client = client
 	userSession.Unlock()
+	saveUserToken(cfg.Email, token)
 	return nil
 }
 
@@ -169,6 +170,10 @@ func RequestLoginCode(ctx context.Context, base, email string) (int, int, error)
 
 func UserCall(ctx context.Context, method, path string, body any) ([]byte, error) {
 	if !userLoggedIn() {
+		account := CurrentAccountConn()
+		if account.CodeLogin {
+			return nil, errAccountNeedsCode
+		}
 		cfg := CurrentAccountConfig()
 		if err := loginUser(ctx, cfg); err != nil {
 			return nil, err
@@ -209,8 +214,10 @@ func UserCall(ctx context.Context, method, path string, body any) ([]byte, error
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
 		userSession.Lock()
+		email := userSession.email
 		userSession.token = ""
 		userSession.Unlock()
+		clearUserToken(email)
 		return out, fmt.Errorf("账号会话失效")
 	}
 	if resp.StatusCode >= 300 {
@@ -220,14 +227,21 @@ func UserCall(ctx context.Context, method, path string, body any) ([]byte, error
 }
 
 func initUserChannel() {
-	cfg := CurrentAccountConfig()
-	if !cfg.configured() {
+	account := CurrentAccountConn()
+	if !account.configured() {
+		return
+	}
+	if userLoggedIn() {
+		return
+	}
+	if account.CodeLogin {
+		// 验证码账号不能在启动时自动登录，等待面板重新获取验证码。
 		return
 	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
-		if err := loginUser(ctx, cfg); err != nil {
+		if err := loginUser(ctx, CurrentAccountConfig()); err != nil {
 			GetMyLog().Warn("即应账号登录失败")
 			return
 		}

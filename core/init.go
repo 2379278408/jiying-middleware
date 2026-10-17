@@ -15,6 +15,7 @@ func InitCore() {
 	initToHandleMessage()
 	initDataHome()
 	initSys()
+	initExecutions()
 	InitGoja()
 	initPluginsCmd()
 	go initWatcher()

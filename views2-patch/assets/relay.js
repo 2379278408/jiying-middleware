@@ -23,6 +23,7 @@
     "nav.features": { zh: "功能管理", en: "Features" },
     "nav.agent": { zh: "Agent 工作台", en: "Agent" },
     "nav.cron": { zh: "定时任务", en: "Schedules" },
+    "nav.executions": { zh: "执行记录", en: "Runs" },
     "nav.tasks": { zh: "任务队列", en: "Task queue" },
     "nav.audit": { zh: "审计日志", en: "Audit log" },
     "nav.observe": { zh: "运行观测", en: "Observability" },
@@ -41,6 +42,7 @@
     "lang.toggle": { zh: "切换语言", en: "Switch language" },
     "logout.title": { zh: "退出登录", en: "Sign out" },
     "nav.toggle.title": { zh: "收起菜单", en: "Toggle menu" },
+    "nav.close.title": { zh: "关闭菜单", en: "Close menu" },
     "nav.custom.hint": { zh: "调整顺序、置顶或隐藏侧栏菜单，设置保存在本机浏览器；新增菜单会自动加入。", en: "Reorder, pin or hide sidebar items. Changes are stored in this browser; new items are added automatically." },
     "nav.custom.reset": { zh: "恢复默认", en: "Reset" },
     "nav.custom.done": { zh: "完成", en: "Done" },
@@ -70,6 +72,738 @@
     "login.parse": { zh: "服务返回了无法解析的响应", en: "Unreadable response from server" },
     "login.title": { zh: "登录 · Relay 控制台", en: "Sign in · Relay Console" }
   };
+
+  // 英文模式下的整页文案表：渲染完成后按文本节点精确替换，用户数据与代码块不参与。
+  var EN_TEXT = {
+    "网络异常，请检查服务状态。": "Network error. Check the service status.",
+    "权限不足": "Insufficient permission",
+    "运行失败": "Run failed",
+    "已删除": "Deleted",
+    "未登录": "Not signed in",
+    "请稍后重试。": "Please try again later.",
+    "已安装": "Installed",
+    "删除": "Delete",
+    "任务队列": "Task queue",
+    "已连接": "Connected",
+    "安装失败": "Install failed",
+    "删除失败": "Delete failed",
+    "插件": "Plugins",
+    "登录失败": "Sign-in failed",
+    "会话": "Conversation",
+    "加载失败": "Load failed",
+    "已登录": "Signed in",
+    "参数": "Params",
+    "运行中…": "Running…",
+    "匹配": "matched",
+    "置顶": "Pin",
+    "消息收发": "Messages",
+    "定时任务": "Schedules",
+    "执行记录": "Runs",
+    "按级别、追踪号与关键字检索；点击 trace 可反向筛选整条链路": "Filter by level, trace ID or keyword; click a trace to pivot across the request chain",
+    "导出当前视图": "Export view",
+    "日期": "Date",
+    "行数": "Lines",
+    "搜索": "Search",
+    "关键字 / trace / 路径": "Keyword / trace / path",
+    "自动换行": "Wrap lines",
+    "全部": "All",
+    "异常": "Issues",
+    "错误": "Errors",
+    "警告": "Warnings",
+    "信息": "Info",
+    "调试": "Debug",
+    "回到底部": "Jump to latest",
+    "双击日志行可复制 · 点击 trace 可按追踪号筛选": "Double-click a row to copy; click a trace to filter by it",
+    "按此追踪号筛选": "Filter by this trace ID",
+    "当日暂无日志": "No logs for this date",
+    "无匹配日志": "No matching logs",
+    "调整级别或关键字后重试。": "Adjust the level or keyword and try again.",
+    "切换日期或刷新后查看。": "Switch the date or refresh to view logs.",
+    "日志加载失败": "Failed to load logs",
+    "加载失败": "Load failed",
+    "加载中…": "Loading…",
+    "重试": "Retry",
+    "已复制该行日志": "Log line copied",
+    "复制失败，请手动选择文本": "Copy failed. Select the text manually.",
+    "已导出当前视图": "Exported current view",
+
+    "记录": "Runs",
+    "执行记录加载失败": "Failed to load runs",
+    "暂无执行记录": "No runs yet",
+    "定时任务执行或手动触发后会在这里留下结果。": "Scheduled or manual runs will appear here.",
+    "新建定时后，中间件会按 cron 表达式自动执行，并记录每次结果。": "New schedules run automatically on their cron expression; every result is recorded.",
+    "开始时间": "Started",
+    "类型": "Type",
+    "耗时": "Duration",
+    "摘要": "Summary",
+    "全部类型": "All types",
+    "全部状态": "All statuses",
+    "定时": "Scheduled",
+    "手动": "Manual",
+    "流程": "Flow",
+    "成功": "Success",
+    "失败": "Failed",
+    "超时": "Timeout",
+    "执行中": "Running",
+    "跳过": "Skipped",
+    "结束": "Finished",
+    "执行者": "Owner",
+    "追踪号": "Trace ID",
+    "错误": "Error",
+    "在日志中查找": "Find in logs",
+    "执行详情": "Run details",
+    "筛选名称 / 命令": "Filter name / command",
+    "按类型筛选": "Filter by type",
+    "按状态筛选": "Filter by status",
+    "定时任务与手动触发的执行结果、耗时和追踪号": "Results, duration and trace IDs for scheduled and manual runs",
+    "定时任务与手动触发后会在这里留下结果。": "Scheduled and manual runs leave their results here.",
+    "运行一次": "Run now",
+    "未运行": "Not run",
+    "下次运行": "Next run",
+    "上次结果": "Last result",
+    "运行 / 失败": "Runs / fails",
+    "调度": "Schedule",
+    "按 cron 表达式执行系统命令或已启用功能，结果写入执行记录": "Run system commands or enabled features on a cron schedule; results are recorded under Runs",
+    "连续失败 3 次会自动停用该定时，修正后可手动启用。": "Three consecutive failures pause the schedule automatically; re-enable it after fixing the cause.",
+    "立即执行一次": "Run once now",
+    "查看该任务执行记录": "View runs for this schedule",
+    "每日额度重置": "Daily quota reset",
+    "已启用功能": "Enabled feature",
+    "系统命令": "System command",
+    "功能名": "Feature name",
+    "选择或输入已启用功能": "Pick or type an enabled feature",
+    "功能参数（可选）": "Feature args (optional)",
+    "会话 ID（可选）": "Conversation ID (optional)",
+    "功能需要会话上下文时填写": "Fill when the feature needs conversation context",
+    "管理员命令仅主人角色可创建与运行。": "Admin commands can only be created and run by the master role.",
+    "请填写名称、表达式与执行内容": "Fill in the name, schedule and command",
+    "已触发执行，稍后可在执行记录查看结果": "Run triggered. Check Runs for the result.",
+    "触发失败": "Failed to trigger",
+    "秒 分 时 日 月 周，例如 0 5 * * * * 表示每小时第 5 分钟。": "Second minute hour day month weekday, e.g. 0 5 * * * * means five minutes past every hour.",
+    "该任务暂无执行记录": "No runs for this schedule yet",
+    "账号会话": "Account session",
+    "会话有效": "Session valid",
+    "会话已失效": "Session expired",
+    "状态未知": "Status unknown",
+    "未配置账号": "No account configured",
+    "立即检查": "Check now",
+    "重新登录": "Sign in again",
+    "退出账号": "Sign out account",
+    "账号会话：": "Account session: ",
+    "最近成功": "Last success",
+    "检查于": "Checked",
+    "该账号使用邮箱验证码登录": "This account signs in with an email code",
+    "点击「立即检查」确认会话状态": "Click \"Check now\" to verify the session",
+    "配置账号后可检查登录会话": "Configure an account to check its session",
+    "退出后账号通道与自动发送将停止，确认退出？": "Signing out stops the account channel and automatic sending. Continue?",
+    "已退出账号": "Account signed out",
+    "退出失败": "Sign-out failed",
+    "请重新获取验证码并登录": "Request a new code and sign in",
+    "请重新输入密码并登录": "Enter the password again to sign in",
+    "正在检查可用发送身份…": "Checking available send identities…",
+    "选择会话后显示可用发送身份": "Pick a conversation to see available send identities",
+    "身份 · 自动": "Identity · Auto",
+    "身份 · 应用": "Identity · App",
+    "身份 · 用户": "Identity · User",
+    "预演": "Preview",
+    "可发送身份：": "Send as: ",
+    "当前会话没有可用发送身份 · ": "No send identity available for this conversation · ",
+    "可用身份检查失败，发送时会再次校验": "Identity check failed; it will be rechecked on send",
+    "发送预演": "Send preview",
+    "解析身份": "Resolved identity",
+    "知道了": "Got it",
+    "未产生实际发送，也不会写入消息记录。": "Nothing was sent and no message was recorded.",
+    "用户": "User",
+    "网络异常，请稍后重试。": "Network error. Try again later.",
+    "未连接": "Disconnected",
+    "服务返回了无法解析的响应": "Unreadable response from server",
+    "运营": "Operator",
+    "只读": "Read-only",
+    "功能": "Features",
+    "正常": "Healthy",
+    "未配置": "Not configured",
+    "连接密钥": "Connection secret",
+    "发送失败": "Send failed",
+    "账号切换失败": "Account switch failed",
+    "对方": "Peer",
+    "应用": "App",
+    "插件列表加载失败": "Failed to load plugins",
+    "安装": "Install",
+    "(无输出)": "(no output)",
+    "读取配置失败": "Failed to read configuration",
+    "配置已保存": "Configuration saved",
+    "保存失败": "Save failed",
+    "技能列表加载失败": "Failed to load skills",
+    "账号": "Account",
+    "功能列表加载失败": "Failed to load features",
+    "已启用": "Enabled",
+    "已停用": "Disabled",
+    "操作失败": "Operation failed",
+    "工具列表加载失败": "Failed to load tools",
+    "定时任务加载失败": "Failed to load schedules",
+    "状态": "Status",
+    "任务列表加载失败": "Failed to load tasks",
+    "网络异常，请稍后重试。": "Network error. Try again later.",
+    "结果": "Result",
+    "移除": "Remove",
+    "移除失败": "Remove failed",
+    "审计日志加载失败": "Failed to load audit log",
+    "异常": "Unhealthy",
+    "进程已运行": "Process uptime",
+    "累计接收": "Total received",
+    "授权失败": "Authorization failed",
+    "即应接入与调度": "Jiying relay & scheduling",
+    "概览": "Overview",
+    "即应接入": "Connect",
+    "运行": "Runtime",
+    "工作台": "Dashboard",
+    "接入系统": "Connect",
+    "连接池": "Connection pool",
+    "权限管理": "Access control",
+    "插件市场": "Plugin market",
+    "功能管理": "Features",
+    "Agent 工作台": "Agent",
+    "审计日志": "Audit log",
+    "运行观测": "Observability",
+    "运行日志": "Runtime logs",
+    "筛选菜单": "Filter menu",
+    "自定义侧栏": "Customize sidebar",
+    "应用通道": "App channel",
+    "账号通道": "Account channel",
+    "应用已连接": "App connected",
+    "应用未连接": "App disconnected",
+    "账号未登录": "Signed out",
+    "切换深浅色": "Toggle theme",
+    "切换语言": "Switch language",
+    "退出登录": "Sign out",
+    "收起菜单": "Toggle menu",
+    "调整顺序、置顶或隐藏侧栏菜单，设置保存在本机浏览器；新增菜单会自动加入。": "Reorder, pin or hide sidebar items. Changes are stored in this browser; new items are added automatically.",
+    "恢复默认": "Reset",
+    "完成": "Done",
+    "取消置顶": "Unpin",
+    "显示": "Show",
+    "隐藏": "Hide",
+    "即应接入与任务调度控制台": "Jiying relay & scheduling console",
+    "接入即应，编排一切": "Connect Jiying, orchestrate everything",
+    "Relay 面向即应应用的消息接入与任务调度中间件。通过应用密钥或账号授权一键接入，在聊天中完成功能调用、脚本执行与定时编排。": "Relay is the message-connectivity and task-scheduling middleware for Jiying apps. Connect with an app secret or account authorization, then invoke features, run scripts and schedule jobs right from chat.",
+    "应用密钥接入": "App secret",
+    "账号 / 邮箱验证码": "Account / email code",
+    "功能目录": "Feature catalog",
+    "定时调度": "Scheduling",
+    "登录控制台": "Sign in",
+    "登录后接入即应应用或账号通道": "Sign in to connect an app or account channel",
+    "用户名": "Username",
+    "请输入用户名": "Enter username",
+    "密码": "Password",
+    "请输入密码": "Enter password",
+    "登 录": "Sign in",
+    "请输入用户名与密码": "Enter username and password",
+    "登录中…": "Signing in…",
+    "网络错误，请稍后重试": "Network error, please retry",
+    "登录 · Relay 控制台": "Sign in · Relay Console",
+    "中文": "中文",
+    "切换到浅色模式": "Switch to light mode",
+    "切换到深色模式": "Switch to dark mode",
+    "主人": "Owner",
+    "关闭": "Close",
+    "确认": "Confirm",
+    "登录已过期，请重新登录": "Session expired. Please sign in again.",
+    "（追踪": "(trace",
+    "网络请求失败，请检查服务状态后重试": "Request failed. Check the service status and retry.",
+    "网络请求失败": "Request failed",
+    "已恢复默认侧栏": "Sidebar reset to defaults",
+    "今日收": "Received today",
+    "今日发": "Sent today",
+    "运行时长": "Uptime",
+    "定时": "Schedules",
+    "任务": "Tasks",
+    "会话列表与发送": "Conversations and sending",
+    "安装与调试插件": "Install and debug plugins",
+    "创建定时调度": "Create a schedule",
+    "执行记录与重试": "Run history and retries",
+    "已配置未连接": "Configured, offline",
+    "配置有误": "Configuration error",
+    "不可用": "Unavailable",
+    "1. 本地存储": "1. Local storage",
+    "2. 应用通道": "2. App channel",
+    "3. 账号通道": "3. Account channel",
+    "4. 模型 Agent": "4. Model agent",
+    "未知状态": "Unknown state",
+    "查看": "View",
+    "去修复": "Fix",
+    "全部就绪，可正常接收与回复消息": "All checks passed. Ready to receive and reply.",
+    "项待处理": "items pending",
+    "接口请求失败": "API request failed",
+    "8-4-4-4-12 的 UUID，从应用详情复制": "UUID in 8-4-4-4-12 format, copied from the app details",
+    "8 位邮箱验证码": "8-digit email code",
+    "应用通道已更新": "App channel updated",
+    "配置失败": "Configuration failed",
+    "账号登录成功": "Signed in successfully",
+    "账号验证并登录成功": "Verified and signed in",
+    "应用握手成功": "App handshake succeeded",
+    "连接测试失败": "Connection test failed",
+    "请先填写服务地址与邮箱": "Enter the service URL and email first",
+    "验证码已发送": "Code sent",
+    "已验证码发送，有效期": "Code sent, valid for",
+    "接入状态加载失败": "Failed to load connection status",
+    "已连接 ·": "Connected ·",
+    "选择一个会话": "Select a conversation",
+    "从会话列表中选择，即可查看历史消息并发送内容。": "Pick a conversation to view history and send messages.",
+    "输入消息，回车或点击发送": "Type a message, press Enter or click Send",
+    "· 已登录": "· Signed in",
+    "已切换账号": "Account switched",
+    "会话加载失败": "Failed to load conversations",
+    "暂无会话": "No conversations",
+    "收到或发起会话后，会在这里列出。": "Conversations appear here after you receive or start one.",
+    "会话列表加载失败": "Failed to load conversations",
+    "消息加载失败": "Failed to load messages",
+    "暂无消息": "No messages",
+    "在下方输入框发送内容，中间件会按功能或 Agent 自动回复。": "Send a message below; the middleware replies via a feature or the agent.",
+    "[图片]": "[Image]",
+    "请选择会话并输入内容": "Select a conversation and enter a message",
+    "已发送": "Sent",
+    "系统": "System",
+    "机器人": "Bot",
+    "暂无插件": "No plugins",
+    "插件放在 scripts 目录下，安装后会自动登记为可调用功能。": "Plugins live in the scripts directory and are registered as callable features after installation.",
+    "规则": "Rule",
+    "平台": "Platform",
+    "编辑插件": "Edit plugin",
+    "新建插件": "New plugin",
+    "保存": "Save",
+    "请填写文件名与代码": "Enter a file name and code",
+    "读取失败": "Read failed",
+    "该功能未关联插件文件": "This feature has no plugin file",
+    "运行插件 ·": "Run plugin ·",
+    "删除插件": "Delete plugin",
+    "确认删除插件": "Delete plugin",
+    "配置": "Configure",
+    "需要数字": "Number required",
+    "无配置项": "No configuration items",
+    "该插件未声明 [config: ...]。": "This plugin does not declare [config: ...].",
+    "插件配置 ·": "Plugin configuration ·",
+    "暂无技能": "No skills",
+    "技能可被插件通过 require 复用；安装 JS 技能时会先在沙箱内试跑。": "Skills can be reused by plugins via require; JS skills are test-run in a sandbox before installation.",
+    "JS 模块": "JS module",
+    "安装技能": "Install skill",
+    "helper.js 或 note.md": "helper.js or note.md",
+    "请填写文件名与内容": "Enter a file name and content",
+    "运行技能 ·": "Run skill ·",
+    "删除技能": "Delete skill",
+    "确认删除技能": "Delete skill",
+    "内置": "Built-in",
+    "脚本": "Script",
+    "公开": "Public",
+    "主控": "Master",
+    "需确认": "Needs confirmation",
+    "暂无功能": "No features",
+    "安装 HTTP 功能或添加插件后，会在这里统一管理。": "HTTP features and installed plugins are managed here.",
+    "运行功能 ·": "Run feature ·",
+    "对应插件文件也会一并删除。": "The plugin file will also be deleted.",
+    "内置功能会在服务重启后自动恢复。": "Built-in features are restored after a restart.",
+    "删除功能": "Delete feature",
+    "确认删除功能": "Delete feature",
+    "安装 HTTP 功能": "Install HTTP feature",
+    "例如：天气": "Example: weather",
+    "请填写功能名与地址": "Enter a feature name and URL",
+    "留空则使用临时会话": "Leave blank to use a temporary conversation",
+    "例如：现在系统状态怎么样": "Example: what is the system status now?",
+    "无权限或未就绪": "No permission or not ready",
+    "需要主控账号才能查看与修改 Agent 配置。": "Only master accounts can view or change agent configuration.",
+    "填写服务商支持的模型名": "Enter a model name supported by the provider",
+    "模型A, 模型B": "Model A, Model B",
+    "Agent 配置加载失败": "Failed to load agent configuration",
+    "暂无可调用功能": "No callable features",
+    "启用功能或安装插件后，Agent 会自动获得对应工具。": "Enable features or install plugins to give the agent tools.",
+    "请输入提问内容": "Enter a question",
+    "暂无定时任务": "No schedules",
+    "新建定时后，中间件会按 cron 表达式自动入队执行。": "Schedules enqueue jobs automatically based on the cron expression.",
+    "停用": "Disable",
+    "启用": "Enable",
+    "新建定时任务": "New schedule",
+    "示例任务": "Example task",
+    "请填写名称、表达式与命令": "Enter a name, expression and command",
+    "已创建": "Created",
+    "创建失败": "Create failed",
+    "删除定时任务": "Delete schedule",
+    "确认删除该定时任务？": "Delete this schedule?",
+    "按状态筛选": "Filter by status",
+    "筛选功能 / 会话 / 结果": "Filter by feature / conversation / result",
+    "暂无任务": "No tasks",
+    "功能执行后会在这里留下记录。": "Feature runs are recorded here.",
+    "（最近 100 条）": "(last 100)",
+    "已重试": "Retried",
+    "任务已不在列表中，请刷新": "The task is no longer in the list. Refresh.",
+    "任务 ID": "Task ID",
+    "用户": "User",
+    "创建时间": "Created",
+    "开始时间": "Started",
+    "结束时间": "Finished",
+    "耗时": "Duration",
+    "重试次数": "Retries",
+    "错误码": "Error code",
+    "任务详情": "Task details",
+    "删除任务": "Delete task",
+    "确认删除任务？": "Delete this task?",
+    "筛选关键字": "Filter keyword",
+    "（无匹配行）": "(no matching rows)",
+    "（当日暂无日志）": "(no logs today)",
+    "暂无日志可导出": "No logs to export",
+    "连接池状态加载失败": "Failed to load connection pool",
+    "尚未接入应用": "No apps connected",
+    "接入后可在此查看通道在线状态，并按应用隔离运行。": "Connect an app to see channel status and run apps in isolation.",
+    "(未命名)": "(unnamed)",
+    "暂无已授权账号": "No authorized accounts",
+    "授权账号后可按账号身份调用功能，并与应用通道隔离运行。": "Authorize an account to call features with its identity, isolated from the app channel.",
+    "账号已切换": "Account switched",
+    "接入应用": "Connect app",
+    "应用标识": "App ID",
+    "请填写完整信息": "Fill in all fields",
+    "已接入": "Connected",
+    "接入失败": "Connect failed",
+    "移除应用": "Remove app",
+    "确认移除应用": "Remove app",
+    "已移除": "Removed",
+    "默认应用已切换": "Default app switched",
+    "切换失败": "Switch failed",
+    "插件市场加载失败": "Failed to load plugin market",
+    "市场暂无插件": "No plugins in the market",
+    "上架插件后会在这里展示，供按应用或个人账号范围安装分发。": "Published plugins appear here for installation by app or account scope.",
+    "未安装": "Not installed",
+    "重装": "Reinstall",
+    "上架插件": "Publish plugin",
+    "插件用途": "Plugin usage",
+    "// 脚本代码": "// script code",
+    "请填写名称与目标": "Enter a name and target",
+    "script 插件需要代码": "Script plugins require code",
+    "已上架": "Published",
+    "上架失败": "Publish failed",
+    "下架插件": "Unpublish plugin",
+    "确认从市场上架列表移除": "Remove from the market",
+    "下架": "Unpublish",
+    "筛选操作者 / 动作 / 目标 / 详情": "Filter by actor / action / target / details",
+    "暂无审计记录": "No audit records",
+    "敏感操作（接入、插件、角色等）会在这里留痕。": "Sensitive actions (connections, plugins, roles) are recorded here.",
+    "在运行日志中查找": "Find in runtime logs",
+    "暂无审计记录可导出": "No audit records to export",
+    "时间": "Time",
+    "操作者": "Actor",
+    "动作": "Action",
+    "目标": "Target",
+    "详情": "Details",
+    "条（最近 100 条）": "rows (last 100)",
+    "失败": "Failed",
+    "拒绝": "Rejected",
+    "超时": "Timeout",
+    "错误": "Error",
+    "无效": "Invalid",
+    "未授权": "Unauthorized",
+    "健康探针": "Health probe",
+    "运转时长": "Uptime",
+    "已收消息": "Messages received",
+    "执行中": "Running",
+    "全部状态": "All statuses",
+    "失败 / 超时": "Failed / timed out",
+    "排队中": "Queued",
+    "待确认": "Awaiting confirmation",
+    "已取消": "Canceled",
+    "应用插件": "App plugin",
+    "个人账号插件": "Account plugin",
+    "JavaScript 模块": "JavaScript module",
+    "请先在接入系统登录账号": "Sign in to an account under Connect first",
+    "账号状态加载失败，点「刷新」重试": "Failed to load account status. Click Refresh to retry.",
+    "通道状态": "Channel status",
+    "应用 · 账号": "App · Account",
+    "限流拒绝": "Rate-limit rejections",
+    "被拒绝任务": "Rejected tasks",
+    "输入用户 ID": "Enter user ID",
+    "主人列表加载失败": "Failed to load owners",
+    "成员角色加载失败": "Failed to load member roles",
+    "当前控制台账号": "Current console account",
+    "暂无显式角色": "No explicit roles",
+    "运营和只读成员会显示在这里。": "Operators and read-only members appear here.",
+    "尚未设置主人": "No owners configured",
+    "主人可以使用主控范围的功能和管理指令。": "Owners can use master-scope features and admin commands.",
+    "请输入用户 ID": "Enter a user ID",
+    "主人权限已授予": "Owner granted",
+    "成员角色已更新": "Member role updated",
+    "撤销角色": "Revoke role",
+    "确认撤销该成员的显式角色？": "Revoke this member's explicit role?",
+    "撤销": "Revoke",
+    "角色已撤销": "Role revoked",
+    "撤销失败": "Revoke failed",
+    "移除主人": "Remove owner",
+    "确认移除用户": "Remove user",
+    "主人已移除": "Owner removed",
+    "暂无 RPC 调用": "No RPC calls",
+    "应用通道产生调用后，这里会按方法显示成功率与耗时。": "Once the app channel makes calls, success rate and latency appear here by method.",
+    "（无指标）": "(no metrics)",
+    "· 完成": "· done",
+    "应用在线": "App online",
+    "应用离线": "App offline",
+    "累计拒绝 · 任务失败": "Rejected total · failed tasks",
+    "中文": "中文",
+    "主人": "Owner",
+    "运营": "Operator",
+    "只读": "Read-only",
+    "即应接入与任务调度实时总览": "Live overview of Jiying connectivity and task scheduling",
+    "刷新": "Refresh",
+    "接入状态": "Connection status",
+    "即应未连接": "Jiying not connected",
+    "应用 ID": "App ID",
+    "服务器时间": "Server time",
+    "刷新周期": "Refresh interval",
+    "10 秒自动刷新": "Auto-refresh every 10s",
+    "快捷入口": "Quick actions",
+    "接入检查": "Connection checklist",
+    "首次使用按此顺序逐项自检": "Work through these checks in order on first use",
+    "尚未配置应用通道 · 先添加一个 MagicChat 应用连接": "No app channel yet · add a MagicChat app connection first",
+    "服务地址必须是 http:// 或 https:// 地址 · 检查账号服务地址和端口；缺少账号邮箱 · 填写用于登录 MagicChat 的邮箱；缺少登录凭据 · 填写密码或使用验证码登录": "Service address must be http:// or https:// · check the account service host and port; missing account email · enter the email used to sign in to MagicChat; missing credentials · enter a password or use an email code",
+    "Agent 未启用 · 启用后可让用户用自然语言调用功能": "Agent disabled · enable it to let users invoke features in natural language",
+    "管理员": "Administrator",
+    "角色 ·": "Role ·",
+    "· 参数": "· Params",
+    "推荐顺序：先配「应用密钥」建立应用通道，再用「账号密码 / 邮箱验证码」授权账号；完成后在": "Recommended order: configure the app secret first to establish the app channel, then authorize the account with password or email code; afterwards verify each item in ",
+    "逐项确认。": ".",
+    "插件归属": "Plugin ownership",
+    "或": "or",
+    "，安装时按应用或个人账号隔离。": ", isolated by app or personal account at install time.",
+    "帮助": "Help",
+    "插件列表": "Plugin list",
+    "定时列表": "Schedule list",
+    "任务列表": "Task list",
+    "日志": "Logs",
+    "先清空上下文": "Clear context first",
+    "自动刷新": "Auto-refresh",
+    "尚未配置": "Not configured",
+    "已配置，留空保持不变": "Configured; leave blank to keep",
+    "自动换行": "Wrap lines",
+    "选择会话查看消息并发送内容": "Select a conversation to read and send messages",
+    "加载中…": "Loading…",
+    "加载账号中…": "Loading accounts…",
+    "重试": "Retry",
+    "消息": "Messages",
+    "发送": "Send",
+    "工作台 · 接入检查": "Dashboard · Connection checklist",
+    "1 应用密钥 → 2 账号授权 → 3 模型 Agent": "1 App secret → 2 Account authorization → 3 Model agent",
+    "待处理项": "Pending items",
+    "应用密钥": "App secret",
+    "账号密码": "Account password",
+    "邮箱验证码": "Email code",
+    "WebSocket 接入地址": "WebSocket endpoint",
+    "应用 ID 必须是 UUID，与账号通道指向同一个即应服务；不一致会导致应用握手 400。": "The app ID must be a UUID and point to the same Jiying service as the account channel; a mismatch causes a 400 during app handshake.",
+    "保存并连接": "Save and connect",
+    "测试连接": "Test connection",
+    "多应用通道与个人账号状态，按应用隔离运行": "Multi-app channels and personal account status, isolated per app",
+    "个人账号": "Personal account",
+    "昵称": "Nickname",
+    "未设置": "Not set",
+    "已授权账号": "Authorized account",
+    "去授权账号": "Authorize account",
+    "接入指引": "Setup guide",
+    "1. 准备应用": "1. Prepare the app",
+    "在 MagicChat 创建应用，取得应用 ID 与应用密钥。": "Create an app in MagicChat and note its app ID and secret.",
+    "2. 接入通道": "2. Connect the channel",
+    "填写 WebSocket 地址、应用 ID 与密钥，保存后即建立通道。": "Enter the WebSocket endpoint, app ID and secret, then save to establish the channel.",
+    "3. 按应用隔离": "3. Isolate by app",
+    "多个应用各自运行与记账，默认应用用于未指定来源的任务。": "Each app runs and bills independently; the default app handles tasks without a specified source.",
+    "主人权限面向即应用户 ID（在即应会话里发送「我的ID」获取）；运营与只读面向控制台登录账号。": "Owner permission targets Jiying user IDs (send \"my ID\" in a Jiying conversation to get yours); operator and read-only roles apply to console accounts.",
+    "授权成员": "Authorized members",
+    "授予权限": "Grant permission",
+    "成员角色": "Member role",
+    "主人列表": "Owner list",
+    "已安装的插件资产，支持 JavaScript 与 Python；安装后会自动登记为可调用功能": "Installed plugin assets in JavaScript or Python; installed plugins are registered as callable features automatically",
+    "功能管理 →": "Feature management →",
+    "技能": "Skills",
+    "可被插件 require 复用的 JS 模块，或 Markdown 说明；安装前会隔离试跑": "JS modules reusable via require, or Markdown notes; installed skills are trial-run in isolation first",
+    "发现、上架与分发包，已安装的插件在「插件」页统一管理": "Discover, publish and distribute packages; installed plugins are managed on the Plugins page",
+    "插件规范": "Plugin spec",
+    "作用范围": "Scope",
+    "类型": "Type",
+    "支持脚本型与 http 型，脚本型随插件一同分发源码。": "Script and HTTP types are supported; script plugins ship their source with the package.",
+    "版本": "Version",
+    "同名插件按版本区分，已安装的会在列表中标注。": "Plugins with the same name differ by version; installed versions are marked in the list.",
+    "面向即应会话的可调用功能：内置、HTTP 与插件功能的启停、试跑与配置": "Callable features for Jiying conversations: enable, trial-run and configure built-in, HTTP and plugin features",
+    "安装功能": "Install feature",
+    "薄 Agent 配置与在线试跑，模型只负责选功能与填参数": "Thin agent configuration and online trial runs; the model only picks features and fills parameters",
+    "模型配置": "Model configuration",
+    "仅主控可改": "Owner only",
+    "模型": "Model",
+    "后备模型": "Fallback models",
+    "主模型不可用时按顺序降级，逗号分隔；留空表示不降级。": "Fallback in order when the primary model is unavailable, comma-separated; leave empty to disable fallback.",
+    "系统提示": "System prompt",
+    "上下文消息数": "Context messages",
+    "每个会话保留的最近消息数量，数值越大越能延续上下文。": "Recent messages kept per conversation; larger values preserve more context.",
+    "高级运行保护": "Advanced runtime guards",
+    "单次工具调用上限": "Tool calls per run",
+    "模型连续调用功能的最大次数，用于防止异常循环。": "Maximum consecutive feature calls per model run, to prevent runaway loops.",
+    "保存配置": "Save configuration",
+    "试跑": "Trial run",
+    "不经过即应会话": "Without a Jiying conversation",
+    "会话 ID（可选）": "Conversation ID (optional)",
+    "提问": "Prompt",
+    "等待运行…": "Waiting for run…",
+    "工具契约": "Tool contract",
+    "由功能与插件清单生成的 JSON Schema": "JSON Schema generated from features and plugin manifests",
+    "按 cron 表达式定时入队执行功能": "Enqueue feature runs on a cron schedule",
+    "新建定时": "New schedule",
+    "名称": "Name",
+    "表达式": "Expression",
+    "命令": "Command",
+    "操作": "Actions",
+    "功能执行记录与状态": "Feature run history and status",
+    "敏感操作留痕：操作者、动作、目标与结果": "Audit trail for sensitive actions: actor, action, target and result",
+    "导出": "Export",
+    "成功": "Success",
+    "匿名探针与指标，不暴露任何凭据": "Anonymous probes and metrics, no credentials exposed",
+    "RPC 调用": "RPC calls",
+    "按方法聚合 · 来自 /metrics": "Aggregated by method · from /metrics",
+    "原始指标": "Raw metrics",
+    "Prometheus 文本格式": "Prometheus text format",
+    "中间件运行日志（需登录控制台；访问日志仅记方法与路径）": "Middleware runtime logs (console sign-in required; access logs record method and path only)",
+    "执行中间件功能「任务列表」（类型 builtin） · 参数 args": "Run middleware feature \"Task list\" (type builtin) · args",
+    "执行中间件功能「定时列表」（类型 builtin） · 参数 args": "Run middleware feature \"Schedule list\" (type builtin) · args",
+    "执行中间件功能「帮助」（类型 builtin） · 参数 args": "Run middleware feature \"Help\" (type builtin) · args",
+    "执行中间件功能「插件列表」（类型 builtin） · 参数 args": "Run middleware feature \"Plugin list\" (type builtin) · args",
+    "执行中间件功能「日志」（类型 builtin） · 参数 args": "Run middleware feature \"Logs\" (type builtin) · args",
+    "执行中间件功能「状态」（类型 builtin） · 参数 args": "Run middleware feature \"Status\" (type builtin) · args",
+    "___END___": ""
+  };
+  var I18N_SKIP = "code,script,style,textarea,[data-no-i18n],.conv-item,.msg-body,.log-line,.rl-codeblock";
+  var I18N_RULES = [
+    [/^(\d+) 项待处理$/, "$1 items pending"],
+    [/^(\d+) 个常用动作$/, "$1 quick actions"],
+    [/^(\d+) 条（最近 100 条）$/, "$1 rows (last 100)"],
+    [/^(\d+) 条$/, "$1 rows"],
+    [/^共 (\d+) 个$/, "$1 total"],
+    [/^(\d+) 个$/, "$1 items"],
+    [/^(\d+) 行$/, "$1 lines"],
+    [/^(\d+) 秒$/, "$1s"],
+    [/^(.*)？其登记的可调用功能会一并移除。$/, "Delete $1? Its registered callable features will also be removed."],
+    [/^(.*)？引用它的插件可能因此报错。$/, "Delete $1? Plugins that reference it may break."],
+    [/^(.*)？已安装的插件与功能不受影响。$/, "Remove $1 from the market? Installed plugins and features are unaffected."],
+    [/^角色 · 主人$/, "Role · Owner"],
+    [/^角色 · 运营$/, "Role · Operator"],
+    [/^角色 · 只读$/, "Role · Read-only"],
+    [/^角色 · (\S+)$/, "Role · $1"],
+    [/^账号通道未配置（追踪 (.+)）$/, "Account channel not configured (trace $1)"],
+    [/^当前控制台账号 (\S+) · 主人$/, "Current console account $1 · Owner"],
+    [/^当前控制台账号 (\S+) · 运营$/, "Current console account $1 · Operator"],
+    [/^当前控制台账号 (\S+) · 只读$/, "Current console account $1 · Read-only"],
+    [/^来源 (\S+)$/, "Source $1"],
+    [/^共 (\d+) 条$/, "$1 rows"],
+    [/^共 (\d+) 行$/, "$1 lines"],
+    [/^匹配 (\d+) \/ 共 (\d+) 行$/, "$1 / $2 lines matched"],
+    [/^筛选 (\d+) \/ 共 (\d+) 行$/, "$1 / $2 lines"],
+    [/^共 (\d+) 行 · 最后刷新 (.+)$/, "$1 lines · updated $2"],
+    [/^匹配 (\d+) \/ 共 (\d+) 行 · 最后刷新 (.+)$/, "$1 / $2 lines matched · updated $3"],
+    [/^筛选 (\d+) \/ 共 (\d+) 行 · 最后刷新 (.+)$/, "$1 / $2 lines · updated $3"],
+    [/^已导出当前视图 (\d+) 行$/, "Exported $1 lines"],
+    [/^待 (\d+) · 完成 (\d+)$/, "Pending $1 · Done $2"],
+    [/^累计拒绝 · 任务失败 (\d+)$/, "Rejected total · failed tasks $1"],
+    [/^共 (\d+) 条（最多保留 500 条）$/, "$1 runs (up to 500 kept)"],
+    [/^已通过(.+)身份发送$/, "Sent as $1"],
+    [/^最近成功 (.+) · 检查于 (.+)$/, "Last success $1 · checked $2"],
+    [/^检查于 (.+)$/, "Checked $1"],
+    [/^可发送身份：应用 \/ 用户 · 应用通道可用；账号通道可用$/, "Send as: App / User · both channels available"],
+    [/^可发送身份：应用 · 应用通道可用；账号通道未登录$/, "Send as: App · app channel available; account signed out"],
+    [/^可发送身份：用户 · 会话不属于当前应用；账号通道可用$/, "Send as: User · conversation is not owned by this app; account available"],
+    [/^可发送身份：用户 · 应用通道离线；账号通道可用$/, "Send as: User · app channel offline; account available"],
+    [/^当前会话没有可用发送身份 · (.*)$/, "No send identity available · $1"],
+    [/^命令已执行: (.+)$/, "Command executed: $1"],
+    [/^命令未注册: (.+)$/, "Command not registered: $1"],
+    [/^权限不足: (.+)$/, "Insufficient permission: $1"],
+    [/^执行异常: (.*)$/, "Execution error: $1"],
+    [/^连续失败 3 次，已暂停: (.*)$/, "Paused after 3 consecutive failures: $1"],
+    [/^缺少功能名$/, "Missing feature name"],
+    [/^会话 ID 不合法$/, "Invalid conversation ID"],
+    [/^缺少命令$/, "Missing command"],
+    [/^空命令$/, "Empty command"]
+  ];
+  var i18nObserver = null;
+  function i18nTranslate(raw) {
+    var text = String(raw || "");
+    var s = text.trim();
+    if (!s) return null;
+    if (Object.prototype.hasOwnProperty.call(EN_TEXT, s)) return EN_TEXT[s];
+    for (var i = 0; i < I18N_RULES.length; i++) {
+      if (I18N_RULES[i][0].test(s)) return s.replace(I18N_RULES[i][0], I18N_RULES[i][1]);
+    }
+    return null;
+  }
+  function i18nLocalizeTextNode(node) {
+    if (!node || LANG !== "en") return;
+    var value = node.nodeValue || "";
+    if (!value.trim()) return;
+    if (node.__relayEn && node.__relayEn === value) return;
+    var parent = node.parentElement;
+    if (!parent || parent.closest(I18N_SKIP)) return;
+    var hit = i18nTranslate(value);
+    if (hit == null) return;
+    if (node.__relayZh == null) node.__relayZh = value;
+    var lead = value.match(/^\s*/)[0];
+    var tail = value.match(/\s*$/)[0];
+    node.__relayEn = lead + hit + tail;
+    node.nodeValue = node.__relayEn;
+  }
+  function i18nLocalizeAttrs(el) {
+    if (!el || el.nodeType !== 1 || LANG !== "en") return;
+    ["placeholder", "title", "aria-label", "alt"].forEach(function (name) {
+      var value = el.getAttribute(name);
+      if (!value) return;
+      var hit = i18nTranslate(value);
+      if (hit == null) return;
+      if (!el.__relayZhAttr) el.__relayZhAttr = {};
+      if (el.__relayZhAttr[name] == null) el.__relayZhAttr[name] = value;
+      el.setAttribute(name, hit);
+    });
+  }
+  function i18nLocalize(root) {
+    if (LANG !== "en" || !root) return;
+    if (root.nodeType === 3) { i18nLocalizeTextNode(root); return; }
+    if (root.nodeType !== 1) return;
+    if (!root.closest(I18N_SKIP)) {
+      var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+      var nodes = [];
+      while (walker.nextNode()) nodes.push(walker.currentNode);
+      nodes.forEach(i18nLocalizeTextNode);
+    }
+    i18nLocalizeAttrs(root);
+    Array.prototype.forEach.call(root.querySelectorAll("[placeholder],[title],[aria-label],[alt]"), i18nLocalizeAttrs);
+  }
+  function i18nRestore(root) {
+    root = root || document.body;
+    if (root.nodeType === 3) {
+      if (root.__relayZh != null) root.nodeValue = root.__relayZh;
+      return;
+    }
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    var nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(function (n) { if (n.__relayZh != null) n.nodeValue = n.__relayZh; delete n.__relayEn; });
+    var els = root.querySelectorAll ? root.querySelectorAll("*") : [];
+    Array.prototype.forEach.call(els, function (el) {
+      if (!el.__relayZhAttr) return;
+      Object.keys(el.__relayZhAttr).forEach(function (name) { el.setAttribute(name, el.__relayZhAttr[name]); });
+      delete el.__relayZhAttr;
+    });
+  }
+  function i18nStartObserver() {
+    if (i18nObserver || LANG !== "en") return;
+    i18nObserver = new MutationObserver(function (list) {
+      list.forEach(function (m) {
+        if (m.type === "characterData") { i18nLocalizeTextNode(m.target); return; }
+        Array.prototype.forEach.call(m.addedNodes, function (n) {
+          if (n.nodeType === 1) i18nLocalize(n);
+          else if (n.nodeType === 3) i18nLocalizeTextNode(n);
+        });
+      });
+    });
+    i18nObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
+  }
+  function i18nStopObserver() {
+    if (i18nObserver) { i18nObserver.disconnect(); i18nObserver = null; }
+  }
   function readLang() {
     try {
       var v = localStorage.getItem(LANG_KEY);
@@ -86,6 +820,8 @@
     LANG = (v === "en") ? "en" : "zh";
     try { localStorage.setItem(LANG_KEY, LANG); } catch (e) { /* 忽略存储失败 */ }
     document.documentElement.lang = (LANG === "en") ? "en" : "zh-CN";
+    if (LANG === "en") i18nStartObserver();
+    else i18nStopObserver();
   }
   // 翻译静态 HTML 里带 data-i18n* 标记的节点。
   function applyStaticI18n() {
@@ -108,9 +844,16 @@
   }
   // 在语言之间切换并重绘受影响的动态外壳；页面正文由各 render 函数按 t() 渲染。
   function toggleLang() {
-    setLang(LANG === "en" ? "zh" : "en");
+    var next = LANG === "en" ? "zh" : "en";
+    if (next === "zh") { i18nStopObserver(); i18nRestore(document.body); }
+    setLang(next);
     applyStaticI18n();
     refreshLangButtons();
+    // 登录页没有控制台外壳，只翻译静态文案后即可返回。
+    if (!document.querySelector(".sidebar")) {
+      if (LANG === "en") i18nLocalize(document.body);
+      return;
+    }
     renderNav();
     if (state.view) {
       var n = NAV.filter(function (x) { return x.id === state.view; })[0];
@@ -119,6 +862,7 @@
     }
     loadConnectStatus();
     if (state.view && renderers[state.view]) { renderers[state.view](); decoratePage(state.view); }
+    if (LANG === "en") i18nLocalize(document.body);
   }
 
   var NAV = [
@@ -132,6 +876,7 @@
     { id: "features", name: "nav.features", ik: "toggles", group: "nav.group.run" },
     { id: "agent", name: "nav.agent", ik: "robot", group: "nav.group.run" },
     { id: "cron", name: "nav.cron", ik: "clock", group: "nav.group.run" },
+    { id: "executions", name: "nav.executions", ik: "activity", group: "nav.group.run" },
     { id: "tasks", name: "nav.tasks", ik: "list", group: "nav.group.run" },
     { id: "audit", name: "nav.audit", ik: "shield", group: "nav.group.run" },
     { id: "observe", name: "nav.observe", ik: "activity", group: "nav.group.run" },
@@ -181,7 +926,8 @@
     theme: "bi-moon-stars",
     themeLight: "bi-sun",
     settings: "bi-sliders",
-    language: "bi-translate"
+    language: "bi-translate",
+    close: "bi-x-lg"
   };
   function ico(kw) {
     return '<i class="bi ' + (ICON[kw] || ICON.zap) + '" aria-hidden="true"></i>';
@@ -230,16 +976,26 @@
   }
   // 统一的空状态：图标 + 主文案 + 说明 + 可选操作，替代单行灰字。
   function emptyState(kw, title, hint, actionHTML) {
-    return '<div class="rl-empty"><div class="rl-empty-ico">' + ico(kw) + "</div>"
+    return '<div class="rl-empty" role="status"><div class="rl-empty-ico">' + ico(kw) + "</div>"
       + "<h4>" + esc(title) + "</h4>"
       + (hint ? "<p>" + esc(hint) + "</p>" : "")
       + (actionHTML ? '<div class="rl-empty-act">' + actionHTML + "</div>" : "")
+      + "</div>";
+  }
+  // 统一的加载态：骨架条 + 无障碍播报，避免各页散落的单行灰字。
+  function loadingState(label) {
+    return '<div class="rl-loading" role="status" aria-live="polite" aria-busy="true">'
+      + '<div class="rl-skel" aria-hidden="true"><span></span><span></span><span></span></div>'
+      + '<span class="rl-sr">' + esc(label || "加载中…") + "</span>"
       + "</div>";
   }
   // 加载失败态：与空态区分开，并给一个重试入口，避免用户只能刷新整页。
   function errorState(box, kw, title, hint, retry) {
     if (!box) return;
     box.innerHTML = emptyState(kw, title, hint || "请稍后重试。", '<button class="btn btn-ghost btn-sm">重试</button>');
+    box.setAttribute("aria-busy", "false");
+    var st = box.querySelector(".rl-empty");
+    if (st) st.setAttribute("role", "alert");
     var b = box.querySelector(".rl-empty-act button");
     if (b && retry) b.addEventListener("click", retry);
   }
@@ -251,7 +1007,7 @@
     if (b && retry) b.addEventListener("click", retry);
   }
 
-  var state = { view: "home", cerr: null, convs: [], conv: null, msgs: [], interval: null, baseUptime: null, uptimeAt: 0, uptimeTimer: null, chatEpoch: 0, chatRequest: 0, logLines: [], logPending: "", logTimer: null, tasks: [], tasksErr: "", role: "", auditRows: [], auditErr: "" };
+  var state = { view: "home", cerr: null, convs: [], conv: null, msgs: [], interval: null, baseUptime: null, uptimeAt: 0, uptimeTimer: null, chatEpoch: 0, chatRequest: 0, logLines: [], logShown: [], logPending: "", logTimer: null, logLevel: "all", logPinned: true, logFromBottom: 0, logLoadedAt: "", logDay: "", tasks: [], tasksErr: "", role: "", auditRows: [], auditErr: "", executions: [], executionsErr: "", execFilter: { kind: "", status: "", name: "" }, chatCaps: null, account: null };
   var ROLE_LABEL = { master: "主人", ops: "运营", readonly: "只读" };
 
   function $(sel, root) { return (root || document).querySelector(sel); }
@@ -294,6 +1050,7 @@
       + '<button type="button" class="btn-close btn-close-white rl-toast-x" data-bs-dismiss="toast" aria-label="关闭"></button>'
       + "</div>";
     box.appendChild(el);
+    if (LANG === "en") i18nLocalize(el);
     el.addEventListener("hidden.bs.toast", function () { el.remove(); });
     var act = el.querySelector(".rl-toast-act");
     if (act) act.addEventListener("click", function () {
@@ -307,6 +1064,7 @@
     $("#modalTitle").textContent = title;
     $("#modalBody").innerHTML = bodyHTML;
     $("#modalFoot").innerHTML = actionsHTML || '<button class="btn btn-ghost" data-bs-dismiss="modal">关闭</button>';
+    if (LANG === "en") i18nLocalize($("#modal"));
     bootstrap.Modal.getOrCreateInstance($("#modal")).show();
   }
   function closeModal() {
@@ -527,7 +1285,9 @@
       sb.classList.remove("collapsed");
       sb.classList.toggle("open");
       var bd = $("#navBackdrop");
-      if (bd) bd.classList.toggle("show", sb.classList.contains("open"));
+      var open = sb.classList.contains("open");
+      if (bd) bd.classList.toggle("show", open);
+      document.body.classList.toggle("nav-open", open);
     } else {
       sb.classList.toggle("collapsed");
     }
@@ -539,6 +1299,7 @@
     if (sb) sb.classList.remove("open");
     var bd = $("#navBackdrop");
     if (bd) bd.classList.remove("show");
+    document.body.classList.remove("nav-open");
     var toggle = $("#navToggle");
     if (toggle && isMobile()) toggle.setAttribute("aria-expanded", "false");
   }
@@ -546,8 +1307,8 @@
   var PAGE_CODE = {
     home: "OVERVIEW / 01", connect: "ACCESS / 02", chat: "MESSAGES / 03", pool: "POOL / 04",
     roles: "ROLES / 05", scripts: "PLUGINS / 06", market: "MARKET / 07", features: "FEATURES / 08",
-    agent: "AGENT / 09", cron: "SCHEDULE / 10", tasks: "TASKS / 11", audit: "AUDIT / 12",
-    observe: "METRICS / 13", logs: "LOGS / 14"
+    agent: "AGENT / 09", cron: "SCHEDULE / 10", executions: "RUNS / 11", tasks: "TASKS / 12",
+    audit: "AUDIT / 13", observe: "METRICS / 14", logs: "LOGS / 15"
   };
   // 为没有显式眉标的页面补一条等宽编号，保证 14 个页面版式一致。
   function decoratePage(id) {
@@ -566,6 +1327,7 @@
   function switchView(id) {
     if (renderers[id]) renderers[id]();
     decoratePage(id);
+    if (LANG === "en") i18nLocalize(document.getElementById("view-" + id) || document.body);
      $$("#nav [data-view]").forEach(function (a) { a.classList.toggle("active", a.getAttribute("data-view") === id); });
     $$(".page").forEach(function (p) { p.hidden = p.id !== "view-" + id; });
     state.view = id;
@@ -636,7 +1398,7 @@
       + quick("tasks", "任务队列", "执行记录与重试", "list", "04")
         + "</div></div>"
         + "</div>"
-      + '<div class="panel mt-16"><div class="panel-head"><h3>接入检查</h3><span class="hint">首次使用按此顺序逐项自检</span></div><div class="panel-body" id="hcReady"><div class="empty">LOADING…</div></div></div>';
+      + '<div class="panel mt-16"><div class="panel-head"><h3>接入检查</h3><span class="hint">首次使用按此顺序逐项自检</span></div><div class="panel-body" id="hcReady">' + loadingState() + '</div></div>';
     Relay.refreshHome();
   }
 
@@ -845,6 +1607,50 @@
     });
   }
 
+  var ACCOUNT_HEALTH = {
+    valid: { label: "会话有效", cls: "badge-ok" },
+    expired: { label: "会话已失效", cls: "badge-err" },
+    unknown: { label: "状态未知", cls: "badge-warn" },
+    unconfigured: { label: "未配置账号", cls: "badge-off" }
+  };
+  function accountHealthView(h, acct) {
+    var key = h.status || (acct.logged_in ? "valid" : "unconfigured");
+    if (!acct.configured) key = "unconfigured";
+    else if (!acct.logged_in && key === "valid") key = "expired";
+    var meta = ACCOUNT_HEALTH[key] || ACCOUNT_HEALTH.unknown;
+    var bits = [];
+    if (h.last_ok) bits.push("最近成功 " + h.last_ok);
+    if (h.checked_at) bits.push("检查于 " + h.checked_at);
+    if (!bits.length) {
+      if (key === "unconfigured") bits.push("配置账号后可检查登录会话");
+      else bits.push(acct.code_login ? "该账号使用邮箱验证码登录" : "点击「立即检查」确认会话状态");
+    }
+    return { key: key, badge: '<span class="badge ' + meta.cls + '">' + meta.label + "</span>", detail: bits.join(" · ") };
+  }
+  function checkAccountHealth() {
+    api("/jiying/api/connect/account/health/check", { method: "POST", form: {} }).then(function (r) {
+      if (r.code === 200 && r.data) {
+        var key = r.data.status || "unknown";
+        var meta = ACCOUNT_HEALTH[key] || ACCOUNT_HEALTH.unknown;
+        toast("账号会话：" + meta.label + (r.data.message ? " · " + r.data.message : ""), key === "valid" ? "ok" : "err");
+        loadConnectStatus(function (st) { renderConnStatus(st); });
+      } else toast(r.msg || "检查失败", "err");
+    });
+  }
+  function reloginAccount() {
+    var codeLogin = !!(state.account && state.account.code_login);
+    setConnTab(codeLogin ? "code" : "pw");
+    toast(codeLogin ? "请重新获取验证码并登录" : "请重新输入密码并登录", "ok");
+  }
+  function logoutAccount() {
+    confirmDialog("退出账号", "退出后账号通道与自动发送将停止，确认退出？", "退出", function () {
+      api("/jiying/api/connect/account/logout", { method: "POST", form: {} }).then(function (r) {
+        if (r.code === 200) { toast("已退出账号", "ok"); loadConnectStatus(function (st) { renderConnStatus(st); }); }
+        else toast(r.msg || "退出失败", "err");
+      });
+    });
+  }
+
   function renderConnStatus(st) {
     var box = $("#connStatus");
     if (!box) return;
@@ -856,13 +1662,30 @@
     // 接入页两个通道都可直接编辑：仅在存在待处理项时提示，且不重复给出跳转按钮。
     var readyBlock = readinessPanel(readiness, { noFix: true, onlyIssues: true });
     var readinessHTML = readyBlock ? '<div class="mt-16 mb-8"><b>待处理项</b></div>' + readyBlock : "";
+    state.account = d.account;
+    var h = d.account.health || {};
+    var health = accountHealthView(h, d.account);
     box.innerHTML = '<div class="conn-state ' + (appOn ? "on" : "off") + '"><span class="dot ' + (appOn ? "on" : "off") + '"></span><div><b>应用通道</b><div class="muted" style="font-size:12px">' + esc((appOn ? "已连接 · " : "未连接") + (d.app.ws_url || "")) + "</div></div></div>"
       + '<div class="conn-state mt-8 ' + (acctOn ? "on" : "off") + '"><span class="dot ' + (acctOn ? "on" : "off") + '"></span><div><b>账号通道</b><div class="muted" style="font-size:12px">' + esc(acctOn ? d.account.email : d.account.status || "未登录") + "</div></div></div>"
+      + '<div class="health-card mt-12"><div class="health-head"><b>账号会话</b>' + health.badge + '</div>'
+      + '<div class="muted" style="font-size:12px">' + esc(health.detail) + "</div>"
+      + (h.message && health.key !== "unconfigured" ? '<div class="muted clamp2" style="font-size:12px;color:var(--err);margin-top:4px" title="' + esc(h.message) + '">' + esc(h.message) + "</div>" : "")
+      + '<div class="input-row mt-8">'
+      + '<button class="btn btn-ghost btn-sm" id="acctHealthCheck"' + (d.account.configured ? "" : " disabled") + '>立即检查</button>'
+      + (d.account.configured ? '<button class="btn btn-ghost btn-sm" id="acctRelogin">重新登录</button>' : "")
+      + (acctOn ? '<button class="btn btn-outline-danger btn-sm" id="acctLogout">退出账号</button>' : "")
+      + "</div></div>"
       + readinessHTML
       + '<div class="kv mt-16"><span class="k">应用 ID</span><span class="v"><code>' + esc(d.app.app_id || "-") + "</code></span></div>"
       + '<div class="kv"><span class="k">接入状态</span><span class="v">' + esc(d.account.status || "未登录") + "</span></div>"
       + '<div class="kv"><span class="k">运行时长</span><span class="v">' + esc(d.runtime.uptime) + "</span></div>"
       + '<div class="kv"><span class="k">服务器时间</span><span class="v">' + esc(d.runtime.time) + "</span></div>";
+    var hc = $("#acctHealthCheck");
+    if (hc) hc.addEventListener("click", checkAccountHealth);
+    var rl = $("#acctRelogin");
+    if (rl) rl.addEventListener("click", reloginAccount);
+    var lo = $("#acctLogout");
+    if (lo) lo.addEventListener("click", logoutAccount);
   }
 
   /* ---------- 消息收发 ---------- */
@@ -877,15 +1700,17 @@
     var cont = $("#view-chat");
     cont.innerHTML = '<div class="page-head"><div><span class="eyebrow">MESSAGES / 03</span><h2>消息收发</h2><p>选择会话查看消息并发送内容</p></div></div>'
       + '<div class="chat-grid">'
-      + '<div class="panel"><div class="panel-head"><h3>会话</h3></div><div class="panel-body" id="convList"><div class="empty">加载中…</div></div></div>'
+      + '<div class="panel"><div class="panel-head"><h3>会话</h3></div><div class="panel-body" id="convList">' + loadingState() + '</div></div>'
       + '<div class="panel" style="display:flex;flex-direction:column"><div class="panel-head"><h3>消息</h3><span class="hint" id="chatTitle"></span><select class="select" id="chatAccountSelect" style="max-width:220px;margin-left:auto"><option>加载账号中…</option></select></div>'
       + '<div class="panel-body" style="flex:1;display:flex;flex-direction:column"><div class="chat-stream" id="chatStream">' + emptyState("message", "选择一个会话", "从会话列表中选择，即可查看历史消息并发送内容。") + "</div>"
-      + '<div class="input-row mt-8"><input class="input" id="chatInput" placeholder="输入消息，回车或点击发送"><button class="btn btn-primary" id="chatSend">发送</button></div>'
+      + '<div class="muted" id="chatCap" style="font-size:12px;margin-top:8px">选择会话后显示可用发送身份</div>'
+      + '<div class="input-row mt-8"><select class="select" id="chatIdentity" style="width:126px" title="发送身份"><option value="auto">身份 · 自动</option><option value="app">身份 · 应用</option><option value="user">身份 · 用户</option></select><input class="input" id="chatInput" placeholder="输入消息，回车或点击发送"><button class="btn btn-ghost" id="chatPreview">预演</button><button class="btn btn-primary" id="chatSend">发送</button></div>'
       + "</div></div></div>";
     loadConvs();
     loadChatAccounts();
-    $("#chatSend").addEventListener("click", sendChat);
-    $("#chatInput").addEventListener("keydown", function (e) { if (e.key === "Enter") sendChat(); });
+    $("#chatSend").addEventListener("click", function () { sendChat(false); });
+    $("#chatPreview").addEventListener("click", function () { sendChat(true); });
+    $("#chatInput").addEventListener("keydown", function (e) { if (e.key === "Enter") sendChat(false); });
   }
 
   function loadChatAccounts() {
@@ -943,7 +1768,47 @@
     loadConvs();
     $("#chatTitle").textContent = c.name || "会话";
     loadChat();
+    loadChatCapabilities();
     startChatTimer();
+  }
+  function loadChatCapabilities() {
+    if (!state.conv) return;
+    var convID = state.conv.id;
+    state.chatCaps = null;
+    var el = $("#chatCap");
+    if (el) el.textContent = "正在检查可用发送身份…";
+    api("/jiying/api/conversation/capabilities?conversation_id=" + encodeURIComponent(convID)).then(function (r) {
+      if (!state.conv || state.conv.id !== convID) return;
+      if (r.code !== 200 || !r.data) {
+        if (el) el.textContent = r.msg || "可用身份检查失败，发送时会再次校验";
+        setChatIdentityAvailability(null);
+        return;
+      }
+      state.chatCaps = r.data;
+      var caps = r.data;
+      setChatIdentityAvailability(caps);
+      if (!el) return;
+      var can = [];
+      if (caps.can_send_as_app) can.push("应用");
+      if (caps.can_send_as_user) can.push("用户");
+      el.textContent = can.length ? "可发送身份：" + can.join(" / ") + " · " + (caps.reason || "") : "当前会话没有可用发送身份 · " + (caps.reason || "");
+      if (!can.length) el.style.color = "var(--err)";
+      else el.style.color = "";
+      var send = $("#chatSend"), prev = $("#chatPreview");
+      if (send) send.disabled = !can.length;
+      if (prev) prev.disabled = !can.length;
+    }).catch(function () {
+      if (el) el.textContent = "可用身份检查失败，发送时会再次校验";
+      setChatIdentityAvailability(null);
+    });
+  }
+  function setChatIdentityAvailability(caps) {
+    var sel = $("#chatIdentity");
+    if (!sel) return;
+    Array.prototype.forEach.call(sel.options, function (o) {
+      if (o.value === "app") o.disabled = caps ? !caps.can_send_as_app : false;
+      if (o.value === "user") o.disabled = caps ? !caps.can_send_as_user : false;
+    });
   }
 
   function loadChat() {
@@ -979,17 +1844,33 @@
     box.scrollTop = box.scrollHeight;
   }
 
-  function sendChat() {
+  function sendChat(dryRun) {
     var input = $("#chatInput");
     var text = input.value.trim();
     if (!state.conv || !text) { toast("请选择会话并输入内容", "err"); return; }
-    input.value = "";
-    api("/jiying/api/send", { method: "POST", form: { conversation_id: state.conv.id, text: text } }).then(function (r) {
-      if (r.code === 200) { toast("已发送", "ok"); setTimeout(loadChat, 800); }
-      else {
+    var identityEl = $("#chatIdentity");
+    var identity = identityEl ? identityEl.value : "auto";
+    if (!dryRun) input.value = "";
+    api("/jiying/api/send/unified", { method: "POST", form: { conversation_id: state.conv.id, text: text, identity: identity, dry_run: dryRun ? "true" : "false" } }).then(function (r) {
+      if (r.code === 200) {
+        var res = r.data || {};
+        var who = res.identity === "user" ? "用户" : res.identity === "app" ? "应用" : "自动";
+        if (dryRun) {
+          showModal("发送预演", '<div class="kv"><span class="k">会话</span><span class="v mono">' + esc(state.conv.id) + '</span></div>'
+            + '<div class="kv"><span class="k">解析身份</span><span class="v">' + esc(who) + '</span></div>'
+            + '<div class="kv"><span class="k">内容</span><span class="v">' + esc(text) + '</span></div>'
+            + '<div class="muted mt-8" style="font-size:12px">' + esc(res.reason || "未产生实际发送，也不会写入消息记录。") + '</div>',
+            '<button class="btn btn-primary" data-bs-dismiss="modal">知道了</button>');
+          return;
+        }
+        toast("已通过" + who + "身份发送", "ok");
+        setTimeout(loadChat, 800);
+      } else {
         // 发送失败时把内容还回输入框，避免用户手打的消息丢失（已在输入新内容则不覆盖）。
-        var box = $("#chatInput");
-        if (box && !box.value.trim()) box.value = text;
+        if (!dryRun) {
+          var box = $("#chatInput");
+          if (box && !box.value.trim()) box.value = text;
+        }
         toast(r.msg || "发送失败", "err");
       }
     });
@@ -1008,8 +1889,8 @@
     cont.innerHTML = '<div class="page-head"><div><h2>插件</h2><p>已安装的插件资产，支持 JavaScript 与 Python；安装后会自动登记为可调用功能</p></div><div class="spacer"></div>'
       + '<button class="btn btn-ghost btn-sm" onclick="Relay.go(\'features\')">功能管理 →</button>'
       + '<button class="btn btn-primary" id="newScript">新建插件</button></div>'
-      + '<div class="panel"><div class="panel-body" id="scriptList"><div class="empty">加载中…</div></div></div>'
-      + '<div class="panel mt-16"><div class="panel-head"><h3>技能</h3><span class="hint">可被插件 require 复用的 JS 模块，或 Markdown 说明；安装前会隔离试跑</span><div class="spacer"></div><button class="btn btn-primary btn-sm" id="newSkill">安装技能</button></div><div class="panel-body" id="skillList"><div class="empty">加载中…</div></div></div>';
+      + '<div class="panel"><div class="panel-body" id="scriptList">' + loadingState() + '</div></div>'
+      + '<div class="panel mt-16"><div class="panel-head"><h3>技能</h3><span class="hint">可被插件 require 复用的 JS 模块，或 Markdown 说明；安装前会隔离试跑</span><div class="spacer"></div><button class="btn btn-primary btn-sm" id="newSkill">安装技能</button></div><div class="panel-body" id="skillList">' + loadingState() + '</div></div>';
     var n = $("#newScript");
     if (n) n.addEventListener("click", function () { openScriptModal(null); });
     var ns = $("#newSkill");
@@ -1289,7 +2170,7 @@
     cont.innerHTML = '<div class="page-head"><div><h2>功能管理</h2><p>面向即应会话的可调用功能：内置、HTTP 与插件功能的启停、试跑与配置</p></div><div class="spacer"></div>'
       + '<button class="btn btn-ghost btn-sm" onclick="Relay.loadFeatures()">刷新</button>'
       + '<button class="btn btn-primary btn-sm" id="newFeature">安装功能</button></div>'
-      + '<div class="panel"><div class="panel-body" id="featureList"><div class="empty">加载中…</div></div></div>';
+      + '<div class="panel"><div class="panel-body" id="featureList">' + loadingState() + '</div></div>';
     var n = $("#newFeature");
     if (n) n.addEventListener("click", openFeatureModal);
     loadFeatures();
@@ -1381,7 +2262,7 @@
     var cont = $("#view-agent");
     cont.innerHTML = '<div class="page-head"><div><h2>Agent 工作台</h2><p>薄 Agent 配置与在线试跑，模型只负责选功能与填参数</p></div></div>'
       + '<div class="grid grid-2">'
-      + '<div class="panel"><div class="panel-head"><h3>模型配置</h3><span class="hint">仅主控可改</span></div><div class="panel-body" id="agentCfg"><div class="empty">加载中…</div></div></div>'
+      + '<div class="panel"><div class="panel-head"><h3>模型配置</h3><span class="hint">仅主控可改</span></div><div class="panel-body" id="agentCfg">' + loadingState() + '</div></div>'
       + '<div class="panel"><div class="panel-head"><h3>试跑</h3><span class="hint">不经过即应会话</span></div><div class="panel-body">'
       + '<div class="field"><label>会话 ID（可选）</label><input class="input" id="ag_conv" placeholder="留空则使用临时会话"></div>'
       + '<div class="field"><label>提问</label><textarea class="input" id="ag_prompt" rows="4" placeholder="例如：现在系统状态怎么样"></textarea></div>'
@@ -1389,7 +2270,7 @@
       + '<button class="btn btn-primary btn-sm" id="ag_run">运行</button></div>'
       + '<pre class="mono rl-out" id="ag_out">等待运行…</pre>'
       + "</div></div>"
-      + '<div class="panel" style="margin-top:16px"><div class="panel-head"><h3>工具契约</h3><span class="hint">由功能与插件清单生成的 JSON Schema</span></div><div class="panel-body" id="agentTools"><div class="empty">加载中…</div></div></div>'
+      + '<div class="panel" style="margin-top:16px"><div class="panel-head"><h3>工具契约</h3><span class="hint">由功能与插件清单生成的 JSON Schema</span></div><div class="panel-body" id="agentTools">' + loadingState() + '</div></div>'
       + "</div>";
     $("#ag_run").addEventListener("click", runAgent);
     loadAgentConfig();
@@ -1463,11 +2344,147 @@
     }).catch(function () { out.textContent = "运行失败"; });
   }
 
+  /* ---------- 执行记录 ---------- */
+  function renderExecutions() {
+    var cont = $("#view-executions");
+    var f = state.execFilter || (state.execFilter = { kind: "", status: "", name: "" });
+    cont.innerHTML = '<div class="page-head"><div><h2>执行记录</h2><p>定时任务与手动触发的执行结果、耗时和追踪号</p></div><div class="spacer"></div>'
+      + '<select class="select" id="execKind" style="width:120px" title="按类型筛选"><option value="">全部类型</option><option value="cron">定时</option><option value="manual">手动</option><option value="flow">流程</option></select>'
+      + '<select class="select" id="execStatus" style="width:120px" title="按状态筛选"><option value="">全部状态</option><option value="success">成功</option><option value="failed">失败</option><option value="running">执行中</option><option value="skipped">跳过</option></select>'
+      + '<input class="input" id="execName" placeholder="筛选名称 / 命令" style="width:190px">'
+      + '<button class="btn btn-ghost btn-sm" onclick="Relay.loadExecutions(false)">刷新</button></div>'
+      + '<div class="panel"><div class="table-wrap"><table class="table align-middle"><thead><tr><th class="nowrap" style="width:150px">开始时间</th><th class="nowrap" style="width:80px">类型</th><th style="width:170px">名称</th><th class="nowrap" style="width:88px">状态</th><th class="nowrap" style="width:88px">耗时</th><th>摘要</th></tr></thead><tbody id="execList"><tr><td colspan="6">' + loadingState() + '</td></tr></tbody></table></div></div>'
+      + '<div class="muted" id="execMeta" style="margin-top:8px;font-size:12px"></div>';
+    var k = $("#execKind"), st = $("#execStatus"), nm = $("#execName");
+    if (k) k.value = f.kind;
+    if (st) st.value = f.status;
+    if (nm) nm.value = f.name;
+    function sync() {
+      state.execFilter = { kind: k.value, status: st.value, name: nm.value.trim() };
+      loadExecutions(false);
+    }
+    if (k) k.addEventListener("change", sync);
+    if (st) st.addEventListener("change", sync);
+    if (nm) nm.addEventListener("keydown", function (e) { if (e.key === "Enter") sync(); });
+    loadExecutions(false);
+  }
+  function loadExecutions(silent) {
+    var f = state.execFilter || {};
+    var qs = "?limit=200&kind=" + encodeURIComponent(f.kind || "") + "&status=" + encodeURIComponent(f.status || "") + "&name=" + encodeURIComponent(f.name || "");
+    api("/jiying/api/executions" + qs).then(function (r) {
+      var box = $("#execList");
+      if (!box) return;
+      if (r.code !== 200) {
+        state.executions = [];
+        state.executionsErr = r.msg || r.message || "请稍后重试。";
+        tableError(box, 6, "activity", r.code === 403 ? "权限不足" : "执行记录加载失败", state.executionsErr, function () { state.executionsErr = ""; loadExecutions(false); });
+        setExecMeta(0);
+        return;
+      }
+      state.executionsErr = "";
+      state.executions = r.data || [];
+      paintExecutions();
+    }).catch(function () {
+      var box = $("#execList");
+      if (!box) return;
+      state.executions = [];
+      state.executionsErr = "网络异常，请稍后重试。";
+      tableError(box, 6, "activity", "执行记录加载失败", state.executionsErr, function () { state.executionsErr = ""; loadExecutions(false); });
+      setExecMeta(0);
+    });
+  }
+  var EXEC_KIND = { cron: "定时", manual: "手动", flow: "流程" };
+  var EXEC_STATUS = {
+    success: '<span class="badge badge-ok">成功</span>',
+    failed: '<span class="badge badge-err">失败</span>',
+    timeout: '<span class="badge badge-err">超时</span>',
+    running: '<span class="badge badge-run">执行中</span>',
+    skipped: '<span class="badge badge-off">跳过</span>'
+  };
+  function paintExecutions() {
+    var box = $("#execList");
+    if (!box || state.executionsErr) return;
+    var list = state.executions || [];
+    if (!list.length) {
+      box.innerHTML = '<tr><td colspan="6">' + emptyState("activity", "暂无执行记录", "定时任务执行或手动触发后会在这里留下结果。") + "</td></tr>";
+      setExecMeta(0);
+      return;
+    }
+    box.innerHTML = list.map(function (e) {
+      var id = String(e.id || "");
+      var detail = String(e.detail || e.error || "").replace(/\s+/g, " ");
+      var dur = Number(e.duration_ms || 0);
+      var durText = dur >= 1000 ? (dur / 1000).toFixed(1) + " s" : (dur ? dur + " ms" : "-");
+      return '<tr class="exec-row" data-exec-id="' + esc(id) + '"><td class="mono nowrap">' + esc(e.started_at || "-") + "</td>"
+        + '<td class="nowrap">' + esc(EXEC_KIND[e.kind] || e.kind || "-") + "</td>"
+        + '<td class="clip" title="' + esc(e.name || "") + '">' + esc(e.name || "-") + "</td>"
+        + '<td class="nowrap">' + (EXEC_STATUS[e.status] || '<span class="badge badge-off">' + esc(e.status || "-") + "</span>") + "</td>"
+        + '<td class="mono nowrap">' + esc(durText) + "</td>"
+        + '<td class="muted"><div class="clamp2" title="' + esc(detail) + '">' + esc(detail || "-") + "</div></td></tr>";
+    }).join("");
+    $$(".exec-row", box).forEach(function (tr) {
+      tr.addEventListener("click", function () { executionDetail(tr.getAttribute("data-exec-id")); });
+    });
+    setExecMeta(list.length);
+  }
+  function setExecMeta(n) {
+    var el = $("#execMeta");
+    if (el) el.textContent = n ? "共 " + n + " 条（最多保留 500 条）" : "";
+  }
+  function executionDetail(id) {
+    var e = (state.executions || []).filter(function (x) { return String(x.id) === String(id); })[0];
+    if (!e) return;
+    var rows = [
+      ["记录 ID", e.id],
+      ["类型", EXEC_KIND[e.kind] || e.kind || "-"],
+      ["名称", e.name || "-"],
+      ["命令", e.command || "-"],
+      ["状态", e.status || "-"],
+      ["开始", e.started_at || "-"],
+      ["结束", e.finished_at || "-"],
+      ["耗时", e.duration_ms ? e.duration_ms + " ms" : "-"],
+      ["执行者", e.owner || "-"],
+      ["追踪号", e.trace_id || "-"],
+      ["摘要", e.detail || "-"],
+      ["错误", e.error || "-"]
+    ];
+    var html = '<table class="table table-sm align-middle" style="margin:0"><tbody>'
+      + rows.map(function (kv) { return '<tr><th class="nowrap" style="width:96px">' + esc(kv[0]) + '</th><td class="mono" style="word-break:break-all">' + esc(String(kv[1] == null ? "" : kv[1])) + "</td></tr>"; }).join("")
+      + "</tbody></table>";
+    var actions = '<button class="btn btn-ghost" data-bs-dismiss="modal">关闭</button>';
+    if (e.trace_id) actions += '<button class="btn btn-primary" id="exec_logs">在日志中查找</button>';
+    showModal("执行详情", html, actions);
+    var btn = $("#exec_logs");
+    if (btn) btn.addEventListener("click", function () { closeModal(); searchLogs(e.trace_id); });
+  }
+  function gotoExecutions(name) {
+    state.execFilter = { kind: "", status: "", name: name || "" };
+    switchView("executions");
+  }
+
   /* ---------- 定时任务 ---------- */
+  function cronCommandLabel(cmd) {
+    var raw = String(cmd || "").trim();
+    if (raw.charAt(0) === "{") {
+      try {
+        var o = JSON.parse(raw);
+        if (o.type === "feature" || o.feature) {
+          var label = "功能 · " + (o.feature || "");
+          if (o.args) label += " · " + o.args;
+          return label;
+        }
+        if (o.type === "command" && o.command) return o.command;
+      } catch (e) { /* 保持原文 */ }
+    }
+    return raw;
+  }
   function renderCron() {
     var cont = $("#view-cron");
-    cont.innerHTML = '<div class="page-head"><div><h2>定时任务</h2><p>按 cron 表达式定时入队执行功能</p></div><div class="spacer"></div><button class="btn btn-primary" id="newCron">新建定时</button></div>'
-      + '<div class="panel"><div class="table-wrap"><table class="table align-middle"><thead><tr><th style="width:180px">名称</th><th class="nowrap" style="width:150px">表达式</th><th>命令</th><th class="nowrap" style="width:80px">状态</th><th class="nowrap text-right" style="width:150px">操作</th></tr></thead><tbody id="cronList"><tr><td colspan="5"><div class="empty">加载中…</div></td></tr></tbody></table></div></div>';
+    cont.innerHTML = '<div class="page-head"><div><h2>定时任务</h2><p>按 cron 表达式执行系统命令或已启用功能，结果写入执行记录</p></div><div class="spacer"></div>'
+      + '<button class="btn btn-ghost btn-sm" onclick="Relay.gotoExecutions(\'\')">执行记录</button>'
+      + '<button class="btn btn-primary" id="newCron">新建定时</button></div>'
+      + '<div class="panel"><div class="table-wrap"><table class="table align-middle"><thead><tr><th style="width:150px">名称</th><th class="nowrap" style="width:112px">调度</th><th class="nowrap" style="width:150px">下次运行</th><th style="width:136px">上次结果</th><th class="nowrap" style="width:88px">运行 / 失败</th><th class="nowrap" style="width:76px">状态</th><th class="nowrap text-right" style="width:214px">操作</th></tr></thead><tbody id="cronList"><tr><td colspan="7">' + loadingState() + "</td></tr></tbody></table></div></div>"
+      + '<div class="muted" style="margin-top:8px;font-size:12px">连续失败 3 次会自动停用该定时，修正后可手动启用。</div>';
     $("#newCron").addEventListener("click", openCronModal);
     loadCrons();
   }
@@ -1475,27 +2492,93 @@
     api("/jiying/api/crons").then(function (r) {
       var box = $("#cronList");
       if (!box) return;
-      if (r.code !== 200) { tableError(box, 5, "clock", r.code === 403 ? "权限不足" : "定时任务加载失败", r.msg || r.message, loadCrons); return; }
+      if (r.code !== 200) { tableError(box, 7, "clock", r.code === 403 ? "权限不足" : "定时任务加载失败", r.msg || r.message, loadCrons); return; }
       var list = r.data ? r.data : [];
-      if (!list.length) { box.innerHTML = '<tr><td colspan="5">' + emptyState("clock", "暂无定时任务", "新建定时后，中间件会按 cron 表达式自动入队执行。") + "</td></tr>"; return; }
+      if (!list.length) { box.innerHTML = '<tr><td colspan="7">' + emptyState("clock", "暂无定时任务", "新建定时后，中间件会按 cron 表达式自动执行，并记录每次结果。", '<button class="btn btn-primary btn-sm" id="cronEmptyAdd">新建定时</button>') + "</td></tr>"; var b = $("#cronEmptyAdd"); if (b) b.addEventListener("click", openCronModal); return; }
       box.innerHTML = list.map(function (c) {
         var on = Boolean(c.status);
-        return '<tr><td class="nowrap">' + esc(c.name) + '</td><td class="nowrap"><code>' + esc(c.cron) + '</code></td><td class="clip" title="' + esc(c.command) + '">' + esc(c.command) + '</td><td class="nowrap">' + (on ? '<span class="badge badge-ok">启用</span>' : '<span class="badge badge-off">停用</span>') + '</td><td class="text-right nowrap"><button class="btn btn-ghost btn-sm" onclick="Relay.toggleCron(' + jsArg(c.id) + ',' + (on ? "false" : "true") + ')">' + (on ? "停用" : "启用") + "</button> " + '<button class="btn btn-outline-danger btn-sm" onclick="Relay.delCron(' + jsArg(c.id) + ')">删除</button></td></tr>';
+        var last = String(c.last_status || "");
+        var badge = last === "success" ? '<span class="badge badge-ok">成功</span>'
+          : last === "failed" ? '<span class="badge badge-err">失败</span>'
+          : last === "timeout" ? '<span class="badge badge-err">超时</span>'
+          : last === "running" ? '<span class="badge badge-run">执行中</span>'
+          : c.last_success ? '<span class="badge badge-ok">成功</span>' : '<span class="badge badge-off">未运行</span>';
+        var when = c.last_run ? '<div class="muted mono" style="font-size:11px">' + esc(c.last_run) + "</div>" : "";
+        var err = c.last_error ? '<div class="muted clamp1" style="font-size:11px;color:var(--err)" title="' + esc(c.last_error) + '">' + esc(c.last_error) + "</div>" : "";
+        var fail = Number(c.fail_count || 0);
+        var count = Number(c.run_count || 0);
+        var owner = c.owner_role === "readonly" ? "" : "";
+        return '<tr><td class="nowrap"><div>' + esc(c.name) + '</div><div class="muted mono" style="font-size:11px" title="' + esc(cronCommandLabel(c.command)) + '">' + esc(cronCommandLabel(c.command)) + "</div></td>"
+          + '<td class="nowrap"><code>' + esc(c.cron) + "</code></td>"
+          + '<td class="nowrap mono">' + esc(c.next_run_at || "-") + "</td>"
+          + "<td>" + badge + when + err + "</td>"
+          + '<td class="mono nowrap">' + count + " / " + (fail ? '<span style="color:var(--err)">' + fail + "</span>" : "0") + "</td>"
+          + '<td class="nowrap">' + (on ? '<span class="badge badge-ok">启用</span>' : '<span class="badge badge-off">停用</span>') + "</td>"
+          + '<td class="text-right nowrap"><button class="btn btn-ghost btn-sm" title="立即执行一次" onclick="Relay.runCron(' + jsArg(c.id) + ')">运行一次</button>'
+          + '<button class="btn btn-ghost btn-sm" title="查看该任务执行记录" onclick="Relay.gotoExecutions(' + jsArg(c.name) + ')">记录</button>'
+          + '<button class="btn btn-ghost btn-sm" onclick="Relay.toggleCron(' + jsArg(c.id) + "," + (on ? "false" : "true") + ')">' + (on ? "停用" : "启用") + "</button>"
+          + '<button class="btn btn-outline-danger btn-sm" onclick="Relay.delCron(' + jsArg(c.id) + ')">删除</button></td></tr>';
       }).join("");
-    }).catch(function () { tableError($("#cronList"), 5, "clock", "定时任务加载失败", "网络异常，请检查服务状态。", loadCrons); });
+    }).catch(function () { tableError($("#cronList"), 7, "clock", "定时任务加载失败", "网络异常，请检查服务状态。", loadCrons); });
   }
   function openCronModal() {
-    showModal("新建定时任务", '<div class="field"><label>名称</label><input class="input" id="cm_name" placeholder="示例任务"></div>'
-      + '<div class="field"><label>Cron 表达式</label><input class="input" id="cm_cron" placeholder="*/30 * * * * *"></div>'
-      + '<div class="field"><label>命令 / 功能名</label><input class="input" id="cm_cmd" placeholder="状态"></div>',
+    showModal("新建定时任务", '<div class="field"><label>名称</label><input class="input" id="cm_name" placeholder="每日额度重置"></div>'
+      + '<div class="field"><label>Cron 表达式</label><input class="input" id="cm_cron" placeholder="0 5 * * * *"><div class="hint">秒 分 时 日 月 周，例如 <code>0 5 * * * *</code> 表示每小时第 5 分钟。</div></div>'
+      + '<div class="field"><label>执行类型</label><select class="select" id="cm_type"><option value="feature">已启用功能</option><option value="command">系统命令</option></select></div>'
+      + '<div id="cm_feature_box"><div class="field"><label>功能名</label><input class="input" id="cm_feature" list="cm_features" placeholder="选择或输入已启用功能"><datalist id="cm_features"></datalist></div>'
+      + '<div class="field"><label>功能参数（可选）</label><input class="input" id="cm_args" placeholder="例如：重置"></div>'
+      + '<div class="field"><label>会话 ID（可选）</label><input class="input" id="cm_conv" placeholder="功能需要会话上下文时填写"></div></div>'
+      + '<div id="cm_command_box" hidden><div class="field"><label>系统命令</label><input class="input" id="cm_command" placeholder="status"></div><div class="hint">管理员命令仅主人角色可创建与运行。</div></div>'
+      + '<pre class="rl-codeblock" id="cm_preview" style="margin:0;max-height:120px"></pre>',
       '<button class="btn btn-ghost" onclick="Relay.closeModal()">取消</button><button class="btn btn-primary" id="cm_save">创建</button>');
+    var typeEl = $("#cm_type"), fbox = $("#cm_feature_box"), cbox = $("#cm_command_box"), prev = $("#cm_preview");
+    function syncType() {
+      var isFeature = typeEl.value === "feature";
+      fbox.hidden = !isFeature;
+      cbox.hidden = isFeature;
+      syncPreview();
+    }
+    function syncPreview() {
+      if (!prev) return;
+      prev.textContent = buildCronCommand();
+    }
+    function buildCronCommand() {
+      if (typeEl.value === "command") return ($("#cm_command").value || "").trim();
+      var feature = ($("#cm_feature").value || "").trim();
+      if (!feature) return "";
+      var spec = { type: "feature", feature: feature };
+      var args = ($("#cm_args").value || "").trim();
+      var conv = ($("#cm_conv").value || "").trim();
+      if (args) spec.args = args;
+      if (conv) spec.conversation_id = conv;
+      return JSON.stringify(spec);
+    }
+    typeEl.addEventListener("change", syncType);
+    ["cm_feature", "cm_args", "cm_conv", "cm_command"].forEach(function (id) {
+      var el = $("#" + id);
+      if (el) el.addEventListener("input", syncPreview);
+    });
+    syncType();
+    api("/jiying/api/features").then(function (r) {
+      var dl = $("#cm_features");
+      if (!dl || r.code !== 200 || !r.data) return;
+      dl.innerHTML = r.data.filter(function (f) { return f.enabled; }).map(function (f) { return '<option value="' + esc(f.name) + '">' + esc(f.kind || "") + "</option>"; }).join("");
+    }).catch(function () {});
     $("#cm_save").addEventListener("click", function () {
-      var name = $("#cm_name").value.trim(), cron = $("#cm_cron").value.trim(), cmd = $("#cm_cmd").value.trim();
-      if (!name || !cron || !cmd) { toast("请填写名称、表达式与命令", "err"); return; }
+      var name = $("#cm_name").value.trim(), cron = $("#cm_cron").value.trim(), cmd = buildCronCommand();
+      if (!name || !cron || !cmd) { toast("请填写名称、表达式与执行内容", "err"); return; }
       api("/jiying/api/cron/add", { method: "POST", form: { name: name, cron: cron, command: cmd } }).then(function (r) {
         if (r.code === 200) { closeModal(); toast("已创建", "ok"); loadCrons(); }
         else toast(r.msg || "创建失败", "err");
       });
+    });
+  }
+  function runCron(id) {
+    api("/jiying/api/cron/run", { method: "POST", form: { id: id } }).then(function (r) {
+      if (r.code === 200) {
+        toast("已触发执行，稍后可在执行记录查看结果", "ok");
+        setTimeout(loadCrons, 1500);
+      } else toast(r.msg || "触发失败", "err");
     });
   }
   function toggleCron(id, on) {
@@ -1517,7 +2600,7 @@
       + '<select class="select" id="taskStatus" style="width:130px" title="按状态筛选"><option value="">全部状态</option><option value="failed">失败 / 超时</option><option value="running">执行中</option><option value="pending">排队中</option><option value="waiting">待确认</option><option value="done">完成</option><option value="canceled">已取消</option></select>'
       + '<input class="input" id="taskFilter" placeholder="筛选功能 / 会话 / 结果" style="width:200px">'
       + '<button class="btn btn-ghost btn-sm" onclick="Relay.loadTasks()">刷新</button></div>'
-      + '<div class="panel"><div class="table-wrap"><table class="table align-middle"><thead><tr><th style="width:128px">ID</th><th class="nowrap" style="width:88px">功能</th><th style="width:120px">会话</th><th class="nowrap" style="width:88px">状态</th><th>结果</th><th class="nowrap text-right" style="width:120px">操作</th></tr></thead><tbody id="taskList"><tr><td colspan="6"><div class="empty">加载中…</div></td></tr></tbody></table></div></div>'
+      + '<div class="panel"><div class="table-wrap"><table class="table align-middle"><thead><tr><th style="width:128px">ID</th><th class="nowrap" style="width:88px">功能</th><th style="width:120px">会话</th><th class="nowrap" style="width:88px">状态</th><th>结果</th><th class="nowrap text-right" style="width:120px">操作</th></tr></thead><tbody id="taskList"><tr><td colspan="6">' + loadingState() + '</td></tr></tbody></table></div></div>'
       + '<div class="muted" id="taskMeta" style="margin-top:8px;font-size:12px"></div>';
     $("#taskStatus").addEventListener("change", paintTasks);
     $("#taskFilter").addEventListener("input", paintTasks);
@@ -1623,33 +2706,75 @@
   }
 
   /* ---------- 运行日志 ---------- */
+  var LOG_LEVEL_LABEL = { error: "错误", warn: "警告", info: "信息", debug: "调试", log: "常规" };
   function renderLogs() {
     stopLogAuto();
     var cont = $("#view-logs");
-    cont.innerHTML = '<div class="page-head"><div><h2>运行日志</h2><p>中间件运行日志（需登录控制台；访问日志仅记方法与路径）</p></div><div class="spacer"></div>'
-      + '<input class="input" id="logDay" style="width:150px" type="date">'
-      + '<select class="select" id="logTail" style="width:110px"><option>100</option><option>200</option><option selected>500</option><option>1000</option></select>'
-      + '<input class="input" id="logFilter" placeholder="筛选关键字" style="width:180px">'
+    state.logLevel = state.logLevel || "all";
+    state.logPinned = true;
+    state.logFromBottom = 0;
+    var day = state.logDay || today();
+    cont.innerHTML = '<div class="page-head"><div><h2>运行日志</h2><p>按级别、追踪号与关键字检索；点击 trace 可反向筛选整条链路</p></div><div class="spacer"></div>'
       + '<label class="log-auto muted"><input type="checkbox" id="logAuto"> 自动刷新</label>'
-      + '<label class="log-auto muted"><input type="checkbox" id="logWrap"> 自动换行</label>'
-      + '<button class="btn btn-sm" id="logExport">导出</button>'
+      + '<button class="btn btn-ghost btn-sm" id="logExport">导出当前视图</button>'
       + '<button class="btn btn-primary btn-sm" id="logReload">刷新</button></div>'
-      + '<div class="panel"><div class="panel-body"><pre class="mono rl-logbox rl-pre" id="logBox" style="max-height:calc(100vh - 220px)">加载中…</pre></div></div>'
-      + '<div class="muted" id="logMeta" style="margin-top:8px;font-size:12px"></div>';
+      + '<div class="panel log-panel">'
+      + '<div class="log-toolbar"><div class="log-filters">'
+      + '<label class="log-field"><span>日期</span><input class="input" id="logDay" type="date"></label>'
+      + '<label class="log-field"><span>行数</span><select class="select" id="logTail"><option>100</option><option>200</option><option selected>500</option><option>1000</option></select></label>'
+      + '<label class="log-field log-search"><span>搜索</span><input class="input" id="logFilter" placeholder="关键字 / trace / 路径" spellcheck="false"></label>'
+      + '<label class="log-check"><input type="checkbox" id="logWrap"> 自动换行</label>'
+      + '</div><div class="log-stats" id="logStats"></div></div>'
+      + '<div class="log-vp"><div class="log-viewport" id="logBox" role="log" aria-live="polite" aria-label="运行日志"></div>'
+      + '<button type="button" class="log-latest" id="logLatest" hidden>回到底部</button></div>'
+      + '<div class="log-foot"><span id="logMeta">加载中…</span><span class="hint">双击日志行可复制 · 点击 trace 可按追踪号筛选</span></div>'
+      + '</div>';
+    $("#logDay").value = day;
     $("#logReload").addEventListener("click", loadLogs);
-    $("#logDay").value = today();
-    $("#logFilter").addEventListener("input", paintLogs);
+    $("#logDay").addEventListener("change", function () { state.logDay = this.value; loadLogs(); });
+    $("#logTail").addEventListener("change", loadLogs);
     $("#logExport").addEventListener("click", exportLogs);
     $("#logAuto").addEventListener("change", function () { setLogAuto(this.checked); });
     $("#logWrap").addEventListener("change", function () { setLogWrap(this.checked); });
+    try { if (localStorage.getItem("relay-log-wrap") === "1") { $("#logWrap").checked = true; setLogWrap(true); } } catch (e) { /* 忽略存储失败 */ }
+    var filter = $("#logFilter"), ft = null;
+    filter.addEventListener("input", function () {
+      clearTimeout(ft);
+      ft = setTimeout(function () { paintLogs(true); }, 120);
+    });
+    var box = $("#logBox");
+    box.addEventListener("scroll", updateLogPinned, { passive: true });
+    box.addEventListener("click", function (e) {
+      var trace = e.target.closest(".log-trace");
+      if (!trace) return;
+      e.preventDefault();
+      var value = trace.getAttribute("data-trace") || "";
+      if (!value) return;
+      state.logPending = value;
+      filter.value = value;
+      paintLogs(true);
+    });
+    box.addEventListener("dblclick", function (e) {
+      if (e.target.closest(".log-trace")) return;
+      var row = e.target.closest(".log-row");
+      if (!row) return;
+      var raw = (state.logShown || [])[Number(row.getAttribute("data-i")) || 0];
+      if (raw == null) return;
+      copyText(String(raw));
+    });
+    $("#logLatest").addEventListener("click", function () {
+      var b = $("#logBox");
+      if (b) b.scrollTop = b.scrollHeight;
+      state.logPinned = true;
+      updateLogPinned();
+    });
     loadLogs();
   }
-  // 默认按行展示（长行横向滚动），避免 trace= 等 token 被从中间断开；需要时再开自动换行。
   function setLogWrap(on) {
     var box = $("#logBox");
     if (box) box.classList.toggle("rl-logbox-wrap", !!on);
+    try { localStorage.setItem("relay-log-wrap", on ? "1" : "0"); } catch (e) { /* 忽略存储失败 */ }
   }
-  // 自动刷新为「tail -f」式流式查看，5 秒拉取一次当日日志并滚到底部。
   function setLogAuto(on) {
     stopLogAuto();
     if (on) { state.logTimer = setInterval(loadLogs, 5000); loadLogs(); }
@@ -1661,6 +2786,10 @@
     var d = new Date();
     return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
   }
+  function fmtClock(d) {
+    function p(n) { return String(n).padStart(2, "0"); }
+    return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+  }
   // 后端时间多为 RFC3339（UTC），统一转成本地「YYYY-MM-DD HH:mm:ss」以对齐服务器时间展示；无法解析则原样返回。
   function fmtTime(s) {
     s = String(s == null ? "" : s).trim();
@@ -1671,40 +2800,222 @@
     return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
   }
   function loadLogs() {
-    var day = ($("#logDay").value || today()).replace(/-/g, "");
+    var dayEl = $("#logDay");
+    if (!dayEl) return;
+    var box = $("#logBox");
+    if (box) {
+      state.logFromBottom = Math.max(0, box.scrollHeight - box.scrollTop - box.clientHeight);
+      state.logPinned = state.logFromBottom <= 32;
+      box.setAttribute("aria-busy", "true");
+    }
+    var day = (dayEl.value || today()).replace(/-/g, "");
+    state.logDay = dayEl.value || today();
     var tail = $("#logTail").value;
     api("/jiying/api/logs?day=" + day + "&tail=" + tail).then(function (r) {
-      var box = $("#logBox");
-      if (!box) return;
-      if (r.code !== 200) { box.textContent = r.msg || "加载失败"; return; }
+      var b = $("#logBox");
+      if (!b) return;
+      b.removeAttribute("aria-busy");
+      if (r.code !== 200) {
+        state.logLines = [];
+        state.logShown = [];
+        b.innerHTML = '<div class="log-empty"><b>日志加载失败</b><p>' + esc(r.msg || "请稍后重试。") + '</p><button type="button" class="btn btn-ghost btn-sm" id="logRetry">重试</button></div>';
+        var retry = $("#logRetry");
+        if (retry) retry.addEventListener("click", loadLogs);
+        var meta = $("#logMeta");
+        if (meta) meta.textContent = "加载失败";
+        renderLogStats({ all: 0, error: 0, warn: 0, info: 0, debug: 0 }, 0);
+        return;
+      }
       state.logLines = r.data.lines || [];
-      if (state.logPending) { $("#logFilter").value = state.logPending; state.logPending = ""; }
-      paintLogs();
+      if (state.logPending) { var f = $("#logFilter"); if (f) f.value = state.logPending; state.logPending = ""; }
+      state.logLoadedAt = fmtClock(new Date());
+      paintLogs(false);
+    }).catch(function () {
+      var b = $("#logBox");
+      if (!b) return;
+      b.removeAttribute("aria-busy");
+      state.logLines = [];
+      state.logShown = [];
+      b.innerHTML = '<div class="log-empty"><b>日志加载失败</b><p>网络异常，请检查服务状态。</p><button type="button" class="btn btn-ghost btn-sm" id="logRetry">重试</button></div>';
+      var retry = $("#logRetry");
+      if (retry) retry.addEventListener("click", loadLogs);
+      var meta = $("#logMeta");
+      if (meta) meta.textContent = "加载失败";
+      renderLogStats({ all: 0, error: 0, warn: 0, info: 0, debug: 0 }, 0);
     });
   }
   function searchLogs(kw) {
     state.logPending = String(kw || "");
-    if (state.view === "logs") { $("#logFilter").value = state.logPending; state.logPending = ""; paintLogs(); }
-    else switchView("logs");
+    if (state.view === "logs") {
+      var f = $("#logFilter");
+      if (f) f.value = state.logPending;
+      state.logPending = "";
+      paintLogs(true);
+    } else switchView("logs");
   }
-  function paintLogs() {
+  function parseLogLine(raw) {
+    var m = String(raw || "").match(/^\[\[\s*([^\]]+?)\s*\]\s*\[\s*([A-Za-z]+)\s*\]\s*\[\s*([^\]]*?)\s*\]\s*([\s\S]*?)\]\s*$/);
+    if (!m) {
+      var level = /(\bFATAL\b|\bPANIC\b)/.test(raw) ? "fatal" : (/\bERROR\b/.test(raw) ? "error" : (/\bWARN(ING)?\b/.test(raw) ? "warn" : "log"));
+      return { raw: true, time: "", clock: "", level: level, src: "", srcFull: "", msg: String(raw || "") };
+    }
+    var time = m[1].trim();
+    var srcFull = m[3].trim();
+    return {
+      raw: false,
+      time: time,
+      clock: time.split(/\s+/).pop() || time,
+      level: m[2].toLowerCase(),
+      src: srcFull.replace(/^.*[\\/]/, "").replace(/\s*:\s*/g, ":"),
+      srcFull: srcFull,
+      msg: m[4].trim()
+    };
+  }
+  function logLevelCounts(lines) {
+    var counts = { error: 0, warn: 0, info: 0, debug: 0, other: 0 };
+    lines.forEach(function (l) {
+      var lv = parseLogLine(l).level;
+      if (lv === "fatal") counts.error++;
+      else if (lv === "error") counts.error++;
+      else if (lv === "warn" || lv === "warning") counts.warn++;
+      else if (lv === "info") counts.info++;
+      else if (lv === "debug" || lv === "trace") counts.debug++;
+      else counts.other++;
+    });
+    return counts;
+  }
+  function renderLogStats(counts, total) {
+    var box = $("#logStats");
+    if (!box) return;
+    var active = state.logLevel || "all";
+    var chips = [
+      ["all", "全部", total],
+      ["issue", "异常", counts.error + counts.warn],
+      ["error", "错误", counts.error],
+      ["warn", "警告", counts.warn],
+      ["info", "信息", counts.info],
+      ["debug", "调试", counts.debug]
+    ];
+    box.innerHTML = chips.map(function (c) {
+      return '<button type="button" class="log-chip' + (active === c[0] ? " active" : "") + '" data-level="' + c[0] + '">' + c[1] + ' <b>' + c[2] + "</b></button>";
+    }).join("");
+    $$(".log-chip", box).forEach(function (b) {
+      b.addEventListener("click", function () {
+        state.logLevel = b.getAttribute("data-level");
+        paintLogs(true);
+      });
+    });
+  }
+  function logLevelPass(level, want) {
+    if (!want || want === "all") return true;
+    var lv = level === "fatal" ? "error" : (level === "warning" ? "warn" : level);
+    if (want === "issue") return lv === "error" || lv === "warn";
+    return lv === want;
+  }
+  function logHighlight(text, kw) {
+    text = String(text == null ? "" : text);
+    if (!kw) return esc(text);
+    var low = text.toLowerCase(), needle = kw.toLowerCase(), out = "", pos = 0, idx;
+    if (!needle) return esc(text);
+    while ((idx = low.indexOf(needle, pos)) >= 0) {
+      out += esc(text.slice(pos, idx)) + "<mark>" + esc(text.slice(idx, idx + needle.length)) + "</mark>";
+      pos = idx + needle.length;
+    }
+    return out + esc(text.slice(pos));
+  }
+  function logTraceHTML(trace, kw) {
+    return '<button type="button" class="log-trace" data-trace="' + esc(trace) + '" title="按此追踪号筛选">trace=' + logHighlight(trace, kw) + "</button>";
+  }
+  function logMessageHTML(msg, kw) {
+    var m = msg.match(/^(?:gin access\s+)?(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\S+)\s+(\d{3})\s+(\S+)\s+trace=(\S+)\s*$/i);
+    if (!m) return logHighlight(msg, kw);
+    var code = Number(m[3]);
+    var cls = code >= 500 ? "s-err" : code >= 400 ? "s-warn" : code >= 300 ? "s-info" : "s-ok";
+    return '<span class="log-method">' + esc(m[1].toUpperCase()) + '</span> <span class="log-path">' + logHighlight(m[2], kw) + '</span> <span class="log-status ' + cls + '">' + esc(m[3]) + '</span> <span class="log-dur">' + esc(m[4]) + "</span> " + logTraceHTML(m[5], kw);
+  }
+  function logRowHTML(raw, i, kw) {
+    var p = parseLogLine(raw);
+    if (p.raw) {
+      return '<div class="log-row lv-' + esc(p.level) + '" data-i="' + i + '" title="双击复制该行"><span class="log-no">' + (i + 1) + '</span><span class="log-msg">' + logHighlight(p.msg, kw) + "</span></div>";
+    }
+    var lv = p.level === "warning" ? "warn" : p.level;
+    return '<div class="log-row lv-' + esc(lv) + '" data-i="' + i + '" title="双击复制该行">'
+      + '<span class="log-no">' + (i + 1) + '</span>'
+      + '<span class="log-time" title="' + esc(p.time) + '">' + esc(p.clock) + '</span>'
+      + '<span class="log-level">' + esc(p.level.toUpperCase()) + '</span>'
+      + '<span class="log-src" title="' + esc(p.srcFull) + '">' + esc(p.src) + '</span>'
+      + '<span class="log-msg">' + logMessageHTML(p.msg, kw) + "</span></div>";
+  }
+  function paintLogs(resetToTop) {
     var box = $("#logBox");
     if (!box) return;
-    var kw = (($("#logFilter") || {}).value || "").trim().toLowerCase();
-    var lines = state.logLines;
-    var shown = kw ? lines.filter(function (l) { return String(l).toLowerCase().indexOf(kw) >= 0; }) : lines;
-    box.textContent = shown.join("\n") || (lines.length ? "（无匹配行）" : "（当日暂无日志）");
-    box.scrollTop = box.scrollHeight;
+    var kw = (($("#logFilter") || {}).value || "").trim();
+    var lower = kw.toLowerCase();
+    var base = lower ? state.logLines.filter(function (l) { return String(l).toLowerCase().indexOf(lower) >= 0; }) : state.logLines;
+    var counts = logLevelCounts(base);
+    renderLogStats({ all: base.length, error: counts.error, warn: counts.warn, info: counts.info, debug: counts.debug }, state.logLines.length);
+    var want = state.logLevel || "all";
+    var shown = base.filter(function (l) { return logLevelPass(parseLogLine(l).level, want); });
+    state.logShown = shown;
+    if (!shown.length) {
+      box.innerHTML = '<div class="log-empty"><b>' + (state.logLines.length ? "无匹配日志" : "当日暂无日志") + "</b><p>" + esc(state.logLines.length ? "调整级别或关键字后重试。" : "切换日期或刷新后查看。") + "</p></div>";
+    } else {
+      box.innerHTML = shown.map(function (l, i) { return logRowHTML(l, i, lower); }).join("");
+    }
+    if (resetToTop) {
+      box.scrollTop = 0;
+      state.logPinned = false;
+    } else if (state.logPinned) {
+      box.scrollTop = box.scrollHeight;
+    } else {
+      box.scrollTop = Math.max(0, box.scrollHeight - box.clientHeight - (state.logFromBottom || 0));
+    }
     var meta = $("#logMeta");
-    if (meta) meta.textContent = kw ? "匹配 " + shown.length + " / " + lines.length + " 行" : "共 " + lines.length + " 行";
+    if (meta) {
+      var text = kw || want !== "all"
+        ? (kw && want !== "all" ? "匹配 " + shown.length + " / 共 " + state.logLines.length + " 行" : (kw ? "匹配 " + shown.length + " / 共 " + state.logLines.length + " 行" : "筛选 " + shown.length + " / 共 " + state.logLines.length + " 行"))
+        : "共 " + state.logLines.length + " 行";
+      if (state.logLoadedAt) text += " · 最后刷新 " + state.logLoadedAt;
+      meta.textContent = text;
+    }
+    updateLogPinned();
+  }
+  function updateLogPinned() {
+    var box = $("#logBox"), btn = $("#logLatest");
+    if (!box) return;
+    var fromBottom = Math.max(0, box.scrollHeight - box.scrollTop - box.clientHeight);
+    state.logFromBottom = fromBottom;
+    state.logPinned = fromBottom <= 32;
+    if (btn) btn.hidden = state.logPinned;
   }
   function exportLogs() {
-    var lines = state.logLines || [];
-    if (!lines.length) { toast("暂无日志可导出", "error"); return; }
-    var kw = (($("#logFilter") || {}).value || "").trim().toLowerCase();
-    var out = kw ? lines.filter(function (l) { return String(l).toLowerCase().indexOf(kw) >= 0; }) : lines;
+    var lines = state.logShown || [];
+    if (!lines.length) { toast("暂无日志可导出", "err"); return; }
     var day = ($("#logDay").value || today());
-    downloadBlob(new Blob([out.join("\n") + "\n"], { type: "text/plain;charset=utf-8" }), "relay-logs-" + day + ".log");
+    downloadBlob(new Blob([lines.join("\n") + "\n"], { type: "text/plain;charset=utf-8" }), "relay-logs-" + day + ".log");
+    toast("已导出当前视图 " + lines.length + " 行", "ok");
+  }
+  function copyText(text) {
+    text = String(text == null ? "" : text);
+    var done = function () { toast("已复制该行日志", "ok"); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(function () { copyTextFallback(text, done); });
+      return;
+    }
+    copyTextFallback(text, done);
+  }
+  function copyTextFallback(text, done) {
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "-1000px";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); done(); }
+    catch (e) { toast("复制失败，请手动选择文本", "err"); }
+    document.body.removeChild(ta);
   }
   function downloadBlob(blob, name) {
     var url = URL.createObjectURL(blob);
@@ -1722,7 +3033,7 @@
     var cont = $("#view-pool");
     cont.innerHTML = '<div class="page-head"><div><h2>连接池</h2><p>多应用通道与个人账号状态，按应用隔离运行</p></div><div class="spacer"></div><button class="btn btn-primary" id="newApp">接入应用</button></div>'
       + '<div class="grid grid-2">'
-      + '<div class="panel"><div class="panel-head"><h3>应用通道</h3></div><div class="panel-body" id="poolApps"><div class="empty">加载中…</div></div></div>'
+      + '<div class="panel"><div class="panel-head"><h3>应用通道</h3></div><div class="panel-body" id="poolApps">' + loadingState() + '</div></div>'
        + '<div class="panel"><div class="panel-head"><h3>个人账号</h3></div><div class="panel-body" id="poolAccountProfile"></div><div class="panel-head pool-account-list-head"><h3>已授权账号</h3></div><div class="panel-body" id="poolAccountList"></div></div>'
       + "</div>"
       + '<div class="panel mt-16"><div class="panel-head"><h3>接入指引</h3></div><div class="panel-body"><div class="rl-cols">'
@@ -1819,7 +3130,7 @@
   function renderMarket() {
     var cont = $("#view-market");
     cont.innerHTML = '<div class="page-head"><div><h2>插件市场</h2><p>发现、上架与分发包，已安装的插件在「插件」页统一管理</p></div><div class="spacer"></div><button class="btn btn-primary" id="newPlugin">上架插件</button></div>'
-      + '<div class="panel"><div class="panel-body" id="marketList"><div class="empty">加载中…</div></div></div>'
+      + '<div class="panel"><div class="panel-body" id="marketList">' + loadingState() + '</div></div>'
       + '<div class="panel mt-16"><div class="panel-head"><h3>插件规范</h3></div><div class="panel-body"><div class="rl-cols">'
       + '<div><b>作用范围</b><p class="muted" style="margin:6px 0 0;font-size:13px">插件归属 <span class="mono">public</span> 或 <span class="mono">master</span>，安装时按应用或个人账号隔离。</p></div>'
       + '<div><b>类型</b><p class="muted" style="margin:6px 0 0;font-size:13px">支持脚本型与 http 型，脚本型随插件一同分发源码。</p></div>'
@@ -1901,7 +3212,7 @@
       + '<input class="input" id="auditFilter" placeholder="筛选操作者 / 动作 / 目标 / 详情" style="width:240px">'
       + '<button class="btn btn-sm" id="auditExport">导出</button>'
       + '<button class="btn btn-ghost btn-sm" onclick="Relay.loadAudit()">刷新</button></div>'
-      + '<div class="panel"><div class="table-wrap"><table class="table align-middle"><thead><tr><th class="nowrap" style="width:150px">时间</th><th class="nowrap" style="width:110px">操作者</th><th class="nowrap" style="width:130px">动作</th><th style="width:150px">目标</th><th>详情</th><th class="nowrap" style="width:130px">结果</th></tr></thead><tbody id="auditList"><tr><td colspan="6"><div class="empty">加载中…</div></td></tr></tbody></table></div></div>'
+      + '<div class="panel"><div class="table-wrap"><table class="table align-middle"><thead><tr><th class="nowrap" style="width:150px">时间</th><th class="nowrap" style="width:110px">操作者</th><th class="nowrap" style="width:130px">动作</th><th style="width:150px">目标</th><th>详情</th><th class="nowrap" style="width:130px">结果</th></tr></thead><tbody id="auditList"><tr><td colspan="6">' + loadingState() + '</td></tr></tbody></table></div></div>'
       + '<div class="muted" id="auditMeta" style="margin-top:8px;font-size:12px"></div>';
     $("#auditFilter").addEventListener("input", paintAudit);
     $("#auditExport").addEventListener("click", exportAudit);
@@ -1956,7 +3267,7 @@
   // 导出当前筛选结果为 CSV，带 BOM 以兼容 Excel 的中文显示。
   function exportAudit() {
     var rows = filteredAudit(state.auditRows || []);
-    if (!rows.length) { toast("暂无审计记录可导出", "error"); return; }
+    if (!rows.length) { toast("暂无审计记录可导出", "err"); return; }
     var head = ["时间", "操作者", "动作", "目标", "详情", "结果"];
     var lines = [head].concat(rows.map(function (a) {
       return [fmtTime(a.time), a.actor, a.action, a.target, a.detail, a.result];
@@ -1989,7 +3300,7 @@
       + tile("已收消息", "…", "累计接收") + tile("任务队列", "…", "执行中")
       + tile("通道状态", "…", "应用 · 账号") + tile("限流拒绝", "…", "被拒绝任务")
       + "</div>"
-      + '<div class="panel mt-16"><div class="panel-head"><h3>RPC 调用</h3><span class="hint">按方法聚合 · 来自 /metrics</span></div><div class="panel-body" id="observeRpc"><div class="empty">加载中…</div></div></div>'
+      + '<div class="panel mt-16"><div class="panel-head"><h3>RPC 调用</h3><span class="hint">按方法聚合 · 来自 /metrics</span></div><div class="panel-body" id="observeRpc">' + loadingState() + '</div></div>'
       + '<div class="panel mt-16"><div class="panel-head"><h3>原始指标</h3><span class="hint">Prometheus 文本格式</span></div><div class="panel-body"><pre class="mono rl-codeblock" id="observeRaw">加载中…</pre></div></div>';
     Relay.loadObserve();
   }
@@ -1998,8 +3309,8 @@
     var cont = $("#view-roles");
       cont.innerHTML = '<div class="page-head"><div><h2>权限管理</h2><p>主人权限面向即应用户 ID（在即应会话里发送「我的ID」获取）；运营与只读面向控制台登录账号。</p></div></div>'
         + '<div class="panel"><div class="panel-head"><h3>授权成员</h3><span class="hint" id="myAccount"></span></div><div class="panel-body"><div class="input-row"><input class="input" id="roleUser" placeholder="输入用户 ID"><select class="select" id="roleValue" style="max-width:150px"><option value="ops">运营</option><option value="readonly">只读</option><option value="master">主人</option></select><button class="btn btn-primary" id="grantRole">授予权限</button></div></div></div>'
-       + '<div class="panel mt-16"><div class="panel-head"><h3>成员角色</h3></div><div class="panel-body" id="roleList"><div class="empty">加载中…</div></div></div>'
-       + '<div class="panel mt-16"><div class="panel-head"><h3>主人列表</h3></div><div class="panel-body" id="masterList"><div class="empty">加载中…</div></div></div>';
+       + '<div class="panel mt-16"><div class="panel-head"><h3>成员角色</h3></div><div class="panel-body" id="roleList">' + loadingState() + '</div></div>'
+       + '<div class="panel mt-16"><div class="panel-head"><h3>主人列表</h3></div><div class="panel-body" id="masterList">' + loadingState() + '</div></div>';
      $("#grantRole").addEventListener("click", grantRole);
     loadRoles();
   }
@@ -2181,6 +3492,7 @@
     features: renderFeatures,
     agent: renderAgent,
     cron: renderCron,
+    executions: renderExecutions,
     tasks: renderTasks,
     market: renderMarket,
     audit: renderAudit,
@@ -2190,8 +3502,8 @@
   };
 
   // 需要定时轮询的视图：切换视图时自动启动，离开时由 switchView 清理。
-  var POLL = { home: function () { refreshHome(true); }, features: loadFeatures, observe: loadObserve };
-  var POLL_MS = { home: 10000, features: 10000, observe: 5000 };
+  var POLL = { home: function () { refreshHome(true); }, features: loadFeatures, observe: loadObserve, executions: function () { loadExecutions(true); } };
+  var POLL_MS = { home: 10000, features: 10000, observe: 5000, executions: 8000 };
 
   /* ---------- 启动 ---------- */
   function init() {
@@ -2202,6 +3514,7 @@
     document.documentElement.lang = (LANG === "en") ? "en" : "zh-CN";
     applyStaticI18n();
     refreshLangButtons();
+    if (LANG === "en") { i18nStartObserver(); i18nLocalize(document.body); }
     hydrateIcons();
     var lb = $("#langBtn");
     if (lb) lb.addEventListener("click", toggleLang);
@@ -2214,6 +3527,9 @@
     if (nc) nc.addEventListener("click", openNavCustomModal);
     var nb = $("#navBackdrop");
     if (nb) nb.addEventListener("click", closeNav);
+    var ncl = $("#navClose");
+    if (ncl) ncl.addEventListener("click", closeNav);
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeNav(); });
     window.addEventListener("resize", function () { if (!isMobile()) closeNav(); hintScroll(); });
     // 快捷键：“/” 或 Ctrl/Cmd+K 聚焦菜单筛选框（输入框内不拦截）。
     document.addEventListener("keydown", function (e) {
@@ -2277,6 +3593,10 @@
     delFeature: delFeature,
     toggleCron: toggleCron,
     delCron: delCron,
+    loadExecutions: loadExecutions,
+    gotoExecutions: gotoExecutions,
+    runCron: runCron,
+    checkAccountHealth: checkAccountHealth,
     loadTasks: loadTasks,
     retryTask: retryTask,
     delTask: delTask,

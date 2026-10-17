@@ -18,6 +18,8 @@ func registerConnectAPI() {
 	g.POST("/account", requireRole(RoleOps), connectAccount)
 	g.POST("/test-account", requireRole(RoleOps), connectTestAccount)
 	g.POST("/account/logout", requireRole(RoleOps), connectAccountLogout)
+	g.GET("/account/health", connectAccountHealth)
+	g.POST("/account/health/check", requireRole(RoleOps), connectAccountHealthCheck)
 	g.POST("/request-code", requireRole(RoleOps), connectRequestCode)
 	g.POST("/login-code", requireRole(RoleOps), connectLoginCode)
 }
@@ -31,9 +33,9 @@ func maskSecret(s string) string {
 }
 
 func connectStatus(c *gin.Context) {
-	conn := loadRelayConn()
 	apps := AppPoolSnapshot()
-	acctCfg := conn.effectiveAccount()
+	acctConn := CurrentAccountConn()
+	acctCfg := UserLogin{BaseURL: acctConn.BaseURL, Email: acctConn.Email, Password: acctConn.Secret}
 	var def AppPoolItem
 	for _, a := range apps {
 		if a.IsDefault {
@@ -51,12 +53,14 @@ func connectStatus(c *gin.Context) {
 		},
 		"apps": apps,
 		"account": gin.H{
-			"configured":    acctCfg.configured(),
+			"configured":    acctConn.configured(),
+			"code_login":    acctConn.CodeLogin,
 			"base_url":      maskURL(acctCfg.BaseURL),
 			"email":         acctCfg.Email,
 			"secret_masked": maskSecret(acctCfg.Password),
 			"logged_in":     userLoggedIn(),
 			"status":        UserSessionStatus(),
+			"health":        accountHealthSnapshot(),
 		},
 		"runtime": gin.H{
 			"uptime": JiyingUptime(),
@@ -252,9 +256,21 @@ func connectTestAccount(c *gin.Context) {
 }
 
 func connectAccountLogout(c *gin.Context) {
-	RecordAudit(consoleUser(c), "connect.account.logout", loadRelayConn().effectiveAccount().Email, "", "成功")
+	email := CurrentAccountConn().Email
+	RecordAudit(consoleUser(c), "connect.account.logout", email, "", "成功")
 	SetUserSession("", "")
+	clearUserToken(email)
 	jiyingJSON(c, "ok")
+}
+
+func connectAccountHealth(c *gin.Context) {
+	jiyingJSON(c, accountHealthSnapshot())
+}
+
+func connectAccountHealthCheck(c *gin.Context) {
+	health := checkAccountHealth(c.Request.Context())
+	RecordAudit(consoleUser(c), "account.health", health.Email, health.Status, health.Message)
+	jiyingJSON(c, health)
 }
 
 func connectRequestCode(c *gin.Context) {
@@ -289,7 +305,7 @@ func connectLoginCode(c *gin.Context) {
 		jiyingErr(c, "登录失败: "+err.Error())
 		return
 	}
-	if err := SyncAccountConn(AccountConn{BaseURL: base, Email: email, Secret: code, CodeLogin: true}); err != nil {
+	if err := SyncAccountConn(AccountConn{BaseURL: base, Email: email, Secret: "", CodeLogin: true}); err != nil {
 		RecordAudit(consoleUser(c), "connect.account.code", email, "", "失败: "+err.Error())
 		jiyingErr(c, err.Error())
 		return

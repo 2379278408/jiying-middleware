@@ -32,12 +32,14 @@ func registerConnectionsAPI() {
 func connectionsSnapshot(c *gin.Context) {
 	apps := AppPoolSnapshot()
 	acct := CurrentAccountConfig()
+	acctConn := CurrentAccountConn()
 	profile := accountProfile(c.Request.Context())
 	jiyingJSON(c, gin.H{
 		"apps":     apps,
 		"accounts": AccountPoolSnapshot(),
 		"account": gin.H{
-			"configured": acct.configured(),
+			"configured": acctConn.configured(),
+			"code_login": acctConn.CodeLogin,
 			"email":      firstNonEmpty(profile.Email, acct.Email),
 			"nickname":   profile.Nickname,
 			"avatar_url": profile.AvatarURL,
@@ -55,7 +57,12 @@ func connectionsAccountSelect(c *gin.Context) {
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
 	defer cancel()
-	if err := loginAccount(ctx, UserLogin{BaseURL: account.BaseURL, Email: account.Email, Password: account.Secret}, account.CodeLogin); err != nil {
+	if token, _, ok := loadUserToken(account.Email); ok {
+		SetUserSession(account.Email, token)
+	} else if account.CodeLogin {
+		jiyingErr(c, "该账号使用邮箱验证码登录，请重新获取验证码")
+		return
+	} else if err := loginAccount(ctx, UserLogin{BaseURL: account.BaseURL, Email: account.Email, Password: account.Secret}, false); err != nil {
 		jiyingErr(c, "账号切换登录失败: "+err.Error())
 		return
 	}

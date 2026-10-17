@@ -41,14 +41,16 @@ func TestDelOriginCommand(t *testing.T) {
 }
 
 func TestAddOriginCommand(t *testing.T) {
-	before := len(Functions)
+	backup := Functions
+	Functions = nil
+	t.Cleanup(func() { Functions = backup })
 	AddOriginCommand(&Function{Title: "t:command", Origin: true})
-	if len(Functions) != before+1 {
-		t.Fatalf("注册后函数表应 +1，实际 %d->%d", before, len(Functions))
+	if len(Functions) != 1 {
+		t.Fatalf("注册后函数表应有 1 个命令，实际 %d", len(Functions))
 	}
 	DelOriginCommand()
-	if len(Functions) != before {
-		t.Fatalf("清除 Origin 后应恢复到 %d", before)
+	if len(Functions) != 0 {
+		t.Fatalf("清除 Origin 后应为空，实际 %d", len(Functions))
 	}
 }
 

@@ -1,10 +1,14 @@
 package core
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -87,28 +91,99 @@ func sockCmdHandler(c *gin.Context) {
 }
 
 func dispatchLocalCommand(cmd string) string {
-	parts := strings.Fields(cmd)
-	if len(parts) == 0 {
-		return "空命令"
+	out, err := dispatchLocalCommandFor(cmd, "system")
+	if err != nil {
+		return err.Error()
 	}
+	return out
+}
+
+// cronFeatureCommand 描述定时任务中以 JSON 声明的功能调用。
+type cronFeatureCommand struct {
+	Type           string `json:"type"`
+	Command        string `json:"command"`
+	Feature        string `json:"feature"`
+	Args           string `json:"args"`
+	ConversationID string `json:"conversation_id"`
+}
+
+func parseCronFeatureCommand(raw string) (cronFeatureCommand, bool, error) {
+	raw = strings.TrimSpace(raw)
+	if !strings.HasPrefix(raw, "{") {
+		return cronFeatureCommand{}, false, nil
+	}
+	var spec cronFeatureCommand
+	if err := json.Unmarshal([]byte(raw), &spec); err != nil {
+		return spec, true, fmt.Errorf("命令 JSON 解析失败: %v", err)
+	}
+	if spec.Type == "" {
+		spec.Type = "feature"
+	}
+	if spec.Type != "feature" && spec.Type != "command" {
+		return spec, true, fmt.Errorf("不支持的命令类型: %s", spec.Type)
+	}
+	return spec, true, nil
+}
+
+// dispatchLocalCommandFor 执行系统命令或 JSON 功能命令，并按 userID 校验敏感命令权限。
+// 纯命令名维持原有系统命令语义，供 cron 与 socket 调用方复用。
+func dispatchLocalCommandFor(cmd, userID string) (string, error) {
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" {
+		return "", fmt.Errorf("空命令")
+	}
+	spec, isJSON, err := parseCronFeatureCommand(cmd)
+	if err != nil {
+		return "", err
+	}
+	if isJSON && spec.Type == "feature" {
+		name := strings.TrimSpace(spec.Feature)
+		if name == "" {
+			return "", fmt.Errorf("缺少功能名")
+		}
+		convID := strings.TrimSpace(spec.ConversationID)
+		if convID != "" && !validConversationID(convID) {
+			return "", fmt.Errorf("会话 ID 不合法")
+		}
+		if userID == "" {
+			userID = "system"
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		out, err := executeFeature(ctx, name, spec.Args, userID, convID)
+		if err != nil {
+			return out, err
+		}
+		return out, nil
+	}
+	if isJSON && spec.Type == "command" {
+		cmd = strings.TrimSpace(spec.Command)
+		if cmd == "" {
+			return "", fmt.Errorf("缺少命令")
+		}
+	}
+	parts := strings.Fields(cmd)
 	handle := parts[0]
 	handler, ok := cmdRouter.Load(handle)
 	if !ok {
-		return "命令未注册: " + handle
+		return "", fmt.Errorf("命令未注册: %s", handle)
+	}
+	if f := functionByHandle(handle); f != nil && f.Admin && !privilegedUser(userID) {
+		return "", fmt.Errorf("权限不足: %s", handle)
 	}
 	fn, ok := handler.(func())
 	if !ok {
-		return "命令处理器类型错误: " + handle
+		return "", fmt.Errorf("命令处理器类型错误: %s", handle)
 	}
 	fc := &Faker{
 		Message: cmd,
 		Type:    2,
-		UserID:  "system",
+		UserID:  userID,
 		ChatID:  "local",
 	}
 	fc.FromGroupID = "local"
 	withSender(fc, fn)
-	return "命令已执行: " + handle
+	return "命令已执行: " + handle, nil
 }
 
 func dispatchChatCommand(chatID, cmd string) string {

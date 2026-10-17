@@ -245,12 +245,16 @@ func registerJiyingAPI() {
 	g.POST("/cron/add", requireRole(RoleOps), jiyingAPICronAdd)
 	g.POST("/cron/toggle", requireRole(RoleOps), jiyingAPICronToggle)
 	g.POST("/cron/delete", requireRole(RoleOps), jiyingAPICronDelete)
+	g.POST("/cron/run", requireRole(RoleOps), jiyingAPICronRun)
+	g.GET("/executions", jiyingAPIExecutions)
 	g.GET("/tasks", jiyingAPITasks)
 	g.POST("/task/retry", requireRole(RoleOps), jiyingAPITaskRetry)
 	g.POST("/task/delete", requireRole(RoleOps), jiyingAPITaskDelete)
 	g.GET("/conversations", jiyingAPIConversations)
 	g.GET("/messages", jiyingAPIMessages)
 	g.POST("/send", requireRole(RoleOps), jiyingAPISend)
+	g.POST("/send/unified", requireRole(RoleOps), jiyingAPISendUnified)
+	g.GET("/conversation/capabilities", jiyingAPIConversationCapabilities)
 	g.POST("/send/image", requireRole(RoleOps), jiyingAPISendImage)
 	g.POST("/send/file", requireRole(RoleOps), jiyingAPISendFile)
 	g.POST("/send/card", requireRole(RoleOps), jiyingAPISendCard)
@@ -594,7 +598,23 @@ func jiyingAPICronAdd(c *gin.Context) {
 		jiyingErr(c, "Cron 表达式无效，支持 5 段或 6 段（含秒）写法，如 */30 * * * * *")
 		return
 	}
-	cmd := &CronCmd{Name: name, Cron: spec, Command: command, Status: true, Type: []string{"web"}}
+	if parsed, isJSON, err := parseCronFeatureCommand(command); isJSON {
+		if err != nil {
+			jiyingErr(c, err.Error())
+			return
+		}
+		if parsed.Type == "feature" {
+			if _, ok := GetFeature(strings.TrimSpace(parsed.Feature)); !ok {
+				jiyingErr(c, "功能不存在: "+parsed.Feature)
+				return
+			}
+			if conv := strings.TrimSpace(parsed.ConversationID); conv != "" && !validConversationID(conv) {
+				jiyingErr(c, "会话 ID 不合法")
+				return
+			}
+		}
+	}
+	cmd := &CronCmd{Name: name, Cron: spec, Command: command, Status: true, Type: []string{"web"}, Owner: consoleUser(c), OwnerRole: UserRole(consoleUser(c))}
 	if chat != "" {
 		cmd.GroupManager = []string{chat}
 	}
@@ -613,6 +633,31 @@ func jiyingAPICronToggle(c *gin.Context) {
 	}
 	RecordAudit(consoleUser(c), "cron.toggle", id, fmt.Sprintf("enabled=%v", on), "成功")
 	jiyingJSON(c, "ok")
+}
+
+func jiyingAPICronRun(c *gin.Context) {
+	id := strings.TrimSpace(c.PostForm("id"))
+	if RunCronCmdsByIds([]string{id}) == 0 {
+		jiyingErr(c, "定时不存在")
+		return
+	}
+	RecordAudit(consoleUser(c), "cron.run", id, "", "成功")
+	jiyingJSON(c, "ok")
+}
+
+func jiyingAPIExecutions(c *gin.Context) {
+	limit := 100
+	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
+		if _, err := fmt.Sscanf(raw, "%d", &limit); err != nil || limit <= 0 {
+			limit = 100
+		}
+	}
+	jiyingJSON(c, listExecutions(ExecutionFilter{
+		Kind:   strings.TrimSpace(c.Query("kind")),
+		Name:   strings.TrimSpace(c.Query("name")),
+		Status: strings.TrimSpace(c.Query("status")),
+		Limit:  limit,
+	}))
 }
 
 func jiyingAPICronDelete(c *gin.Context) {
@@ -724,6 +769,42 @@ func jiyingAPIMessages(c *gin.Context) {
 		return
 	}
 	c.Data(http.StatusOK, "application/json; charset=utf-8", wrapJiyingData(parsed.Data))
+}
+
+func jiyingAPIConversationCapabilities(c *gin.Context) {
+	convID := strings.TrimSpace(c.Query("conversation_id"))
+	if !validConversationID(convID) {
+		jiyingErr(c, "会话 ID 不合法")
+		return
+	}
+	jiyingJSON(c, conversationCapabilities(convID))
+}
+
+func jiyingAPISendUnified(c *gin.Context) {
+	convID := strings.TrimSpace(c.PostForm("conversation_id"))
+	text := strings.TrimSpace(c.PostForm("text"))
+	identity := strings.TrimSpace(c.PostForm("identity"))
+	dryRun := c.PostForm("dry_run") == "true" || c.PostForm("dry_run") == "1"
+	result, err := SendMessage(c.Request.Context(), SendOptions{
+		ConversationID: convID,
+		Text:           text,
+		Identity:       identity,
+		ReplyTo:        strings.TrimSpace(c.PostForm("reply_to")),
+		DryRun:         dryRun,
+	})
+	if err != nil {
+		RecordAudit(consoleUser(c), "message.send", convID, identity, "失败: "+err.Error())
+		jiyingErr(c, err.Error())
+		return
+	}
+	summary := truncateText(text, 50)
+	if dryRun {
+		RecordAudit(consoleUser(c), "message.dry_run", convID, result.Identity, summary)
+	} else {
+		jiyingCountOutbound()
+		RecordAudit(consoleUser(c), "message.send", convID, result.Identity, summary)
+	}
+	jiyingJSON(c, result)
 }
 
 func jiyingAPISend(c *gin.Context) {

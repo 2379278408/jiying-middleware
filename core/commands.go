@@ -104,3 +104,15 @@ func runCronCommand(f *Function) {
 }
 
 var _ = cron.EntryID(0)
+
+// functionByHandle 按命令句柄查找注册项，用于复用 Admin 标记做执行权限校验。
+func functionByHandle(handle string) *Function {
+	funcLock.RLock()
+	defer funcLock.RUnlock()
+	for _, f := range Functions {
+		if f != nil && f.Handle == handle {
+			return f
+		}
+	}
+	return nil
+}

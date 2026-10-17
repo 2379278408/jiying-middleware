@@ -19,7 +19,7 @@ type AccountConn struct {
 }
 
 func (a AccountConn) configured() bool {
-	return a.BaseURL != "" && a.Email != "" && a.Secret != ""
+	return a.BaseURL != "" && a.Email != "" && (a.Secret != "" || a.CodeLogin)
 }
 
 type RelayConn struct {
@@ -80,10 +80,7 @@ func CurrentAccountConfig() UserLogin {
 
 func initAppChannelFromConfig() {
 	applyAppConns(loadAppConns())
-	conn := loadRelayConn()
-	if conn.Account.BaseURL != "" && conn.Account.Email != "" && conn.Account.Secret != "" {
-		SetUserSession(conn.Account.Email, "")
-	}
+	initUserSessionHealth()
 	initUserChannel()
 }
 
