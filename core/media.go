@@ -58,11 +58,11 @@ func buildImageMessage(ctx context.Context, conversationID, src, caption, captio
 
 // buildFileMessage 解析文件来源并构造文件消息体。
 func buildFileMessage(ctx context.Context, conversationID, src, name string, sizeBytes int64) (map[string]any, error) {
-	content, err := resolveMediaContent(ctx, conversationID, "", src)
+	url, err := resolveMediaContent(ctx, conversationID, "", src)
 	if err != nil {
 		return nil, err
 	}
-	return FileMessage(content, name, sizeBytes), nil
+	return FileMessage(url, name, sizeBytes), nil
 }
 
 // ImageMessage 构造图片消息体，content 需为服务端可拉取的 URL。
@@ -78,9 +78,10 @@ func ImageMessage(content, caption, captionType string) map[string]any {
 	return m
 }
 
-// FileMessage 构造文件消息体，content 需为服务端可拉取的 URL。
-func FileMessage(content, name string, sizeBytes int64) map[string]any {
-	return map[string]any{"type": "file", "content": content, "name": name, "size_bytes": sizeBytes}
+// FileMessage 构造文件消息体；url 需为服务端可拉取的远程 URL。
+// 注意：服务端对 file 的远程拉取字段是 url，content 仅用于内联纯文本内容。
+func FileMessage(url, name string, sizeBytes int64) map[string]any {
+	return map[string]any{"type": "file", "url": url, "name": name, "size_bytes": sizeBytes}
 }
 
 // MarkdownMessage 构造 Markdown 富文本消息体。
@@ -169,6 +170,38 @@ func gojaArgString(call goja.FunctionCall, i int) string {
 		return ""
 	}
 	return v.String()
+}
+
+// gojaArgStrings 把第 i 个参数（JS 数组或单值）转为去空后的字符串切片。
+func gojaArgStrings(call goja.FunctionCall, i int) []string {
+	if i < 0 || i >= len(call.Arguments) {
+		return nil
+	}
+	v := call.Argument(i)
+	if v == nil || goja.IsUndefined(v) || goja.IsNull(v) {
+		return nil
+	}
+	if v.String() == "" {
+		return nil
+	}
+	switch arr := v.Export().(type) {
+	case []interface{}:
+		out := make([]string, 0, len(arr))
+		for _, e := range arr {
+			if s, ok := e.(string); ok && strings.TrimSpace(s) != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	case []string:
+		return arr
+	case string:
+		if strings.TrimSpace(arr) == "" {
+			return nil
+		}
+		return []string{arr}
+	}
+	return nil
 }
 
 // registerSendApis 向脚本运行时注入会话级发送与媒体能力；无会话上下文时发送返回 false。

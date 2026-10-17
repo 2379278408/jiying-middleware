@@ -314,3 +314,130 @@ func TestScriptAppApis(t *testing.T) {
 		t.Fatal("appUser must return null on error")
 	}
 }
+
+func TestScriptAppApisGroupTopicStatus(t *testing.T) {
+	client, rec := rpcTestClient(t, func(method string, _ json.RawMessage) (bool, string, json.RawMessage) {
+		switch method {
+		case "group_conversations.create":
+			return true, "", json.RawMessage(`{"conversation":{"id":"g-new"}}`)
+		case "group_conversations.members.list":
+			return true, "", json.RawMessage(`{"members":[{"id":"u-1","role":"member"}],"total":1}`)
+		case "conversation.topic.create":
+			return true, "", json.RawMessage(`{"conversation":{"id":"topic-1"},"last_message_seq":3}`)
+		}
+		return true, "", json.RawMessage(`{}`)
+	})
+	old := activeJiying
+	activeJiying = client
+	t.Cleanup(func() { activeJiying = old })
+
+	rt := goja.New()
+	registerAppApis(rt, "")
+
+	var group struct {
+		Name      string   `json:"name"`
+		MemberIDs []string `json:"member_ids"`
+		AppIDs    []string `json:"app_ids"`
+	}
+	if v, err := rt.RunString(`groupCreate("项目组", ["u-1","u-2"], ["app-x"])`); err != nil {
+		t.Fatal(err)
+	} else if v.ToObject(rt).Get("conversation").ToObject(rt).Get("id").String() != "g-new" {
+		t.Fatal("groupCreate must return created conversation")
+	}
+	if err := json.Unmarshal(rec.payload("group_conversations.create"), &group); err != nil {
+		t.Fatal(err)
+	}
+	if group.Name != "项目组" || len(group.MemberIDs) != 2 || len(group.AppIDs) != 1 {
+		t.Fatalf("group payload=%+v", group)
+	}
+
+	var add struct {
+		MemberIDs []string `json:"member_ids"`
+		AppIDs    []string `json:"app_ids"`
+	}
+	if v, err := rt.RunString(`groupAddMembers("g-1", ["u-3"], ["app-y"])`); err != nil {
+		t.Fatal(err)
+	} else if !v.ToBoolean() {
+		t.Fatal("groupAddMembers must report success")
+	}
+	if err := json.Unmarshal(rec.payload("group_conversations.members.add"), &add); err != nil {
+		t.Fatal(err)
+	}
+	if len(add.MemberIDs) != 1 || add.MemberIDs[0] != "u-3" || len(add.AppIDs) != 1 {
+		t.Fatalf("add payload=%+v", add)
+	}
+
+	if v, err := rt.RunString(`groupMembers("g-1", 2, 50)`); err != nil {
+		t.Fatal(err)
+	} else if v.ToObject(rt).Get("total").ToInteger() != 1 {
+		t.Fatal("groupMembers must return total")
+	}
+	var membersReq struct {
+		Page     int `json:"page"`
+		PageSize int `json:"page_size"`
+	}
+	if err := json.Unmarshal(rec.payload("group_conversations.members.list"), &membersReq); err != nil {
+		t.Fatal(err)
+	}
+	if membersReq.Page != 2 || membersReq.PageSize != 50 {
+		t.Fatalf("members req=%+v", membersReq)
+	}
+
+	if v, err := rt.RunString(`appTopicClose("topic-1", 3)`); err != nil {
+		t.Fatal(err)
+	} else if !v.ToBoolean() {
+		t.Fatal("appTopicClose must report success")
+	}
+	var closeReq struct {
+		ExpectedLastSeq int64 `json:"expected_last_message_seq"`
+	}
+	if err := json.Unmarshal(rec.payload("conversation.topic.close"), &closeReq); err != nil {
+		t.Fatal(err)
+	}
+	if closeReq.ExpectedLastSeq != 3 {
+		t.Fatalf("close req=%+v", closeReq)
+	}
+
+	if v, err := rt.RunString(`appStatus("app-conv-1", "正在处理消息")`); err != nil {
+		t.Fatal(err)
+	} else if !v.ToBoolean() {
+		t.Fatal("appStatus must report success")
+	}
+	var statusReq struct {
+		ConversationID string `json:"conversation_id"`
+		Status         string `json:"status"`
+	}
+	if err := json.Unmarshal(rec.payload("conversation.status"), &statusReq); err != nil {
+		t.Fatal(err)
+	}
+	if statusReq.ConversationID != "app-conv-1" || statusReq.Status != "正在处理消息" {
+		t.Fatalf("status req=%+v", statusReq)
+	}
+}
+
+func TestGojaArgStrings(t *testing.T) {
+	rt := goja.New()
+	var got []string
+	_ = rt.Set("grab", func(call goja.FunctionCall) goja.Value {
+		got = gojaArgStrings(call, 0)
+		return goja.Undefined()
+	})
+	if _, err := rt.RunString(`grab(["a","", "b", 3])`); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Fatalf("got=%v", got)
+	}
+	if _, err := rt.RunString(`grab([])`); err != nil {
+		t.Fatal(err)
+	}
+	if got != nil {
+		t.Fatalf("empty array must yield nil, got=%v", got)
+	}
+	if _, err := rt.RunString(`grab("solo")`); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "solo" {
+		t.Fatalf("single string got=%v", got)
+	}
+}

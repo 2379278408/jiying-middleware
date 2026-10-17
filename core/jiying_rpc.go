@@ -508,8 +508,8 @@ func appClientForScript(convID string) *JiyingClient {
 	return currentJiying()
 }
 
-// registerAppApis 向 goja 运行时注入应用通道的查询、历史与回执能力。
-// 只暴露指南对普通应用开放的方法，不含 runas / 代用户发送 / 群管理等写操作。
+// registerAppApis 向 goja 运行时注入应用通道的查询、历史、回执、话题、临时状态与群管理能力。
+// 只暴露指南对普通应用开放的 20 个方法，不含 runas / 代用户发送 / entity_card。
 func registerAppApis(rt *goja.Runtime, convID string) {
 	rpc := func(method string, payload map[string]any) (goja.Value, error) {
 		c := appClientForScript(convID)
@@ -594,5 +594,125 @@ func registerAppApis(rt *goja.Runtime, convID string) {
 			return goja.Null()
 		}
 		return v
+	})
+	// appTopicCreate(parentConversationId, sourceMessageId) -> 话题；失败返回 null。
+	_ = rt.Set("appTopicCreate", func(call goja.FunctionCall) goja.Value {
+		v, err := rpc("conversation.topic.create", map[string]any{
+			"conversation_id":   gojaArgString(call, 0),
+			"source_message_id": gojaArgString(call, 1),
+		})
+		if err != nil {
+			return goja.Null()
+		}
+		return v
+	})
+	// appTopicClose(conversationId[, expectedLastSeq]) -> bool。
+	_ = rt.Set("appTopicClose", func(call goja.FunctionCall) goja.Value {
+		_, err := rpc("conversation.topic.close", map[string]any{
+			"conversation_id":           gojaArgString(call, 0),
+			"expected_last_message_seq": call.Argument(1).ToInteger(),
+		})
+		return rt.ToValue(err == nil)
+	})
+	// appStatus(conversationId, status) -> bool；向一对一会话同步临时状态。
+	_ = rt.Set("appStatus", func(call goja.FunctionCall) goja.Value {
+		_, err := rpc("conversation.status", map[string]any{
+			"conversation_id": gojaArgString(call, 0),
+			"status":          gojaArgString(call, 1),
+		})
+		return rt.ToValue(err == nil)
+	})
+	// groupCreate(name, memberIds[, appIds]) -> {conversation,message}；失败返回 null。
+	_ = rt.Set("groupCreate", func(call goja.FunctionCall) goja.Value {
+		payload := map[string]any{
+			"name":       gojaArgString(call, 0),
+			"member_ids": gojaArgStrings(call, 1),
+		}
+		if appIDs := gojaArgStrings(call, 2); len(appIDs) > 0 {
+			payload["app_ids"] = appIDs
+		}
+		v, err := rpc("group_conversations.create", payload)
+		if err != nil {
+			return goja.Null()
+		}
+		return v
+	})
+	// groupGet(conversationId) -> 群详情；失败返回 null。
+	_ = rt.Set("groupGet", func(call goja.FunctionCall) goja.Value {
+		v, err := rpc("group_conversations.get", map[string]any{"conversation_id": gojaArgString(call, 0)})
+		if err != nil {
+			return goja.Null()
+		}
+		return v
+	})
+	// groupRename(conversationId, name) -> 群详情；失败返回 null。
+	_ = rt.Set("groupRename", func(call goja.FunctionCall) goja.Value {
+		v, err := rpc("group_conversations.update", map[string]any{
+			"conversation_id": gojaArgString(call, 0),
+			"name":            gojaArgString(call, 1),
+		})
+		if err != nil {
+			return goja.Null()
+		}
+		return v
+	})
+	// groupAnnounce(conversationId, announcement) -> 群详情；传空串表示清空，失败返回 null。
+	_ = rt.Set("groupAnnounce", func(call goja.FunctionCall) goja.Value {
+		v, err := rpc("group_conversations.update", map[string]any{
+			"conversation_id": gojaArgString(call, 0),
+			"announcement":    gojaArgString(call, 1),
+		})
+		if err != nil {
+			return goja.Null()
+		}
+		return v
+	})
+	// groupDissolve(conversationId) -> bool。
+	_ = rt.Set("groupDissolve", func(call goja.FunctionCall) goja.Value {
+		_, err := rpc("group_conversations.dissolve", map[string]any{"conversation_id": gojaArgString(call, 0)})
+		return rt.ToValue(err == nil)
+	})
+	// groupMembers(conversationId[, page[, pageSize]]) -> {members,total}；失败返回 null。
+	_ = rt.Set("groupMembers", func(call goja.FunctionCall) goja.Value {
+		v, err := rpc("group_conversations.members.list", map[string]any{
+			"conversation_id": gojaArgString(call, 0),
+			"page":            int(call.Argument(1).ToInteger()),
+			"page_size":       int(call.Argument(2).ToInteger()),
+		})
+		if err != nil {
+			return goja.Null()
+		}
+		return v
+	})
+	// groupAddMembers(conversationId, memberIds[, appIds]) -> bool。
+	_ = rt.Set("groupAddMembers", func(call goja.FunctionCall) goja.Value {
+		payload := map[string]any{
+			"conversation_id": gojaArgString(call, 0),
+			"member_ids":      gojaArgStrings(call, 1),
+		}
+		if appIDs := gojaArgStrings(call, 2); len(appIDs) > 0 {
+			payload["app_ids"] = appIDs
+		}
+		_, err := rpc("group_conversations.members.add", payload)
+		return rt.ToValue(err == nil)
+	})
+	// groupRemoveMember(conversationId, memberType, memberId) -> bool。
+	_ = rt.Set("groupRemoveMember", func(call goja.FunctionCall) goja.Value {
+		_, err := rpc("group_conversations.members.remove", map[string]any{
+			"conversation_id": gojaArgString(call, 0),
+			"member_type":     gojaArgString(call, 1),
+			"member_id":       gojaArgString(call, 2),
+		})
+		return rt.ToValue(err == nil)
+	})
+	// groupSetRole(conversationId, memberType, memberId, role) -> bool。
+	_ = rt.Set("groupSetRole", func(call goja.FunctionCall) goja.Value {
+		_, err := rpc("group_conversations.members.set_role", map[string]any{
+			"conversation_id": gojaArgString(call, 0),
+			"member_type":     gojaArgString(call, 1),
+			"member_id":       gojaArgString(call, 2),
+			"role":            gojaArgString(call, 3),
+		})
+		return rt.ToValue(err == nil)
 	})
 }

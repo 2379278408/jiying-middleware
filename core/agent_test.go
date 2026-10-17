@@ -194,3 +194,23 @@ func TestAgentFallsBackWhenPrimaryUnavailable(t *testing.T) {
 		t.Fatal("主模型不可用后应调用后备模型")
 	}
 }
+
+// TestAgentToolCallKeepsContentField 回归：assistant 带 tool_calls 时 content 为空也必须序列化出来，
+// 否则严格网关会以 missing field `content` 拒绝第二轮请求。
+func TestAgentToolCallKeepsContentField(t *testing.T) {
+	msg := chatMessage{Role: "assistant", ToolCalls: []chatToolCall{{ID: "call_1", Type: "function"}}}
+	raw, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"content":""`) {
+		t.Fatalf("assistant tool_call 消息必须保留 content 字段，got %s", raw)
+	}
+	user, err := json.Marshal(chatMessage{Role: "user", Content: "你好"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(user), "tool_calls") || strings.Contains(string(user), "tool_call_id") {
+		t.Fatalf("普通消息不应携带工具字段，got %s", user)
+	}
+}

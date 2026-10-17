@@ -171,8 +171,9 @@
 - 查询类：`UsersGet`（`users.get`）、`AppsGet`（`apps.get`）、`ListConversations`（`conversations.list`）、`ListMessages`（`conversation.messages.list`，要求 `before_or_equal_seq` 为正整数）。
 - 话题类：`TopicCreate` / `TopicGet` / `TopicClose`（`conversation.topic.create|get|close`），`JiyingTopic` 暴露话题会话 ID、父会话、来源消息与 `last_message_seq`。
 - 群聊类：`GroupCreate` / `GroupGet` / `GroupUpdate` / `GroupDissolve` 与 `GroupMembers` / `GroupAddMembers` / `GroupRemoveMember` / `GroupSetRole`，并在发送前校验群名称（1~120 字符）、公告长度（≤200）、名称与公告只能改其一、`member_type`（user/app）与 `role`（admin/member）。
-- 脚本能力：`registerSendApis` 末尾调用 `registerAppApis`，向 goja 注入 `appUser` / `appSelf` / `appConversations` / `appHistory` / `appReaction` / `appTopic`；查询类失败返回 `null`、`appReaction` 返回布尔，便于脚本判空。这些仅覆盖指南对普通应用开放的只读与回执能力，不含 `runas`、代用户发送、群管理等写操作。
-- 单测覆盖：`core/jiying_rpc_test.go` 覆盖目标校验、用户/会话发送、查询解析、话题解析、群参数校验与脚本 API 行为。
+- 脚本能力：`registerSendApis` 末尾调用 `registerAppApis`，向 goja 注入完整应用通道能力。查询与回执：`appUser` / `appSelf` / `appConversations` / `appHistory` / `appReaction`；话题与状态：`appTopic`（查询）/ `appTopicCreate` / `appTopicClose` / `appStatus`；群管理：`groupCreate` / `groupGet` / `groupRename` / `groupAnnounce` / `groupDissolve` / `groupMembers` / `groupAddMembers` / `groupRemoveMember` / `groupSetRole`。查询类失败返回 `null`、写操作返回布尔，便于脚本判空。数组参数（成员/应用 ID）统一经 `gojaArgStrings` 清洗，空数组视为未提供。
+- 覆盖范围：上述脚本接口覆盖指南对普通应用开放的全部 20 个方法，不含 `runas`、代用户发送与 `entity_card`。
+- 单测覆盖：`core/jiying_rpc_test.go` 覆盖目标校验、用户/会话发送、查询解析、话题解析、群参数校验、脚本 API 行为（含群/话题/状态注入）与数组参数清洗。
 
 ### Agent 服务端历史上下文（`core/agent.go`）
 
@@ -184,10 +185,11 @@
 
 ### 媒体消息 URL 化（`core/media.go`）
 
-按指南要求，图片/文件消息体使用服务端可拉取的 `content`（URL），不再发送仅应用可见的 `file_id`。
+按指南要求，图片/文件消息体使用服务端可拉取的 URL，不再发送仅应用可见的 `file_id`。
 
 - 解析入口：`resolveMediaContent` 统一处理媒体来源——传入绝对 `http(s)` URL 时原样返回，传入 `file_id` 时经 `appReadTemporaryURL`（`temporary_files.read_urls`）换取签名 URL；空白来源直接报错。`buildImageMessage` / `buildFileMessage` 先解析再构造消息体。
-- 消息体：`ImageMessage(content, caption, captionType)` 写 `content` 与可选 `caption` / `caption_type`（默认 `text`，为 `markdown` 时保留）；`FileMessage(content, name, sizeBytes)` 写 `content` / `name` / `size_bytes`；新增 `MarkdownMessage(content)` 构造 `markdown` 富文本。
+- 消息体字段差异（对齐服务端实现）：图片的远程 URL 放 `content`（服务端 `createRemoteImageMessageBody` 接受 `content` 或 `url`，`url` 为别名）；**文件的远程 URL 必须放 `url`**，`content` 在服务端只作内联纯文本（≤64KiB、`text/plain`，走 `createInlineFileMessageBody`）。两者同时提供会报「文件 URL 和内容只能二选一」。`ImageMessage(content, caption, captionType)` 写 `content` 与可选 `caption` / `caption_type`（默认 `text`，为 `markdown` 时保留）；`FileMessage(url, name, sizeBytes)` 写 `url` / `name` / `size_bytes`；新增 `MarkdownMessage(content)` 构造 `markdown` 富文本。
+- 服务端拉取约束：URL 须为 `http(s)`，DNS 解析不得命中 loopback/私有/链路本地/多播/`100.64.0.0/10`（SSRF 防护，`validateLinkFetchAddr`），否则报「URL 不允许访问」；图片下载后转 WebP，服务端上限 `request_too_large`（图片 >5MiB、文件 >20MiB）。
 - 调用面：控制台 `/send/image`、`/send/file` 同时接受 `url` 或 `file_id`（无 `url` 时回退 `file_id`），新增 `/send/markdown`；脚本 `sendImage` / `sendFile` 接受 URL 或 `file_id` 并支持 `caption_type`，新增 `sendMarkdown`；便捷函数 `SendImageToConv` / `SendFileToConv` 语义同步为「URL 或 `file_id`」，新增 `SendMarkdownToConv`。
-- 单测覆盖：`TestMediaMessageBuilders` 断言 `content` 与 `caption_type`；`TestResolveMediaContentPassthroughURL` 覆盖 URL 直通与空白报错。
+- 单测覆盖：`TestMediaMessageBuilders` 断言图片 `content`/`caption_type` 与文件 `url`（并断言文件体不出现 `content`）；`TestResolveMediaContentPassthroughURL` 覆盖 URL 直通与空白报错。
 

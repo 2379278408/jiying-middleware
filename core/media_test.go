@@ -21,8 +21,11 @@ func TestMediaMessageBuilders(t *testing.T) {
 		t.Fatal("empty caption must be omitted")
 	}
 	file := FileMessage("https://cdn.example.com/a.pdf", "a.pdf", 10)
-	if file["type"] != "file" || file["content"] != "https://cdn.example.com/a.pdf" || file["size_bytes"] != int64(10) {
+	if file["type"] != "file" || file["url"] != "https://cdn.example.com/a.pdf" || file["size_bytes"] != int64(10) {
 		t.Fatalf("file message mismatch: %+v", file)
+	}
+	if _, ok := file["content"]; ok {
+		t.Fatal("file message must not put remote URL in content (server treats content as inline text)")
 	}
 	if got := MarkdownMessage("**hi**")["type"]; got != "markdown" {
 		t.Fatalf("markdown type mismatch: %v", got)
