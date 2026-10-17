@@ -48,11 +48,12 @@ var aiEndpoints = []apiDoc{
 	{"POST", "/jiying/api/send/unified", "统一发送：自动选择身份与消息类型", "ops", []string{"conversation_id", "text", "identity", "reply_to", "dry_run"}, "dry_run=true 只预演"},
 	{"POST", "/jiying/api/send/image", "发送图片", "ops", []string{"conversation_id", "url", "file_id", "caption", "caption_type", "reply_to"}, "url 与 file_id 二选一"},
 	{"POST", "/jiying/api/send/file", "发送文件", "ops", []string{"conversation_id", "url", "file_id", "name", "size", "reply_to"}, "url 与 file_id 二选一；size 为字节数"},
+	{"POST", "/jiying/api/upload", "上传临时文件并获取 file_id", "ops", []string{"name", "content_type", "data_base64"}, "也支持 multipart 的 file 字段；最大 20 MB"},
 	{"POST", "/jiying/api/send/card", "发送卡片", "ops", []string{"conversation_id", "title", "description", "url", "reply_to"}, ""},
 	{"POST", "/jiying/api/send/markdown", "发送 Markdown", "ops", []string{"conversation_id", "content", "text", "reply_to"}, "content 与 text 等价"},
 	{"POST", "/jiying/api/send/link", "发送链接卡片", "ops", []string{"conversation_id", "url", "title", "reply_to"}, ""},
 	{"POST", "/jiying/api/send/chart", "发送图表", "ops", []string{"conversation_id", "chart_type", "title", "description", "data", "reply_to"}, "data 为 JSON 字符串"},
-	{"GET", "/jiying/api/logs", "读取运行日志", "readonly", []string{"tail", "day"}, "tail 最大 2000；day 形如 20261017"},
+	{"GET", "/jiying/api/logs", "读取运行日志", "ops", []string{"tail", "day"}, "tail 最大 2000；day 形如 20261017"},
 	{"GET", "/jiying/api/connect/status", "接入状态：应用、账号、运行时就绪度", "readonly", nil, ""},
 	{"GET", "/jiying/api/connect/readiness", "接入就绪度检查", "readonly", nil, ""},
 	{"POST", "/jiying/api/connect/app", "配置即应应用（WebSocket 地址等）", "ops", []string{"ws_url", "app_id", "secret"}, "敏感字段用 **** 占位表示不修改"},
@@ -94,6 +95,7 @@ var aiEndpoints = []apiDoc{
 	{"GET", "/jiying/api/icon", "生成并缓存图标（需 msg 关键词）", "readonly", []string{"msg", "n"}, "n 非空时返回 PNG"},
 	{"GET", "/jiying/api/keys", "列出 API Key（仅浏览器会话）", "master", nil, "密钥不能管理自身"},
 	{"POST", "/jiying/api/keys", "创建 API Key（仅浏览器会话）", "master", []string{"label", "scope", "expires_days"}, "创建后明文只返回一次"},
+	{"POST", "/jiying/api/keys/rotate", "轮换 API Key（仅浏览器会话）", "master", []string{"id", "expires_days"}, "expires_days 留空则沿用旧密钥剩余有效期"},
 	{"POST", "/jiying/api/keys/delete", "撤销 API Key（仅浏览器会话）", "master", []string{"id"}, ""},
 	{"GET", "/jiying/api/ai/manifest", "AI 能力清单：功能、定时、端点、约定", "readonly", nil, ""},
 }
@@ -187,7 +189,71 @@ func aiManifest(c *gin.Context) {
 
 var aiSessionOnly = map[string]bool{
 	"/jiying/api/keys":        true,
+	"/jiying/api/keys/rotate": true,
 	"/jiying/api/keys/delete": true,
+}
+
+// fieldExample 为常见参数给出可直接替换的示例值，避免文档里只有类型没有形状。
+func fieldExample(name string) string {
+	switch name {
+	case "id", "file_id", "message_id", "reply_to":
+		return "abc123"
+	case "conversation_id":
+		return "conv_abc123"
+	case "url":
+		return "https://example.com/file.png"
+	case "name", "label":
+		return "巡检机器人"
+	case "title":
+		return "运行结果"
+	case "content", "text", "code", "system", "prompt":
+		return "示例内容"
+	case "data_base64", "content_base64":
+		return "aGVsbG8="
+	case "content_type":
+		return "text/plain"
+	case "scope":
+		return "ops"
+	case "expires_days":
+		return "30"
+	case "dry_run":
+		return "true"
+	case "data":
+		return `{"labels":["一月","二月"],"values":[12,18]}`
+	case "msg":
+		return "状态"
+	case "tail", "day":
+		return "200"
+	case "cron":
+		return "0 */30 * * * *"
+	case "args":
+		return ""
+	default:
+		return "<" + name + ">"
+	}
+}
+
+// openAPIResponse 返回统一的成功响应结构，业务错误仍以 HTTP 200 + code=1 返回。
+func openAPIResponse() gin.H {
+	return gin.H{
+		"description": "统一响应；code=200 表示成功，code=1 表示业务失败",
+		"content": gin.H{
+			"application/json": gin.H{
+				"schema": gin.H{
+					"type":     "object",
+					"required": []string{"code"},
+					"properties": gin.H{
+						"ok":       gin.H{"type": "boolean"},
+						"code":     gin.H{"type": "integer", "example": 200},
+						"message":  gin.H{"type": "string"},
+						"trace_id": gin.H{"type": "string"},
+						"data":     gin.H{},
+					},
+				},
+				"example": gin.H{"ok": true, "code": 200, "message": "", "data": gin.H{}},
+			},
+		},
+	}
 }
 
 func buildOpenAPI(base string) gin.H {
@@ -199,13 +265,15 @@ func buildOpenAPI(base string) gin.H {
 			security = []gin.H{{"cookieAuth": []string{}}}
 		}
 		op := gin.H{
-			"summary":  ep.Summary,
-			"tags":     []string{strings.Split(strings.TrimPrefix(path, "/jiying/api/"), "/")[0]},
-			"security": security,
+			"summary":         ep.Summary,
+			"tags":            []string{strings.Split(strings.TrimPrefix(path, "/jiying/api/"), "/")[0]},
+			"security":        security,
+			"x-required-role": ep.Scope,
 			"responses": gin.H{
-				"200": gin.H{"description": "统一响应 {code:200,data}"},
-				"401": gin.H{"description": "未认证"},
-				"403": gin.H{"description": "权限不足"},
+				"200": openAPIResponse(),
+				"401": gin.H{"description": "未登录、密钥无效或已过期"},
+				"403": gin.H{"description": "角色不足，或密钥无权访问该接口"},
+				"429": gin.H{"description": "API Key 请求超过每分钟 180 次"},
 			},
 		}
 		if ep.Notes != "" {
@@ -226,11 +294,19 @@ func buildOpenAPI(base string) gin.H {
 			}
 		} else {
 			props := gin.H{}
+			example := gin.H{}
 			for _, f := range ep.Fields {
 				props[f] = gin.H{"type": "string"}
+				example[f] = fieldExample(f)
 			}
 			op["requestBody"] = gin.H{
-				"content": gin.H{"application/x-www-form-urlencoded": gin.H{"schema": gin.H{"type": "object", "properties": props}}},
+				"required": true,
+				"content": gin.H{
+					"application/x-www-form-urlencoded": gin.H{
+						"schema":  gin.H{"type": "object", "properties": props},
+						"example": example,
+					},
+				},
 			}
 		}
 		if _, ok := paths[path]; !ok {
@@ -286,6 +362,8 @@ func buildAIGuide(base string) string {
 - 查看连接：GET /jiying/api/connect/status
 - 查看会话：GET /jiying/api/conversations
 - 读取消息：GET /jiying/api/messages?conversation_id=<id>
+- 上传文件：POST /jiying/api/upload  name,content_type,data_base64（或 multipart file），最大 20 MB
+- 发送文件：POST /jiying/api/send/file  conversation_id,file_id,name,size
 - 预演发送：POST /jiying/api/send/unified  conversation_id,text,dry_run=true
 - 正式发送：同上去掉 dry_run；身份不确定时先 dry_run
 - 执行功能：POST /jiying/api/feature/run  name,args

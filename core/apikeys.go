@@ -62,6 +62,7 @@ type apiKeyWindow struct {
 const (
 	apiKeyRateLimit  = 180
 	apiKeyRateWindow = time.Minute
+	maxAPIKeys       = 100
 )
 
 func loadAPIKeys() map[string]savedAPIKey {
@@ -90,32 +91,20 @@ func hashAPIKey(token string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// CreateAPIKey 生成新密钥并返回一次明文。expiresDays <= 0 表示长期有效。
-func CreateAPIKey(label, scope string, expiresDays int) (string, APIKey, error) {
-	label = strings.TrimSpace(label)
-	if label == "" {
-		return "", APIKey{}, fmt.Errorf("请填写密钥备注")
-	}
-	if len([]rune(label)) > 40 {
-		label = string([]rune(label)[:40])
-	}
-	if _, ok := roleRank[scope]; !ok || scope == "" {
-		return "", APIKey{}, fmt.Errorf("权限范围只能是 readonly / ops / master")
-	}
+// newAPIKeyRecord 生成密钥明文与落盘记录；调用方负责加锁与持久化。
+func newAPIKeyRecord(label, scope string, expiresDays int, now time.Time) (string, savedAPIKey, error) {
 	buf := make([]byte, 32)
 	if _, err := rand.Read(buf); err != nil {
-		return "", APIKey{}, fmt.Errorf("生成密钥失败")
+		return "", savedAPIKey{}, fmt.Errorf("生成密钥失败")
 	}
 	token := apiKeyPrefix + base64.RawURLEncoding.EncodeToString(buf)
 	idBuf := make([]byte, 8)
 	if _, err := rand.Read(idBuf); err != nil {
-		return "", APIKey{}, fmt.Errorf("生成密钥失败")
+		return "", savedAPIKey{}, fmt.Errorf("生成密钥失败")
 	}
-	id := hex.EncodeToString(idBuf)
-	now := time.Now()
 	item := savedAPIKey{
 		APIKey: APIKey{
-			ID:        id,
+			ID:        hex.EncodeToString(idBuf),
 			Label:     label,
 			Prefix:    token[:11],
 			Scope:     scope,
@@ -126,23 +115,120 @@ func CreateAPIKey(label, scope string, expiresDays int) (string, APIKey, error) 
 	if expiresDays > 0 {
 		item.ExpiresAt = now.AddDate(0, 0, expiresDays).Format(time.RFC3339)
 	}
+	return token, item, nil
+}
+
+// pruneExpiredKeysLocked 删除已过期密钥，返回是否有变更；调用方需持有 apiKeysMu。
+func pruneExpiredKeysLocked(items map[string]savedAPIKey, now time.Time) bool {
+	changed := false
+	for id, item := range items {
+		if item.ExpiresAt == "" {
+			continue
+		}
+		exp, err := time.Parse(time.RFC3339, item.ExpiresAt)
+		if err == nil && now.After(exp) {
+			delete(items, id)
+			changed = true
+		}
+	}
+	return changed
+}
+
+// validateAPIKeyInput 归一化备注与 scope，供创建与轮换共用。
+func validateAPIKeyInput(label, scope string) (string, error) {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return "", fmt.Errorf("请填写密钥备注")
+	}
+	if len([]rune(label)) > 40 {
+		label = string([]rune(label)[:40])
+	}
+	if _, ok := roleRank[scope]; !ok || scope == "" {
+		return "", fmt.Errorf("权限范围只能是 readonly / ops / master")
+	}
+	return label, nil
+}
+
+// CreateAPIKey 生成新密钥并返回一次明文。expiresDays <= 0 表示长期有效。
+func CreateAPIKey(label, scope string, expiresDays int) (string, APIKey, error) {
+	label, err := validateAPIKeyInput(label, scope)
+	if err != nil {
+		return "", APIKey{}, err
+	}
+	now := time.Now()
+	token, item, err := newAPIKeyRecord(label, scope, expiresDays, now)
+	if err != nil {
+		return "", APIKey{}, err
+	}
 	apiKeysMu.Lock()
 	items := loadAPIKeys()
-	items[id] = item
+	pruneExpiredKeysLocked(items, now)
+	if len(items) >= maxAPIKeys {
+		apiKeysMu.Unlock()
+		return "", APIKey{}, fmt.Errorf("密钥数量已达上限 %d，请先撤销不用的密钥", maxAPIKeys)
+	}
+	items[item.ID] = item
 	saveAPIKeys(items)
 	apiKeysMu.Unlock()
 	return token, item.APIKey, nil
 }
 
-// ListAPIKeys 返回全部密钥元数据，按创建时间倒序。
+// RotateAPIKey 立即作废旧密钥并生成同备注、同 scope 的新密钥。
+// expiresDays 为 nil 时沿用旧密钥的剩余有效期（永久密钥保持永久）。
+func RotateAPIKey(id string, expiresDays *int) (string, APIKey, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return "", APIKey{}, fmt.Errorf("缺少密钥 ID")
+	}
+	now := time.Now()
+	apiKeysMu.Lock()
+	items := loadAPIKeys()
+	old, ok := items[id]
+	if !ok {
+		apiKeysMu.Unlock()
+		return "", APIKey{}, fmt.Errorf("密钥不存在")
+	}
+	days := 0
+	if expiresDays != nil {
+		days = *expiresDays
+	} else if old.ExpiresAt != "" {
+		if exp, err := time.Parse(time.RFC3339, old.ExpiresAt); err == nil {
+			days = int(time.Until(exp).Hours()/24) + 1
+			if days < 1 {
+				days = 1
+			}
+		}
+	}
+	token, item, err := newAPIKeyRecord(old.Label, old.Scope, days, now)
+	if err != nil {
+		apiKeysMu.Unlock()
+		return "", APIKey{}, err
+	}
+	items[item.ID] = item
+	delete(items, id)
+	saveAPIKeys(items)
+	apiKeysMu.Unlock()
+	apiKeyUsage.Lock()
+	delete(apiKeyUsage.lastSave, id)
+	apiKeyUsage.Unlock()
+	apiKeyWindows.Lock()
+	delete(apiKeyWindows.windows, id)
+	apiKeyWindows.Unlock()
+	return token, item.APIKey, nil
+}
+
+// ListAPIKeys 返回全部密钥元数据，按创建时间倒序；过期密钥顺带清理。
 func ListAPIKeys() []APIKey {
 	apiKeysMu.Lock()
-	defer apiKeysMu.Unlock()
 	items := loadAPIKeys()
+	if pruneExpiredKeysLocked(items, time.Now()) {
+		saveAPIKeys(items)
+	}
 	out := make([]APIKey, 0, len(items))
 	for _, item := range items {
 		out = append(out, item.APIKey)
 	}
+	apiKeysMu.Unlock()
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt > out[j].CreatedAt })
 	return out
 }
@@ -216,6 +302,14 @@ func allowAPIKeyRequest(id string) bool {
 	now := time.Now()
 	apiKeyWindows.Lock()
 	defer apiKeyWindows.Unlock()
+	// 窗口表按密钥数增长；超过阈值时清理两个窗口周期前的旧条目。
+	if len(apiKeyWindows.windows) > 256 {
+		for key, win := range apiKeyWindows.windows {
+			if now.Sub(win.start) > 2*apiKeyRateWindow {
+				delete(apiKeyWindows.windows, key)
+			}
+		}
+	}
 	w := apiKeyWindows.windows[id]
 	if w == nil || now.Sub(w.start) >= apiKeyRateWindow {
 		apiKeyWindows.windows[id] = &apiKeyWindow{start: now, count: 1}
@@ -289,6 +383,32 @@ func registerAPIKeysAPI() {
 			return
 		}
 		RecordAudit(consoleUser(c), "key.create", item.Label, item.Scope, "成功")
+		jiyingJSON(c, gin.H{"token": token, "key": item})
+	})
+	g.POST("/keys/rotate", requireRole(RoleMaster), requireConsoleSession, func(c *gin.Context) {
+		var days *int
+		if v := strings.TrimSpace(c.PostForm("expires_days")); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 0 || n > 3650 {
+				jiyingErr(c, "有效期格式不正确")
+				return
+			}
+			days = &n
+		}
+		id := strings.TrimSpace(c.PostForm("id"))
+		target := id
+		for _, item := range ListAPIKeys() {
+			if item.ID == id {
+				target = item.Label + "(" + item.Prefix + ")"
+				break
+			}
+		}
+		token, item, err := RotateAPIKey(id, days)
+		if err != nil {
+			jiyingErr(c, err.Error())
+			return
+		}
+		RecordAudit(consoleUser(c), "key.rotate", target, "new "+item.Prefix, "成功")
 		jiyingJSON(c, gin.H{"token": token, "key": item})
 	})
 	g.POST("/keys/delete", requireRole(RoleMaster), requireConsoleSession, func(c *gin.Context) {

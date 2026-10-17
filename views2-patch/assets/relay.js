@@ -158,6 +158,26 @@
     "回发消息（JavaScript）": "Echo message (JavaScript)",
     "回发消息（Python）": "Echo message (Python)",
     "权限不足": "Insufficient permission",
+    "当前角色无权查看该页面": "Your role cannot open this page",
+    "备注": "Label",
+    "权限范围": "Scope",
+    "有效期": "Expiry",
+    "轮换": "Rotate",
+    "已轮换": "Rotated",
+    "轮换 API Key": "Rotate API key",
+    "文件上传": "File upload",
+    "最大 20 MB。上传后把 file_id 交给发送接口。": "Up to 20 MB. Pass the returned file_id to a send endpoint.",
+    "选择文件": "Choose file",
+    "文件名（可选）": "File name (optional)",
+    "留空则使用原文件名": "Leave blank to keep the original name",
+    "上传并获取 file_id": "Upload and get file_id",
+    "请选择文件": "Choose a file",
+    "文件不能超过 20 MB": "File must be 20 MB or smaller",
+    "上传失败": "Upload failed",
+    "上传成功": "Uploaded",
+    "已复制 file_id": "file_id copied",
+    "发送时调用 POST /jiying/api/send/file，传入 conversation_id、file_id、name、size。": "Then call POST /jiying/api/send/file with conversation_id, file_id, name and size.",
+    "请先复制密钥，再点击「我已保存」": "Copy the key before closing",
     "运行失败": "Run failed",
     "已删除": "Deleted",
     "未登录": "Not signed in",
@@ -963,7 +983,7 @@
     { id: "tasks", name: "nav.tasks", ik: "list", group: "nav.group.run" },
     { id: "audit", name: "nav.audit", ik: "shield", group: "nav.group.run" },
     { id: "observe", name: "nav.observe", ik: "activity", group: "nav.group.run" },
-    { id: "logs", name: "nav.logs", ik: "file", group: "nav.group.run" }
+    { id: "logs", name: "nav.logs", ik: "file", group: "nav.group.run", minRole: "ops" }
   ];
 
   // 图标统一使用随包内置的 Bootstrap Icons（vendor/bootstrap），不再依赖外部图标服务。
@@ -1186,6 +1206,8 @@
     if (opts.form) {
       init.headers["Content-Type"] = "application/x-www-form-urlencoded";
       init.body = new URLSearchParams(opts.form).toString();
+    } else if (opts.body) {
+      init.body = opts.body;
     }
     return fetch(url, init).then(function (r) {
       return r.text().then(function (raw) {
@@ -1246,10 +1268,17 @@
     return { order: NAV.map(function (x) { return x.id; }), hidden: [], pinned: [] };
   }
   // 按偏好顺序展开为实际可见菜单：置顶项在前，隐藏项被过滤。
+  // 角色不足时隐藏对应菜单；角色尚未加载完成时先全部展示，由后端继续兜底。
+  var ROLE_RANK = { master: 3, ops: 2, readonly: 1 };
+  function roleAllowed(minRole) {
+    if (!minRole) return true;
+    var have = ROLE_RANK[state.role] || 0;
+    return have === 0 || have >= ROLE_RANK[minRole];
+  }
   function orderedNav(p) {
     var byId = {};
     NAV.forEach(function (x) { byId[x.id] = x; });
-    var visible = p.order.map(function (id) { return byId[id]; }).filter(function (x) { return x && p.hidden.indexOf(x.id) < 0; });
+    var visible = p.order.map(function (id) { return byId[id]; }).filter(function (x) { return x && p.hidden.indexOf(x.id) < 0 && roleAllowed(x.minRole); });
     return {
       pinned: visible.filter(function (x) { return p.pinned.indexOf(x.id) >= 0; }),
       rest: visible.filter(function (x) { return p.pinned.indexOf(x.id) < 0; })
@@ -1422,6 +1451,11 @@
   }
 
   function switchView(id) {
+    var target = NAV.filter(function (x) { return x.id === id; })[0];
+    if (target && !roleAllowed(target.minRole)) {
+      toast("当前角色无权查看该页面", "err");
+      id = "home";
+    }
     if (renderers[id]) renderers[id]();
     decoratePage(id);
     if (LANG === "en") i18nLocalize(document.getElementById("view-" + id) || document.body);
@@ -3619,7 +3653,8 @@
         + "2. Ask for confirmation before deleting, disabling, signing out, changing roles or bulk sending.\n"
         + "3. Use application/x-www-form-urlencoded. A response of {\"code\":200,\"data\":...} means success.\n"
         + "4. Dry-run sends with dry_run=true; on failure read /jiying/api/logs.\n"
-        + "5. Never read or reveal keys, passwords or cookies.\n";
+        + "5. Upload local files with POST /jiying/api/upload (multipart field `file`, max 20 MB), then pass the returned file_id to /jiying/api/send/file.\n"
+        + "6. Never read or reveal keys, passwords or cookies.\n";
     }
     return "你是 Relay 即应控制台的 AI 操作助手。请通过 REST API 完成我的请求。\n\n"
       + "Base URL: " + base + "\n"
@@ -3632,7 +3667,8 @@
       + "2. 删除、停用、退出、改角色、批量发送必须先征得我确认。\n"
       + "3. 参数用 application/x-www-form-urlencoded 传递；响应为 {\"code\":200,\"data\":...} 表示成功。\n"
       + "4. 发送消息前先用 dry_run=true 预演；失败时读取 /jiying/api/logs 定位原因。\n"
-      + "5. 不要读取或输出任何密钥、密码、Cookie。\n";
+      + "5. 本地文件用 POST /jiying/api/upload 上传（multipart 字段 file，最大 20 MB），再把 file_id 交给 /jiying/api/send/file。\n"
+      + "6. 不要读取或输出任何密钥、密码、Cookie。\n";
   }
   function copyPlain(text, okMsg) {
     var done = function () { toast(okMsg || "已复制", "ok"); };
@@ -3654,20 +3690,58 @@
       + aiStep("03", "直接调用", "密钥放请求头，先读清单再执行操作。")
       + "</div>"
       + '<div class="panel mt-16"><div class="panel-head"><h3>API Key</h3><span class="hint key-warn">密钥只在创建时显示一次，妥善保存。</span></div><div class="panel-body">'
-      + '<div class="input-row" id="keyCreateRow"><input class="input" id="keyLabel" placeholder="备注，例如 巡检机器人" aria-label="备注" title="备注" maxlength="40">'
-      + '<select class="select" id="keyScope" aria-label="权限" title="权限" style="max-width:140px"><option value="ops">运营</option><option value="readonly">只读</option><option value="master">主人</option></select>'
-      + '<select class="select" id="keyDays" aria-label="有效期" title="有效期" style="max-width:120px"><option value="30">30 天</option><option value="7">7 天</option><option value="90">90 天</option><option value="0">永久</option></select>'
-      + '<button class="btn btn-primary" id="newKey">创建密钥</button></div>'
+      + '<div class="grid grid-3 key-create-grid" id="keyCreateRow">'
+      + '<div class="field"><label for="keyLabel">备注</label><input class="input" id="keyLabel" placeholder="例如 巡检机器人" maxlength="40"></div>'
+      + '<div class="field"><label for="keyScope">权限范围</label><select class="select" id="keyScope"><option value="ops">运营</option><option value="readonly">只读</option><option value="master">主人</option></select></div>'
+      + '<div class="field"><label for="keyDays">有效期</label><div class="input-row"><select class="select" id="keyDays" style="flex:1"><option value="30">30 天</option><option value="7">7 天</option><option value="90">90 天</option><option value="0">永久</option></select><button class="btn btn-primary" id="newKey">创建密钥</button></div></div>'
+      + '</div>'
       + '<div id="keyList" class="mt-16">' + loadingState() + "</div></div></div>"
+      + (roleAllowed("ops") ? uploadPanelHTML() : "")
       + '<div class="panel mt-16"><div class="panel-head"><h3>给 AI 的说明书</h3><div class="spacer"></div><button class="btn btn-ghost btn-sm" id="copyPrompt">复制说明</button><button class="btn btn-ghost btn-sm" id="downloadGuide">下载说明</button></div><div class="panel-body"><pre class="ai-prompt mono" id="aiPrompt"></pre></div></div>';
     $("#aiPrompt").textContent = aiPromptText("");
     if (state.role && !master) $("#keyCreateRow").hidden = true;
     $("#newKey").addEventListener("click", createAPIKey);
+    if (roleAllowed("ops")) bindUploadPanel();
     $("#copyPrompt").addEventListener("click", function () { copyPlain(aiPromptText(""), "已复制说明"); });
     $("#downloadGuide").addEventListener("click", function () {
       downloadBlob(new Blob([aiPromptText("")], { type: "text/plain;charset=utf-8" }), "relay-ai-guide.txt");
     });
     loadAPIKeys();
+  }
+  function uploadPanelHTML() {
+    return '<div class="panel mt-16" id="uploadPanel"><div class="panel-head"><h3>文件上传</h3><span class="hint">最大 20 MB。上传后把 file_id 交给发送接口。</span></div><div class="panel-body">'
+      + '<div class="grid grid-2"><div class="field"><label for="uploadFile">选择文件</label><input class="input" type="file" id="uploadFile"></div>'
+      + '<div class="field"><label for="uploadName">文件名（可选）</label><input class="input" id="uploadName" placeholder="留空则使用原文件名"></div></div>'
+      + '<div class="input-row"><button class="btn btn-primary" id="uploadBtn">上传并获取 file_id</button></div>'
+      + '<div id="uploadResult" class="mt-16" hidden></div></div></div>';
+  }
+  function bindUploadPanel() {
+    var btn = $("#uploadBtn");
+    if (btn) btn.addEventListener("click", uploadTempFile);
+  }
+  function uploadTempFile() {
+    var input = $("#uploadFile");
+    var file = input && input.files && input.files[0];
+    if (!file) { toast("请选择文件", "err"); return; }
+    if (file.size > 20 * 1024 * 1024) { toast("文件不能超过 20 MB", "err"); return; }
+    var fd = new FormData();
+    fd.append("file", file);
+    var name = ($("#uploadName").value || "").trim();
+    if (name) fd.append("name", name);
+    var btn = $("#uploadBtn");
+    btn.disabled = true;
+    api("/jiying/api/upload", { method: "POST", body: fd }).then(function (r) {
+      btn.disabled = false;
+      if (r.code !== 200) { toast(r.msg || r.message || "上传失败", "err"); return; }
+      var d = r.data || {};
+      var box = $("#uploadResult");
+      box.hidden = false;
+      box.innerHTML = '<div class="field"><label>file_id</label><div class="input-row"><input class="input mono" id="uploadFileId" readonly value="' + esc(d.file_id || "") + '">'
+        + '<button class="btn btn-ghost btn-sm" id="copyFileId">复制</button></div></div>'
+        + '<p class="hint">发送时调用 POST /jiying/api/send/file，传入 conversation_id、file_id、name、size。</p>';
+      $("#copyFileId").addEventListener("click", function () { copyPlain(d.file_id || "", "已复制 file_id"); });
+      toast("上传成功", "ok");
+    });
   }
   function apiKeyStatus(k) {
     if (k.expires_at && Date.parse(k.expires_at) < Date.now()) return { cls: "badge-off", label: "已过期" };
@@ -3704,10 +3778,13 @@
           var st = apiKeyStatus(k);
           return "<tr><td>" + esc(k.label || "-") + '</td><td class="mono">' + esc(k.prefix || "") + '…</td><td>' + esc(EN_TEXT[k.scope === "master" ? "主人" : k.scope === "ops" ? "运营" : "只读"] || k.scope)
             + "</td><td class=\"mono\">" + esc((k.created_at || "").slice(0, 10)) + "</td><td class=\"mono\">" + esc(k.last_used_at ? k.last_used_at.slice(0, 16).replace("T", " ") : "-")
-            + '</td><td><span class="badge ' + st.cls + '">' + esc(st.label) + '</span></td><td class="text-right"><button class="btn btn-outline-danger btn-sm" data-revoke="' + esc(k.id) + '" data-label="' + esc(k.label || "") + '">撤销</button></td></tr>';
+            + '</td><td><span class="badge ' + st.cls + '">' + esc(st.label) + '</span></td><td class="text-right nowrap"><button class="btn btn-ghost btn-sm" data-rotate="' + esc(k.id) + '" data-label="' + esc(k.label || "") + '">轮换</button> <button class="btn btn-outline-danger btn-sm" data-revoke="' + esc(k.id) + '" data-label="' + esc(k.label || "") + '">撤销</button></td></tr>';
         }).join("") + "</tbody></table></div>";
       $$("[data-revoke]", box).forEach(function (btn) {
         btn.addEventListener("click", function () { revokeAPIKey(btn.getAttribute("data-revoke"), btn.getAttribute("data-label")); });
+      });
+      $$("[data-rotate]", box).forEach(function (btn) {
+        btn.addEventListener("click", function () { rotateAPIKey(btn.getAttribute("data-rotate"), btn.getAttribute("data-label")); });
       });
     });
   }
@@ -3732,16 +3809,30 @@
       });
     });
   }
+  function rotateAPIKey(id, label) {
+    confirmDialog("轮换 API Key", "将立即作废「" + label + "」的旧密钥并生成新密钥，正在使用旧密钥的调用会中断。", "轮换", function () {
+      api("/jiying/api/keys/rotate", { method: "POST", form: { id: id } }).then(function (r) {
+        if (r.code === 200) { toast("已轮换", "ok"); loadAPIKeys(); showNewKey(r.data && r.data.token); }
+        else toast(r.msg || r.message || "轮换失败", "err");
+      });
+    });
+  }
+  var keyRevealOpen = false;
   function showNewKey(token) {
     if (!token) return;
+    keyRevealOpen = true;
     showModal("API Key 已创建",
       '<p class="rl-confirm-msg">这是唯一一次显示明文，关闭后无法找回。</p>'
       + '<div class="key-token mono" id="newKeyToken">' + esc(token) + "</div>"
       + '<div class="input-row mt-16"><button class="btn btn-ghost btn-sm" id="copyToken">复制密钥</button>'
       + '<button class="btn btn-ghost btn-sm" id="copyKeyPrompt">复制接入说明</button></div>',
-      '<button class="btn btn-primary" data-bs-dismiss="modal">我已保存</button>');
+      '<button class="btn btn-primary" id="keySaved">我已保存</button>');
     $("#copyToken").addEventListener("click", function () { copyPlain(token, "已复制"); });
     $("#copyKeyPrompt").addEventListener("click", function () { copyPlain(aiPromptText(token), "已复制说明"); });
+    $("#keySaved").addEventListener("click", function () {
+      keyRevealOpen = false;
+      closeModal();
+    });
   }
 
   function tile(label, val, sub) {
@@ -3931,6 +4022,10 @@
           state.role = rr.data.me || "";
           var el = $("#userRole");
           if (el && ROLE_LABEL[state.role]) el.textContent = "角色 · " + ROLE_LABEL[state.role];
+          renderNav();
+          var cur = NAV.filter(function (x) { return x.id === state.view; })[0];
+          if (cur && !roleAllowed(cur.minRole)) switchView("home");
+          else if (state.view === "ai" && !roleAllowed("ops")) renderAI();
         }
       });
       switchView(defaultViewId());
@@ -3938,7 +4033,15 @@
     }).catch(function () { location.href = "login.html"; });
   }
   var modal = $("#modal");
-  if (modal) modal.addEventListener("click", function (e) { if (e.target === this) closeModal(); });
+  if (modal) {
+    modal.addEventListener("click", function (e) { if (e.target === this) closeModal(); });
+    modal.addEventListener("hide.bs.modal", function (e) {
+      if (keyRevealOpen) {
+        e.preventDefault();
+        toast("请先复制密钥，再点击「我已保存」", "info");
+      }
+    });
+  }
 
   window.Relay = {
     go: switchView,

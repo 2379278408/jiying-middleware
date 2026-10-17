@@ -716,6 +716,9 @@ tr:last-child td { border-bottom: none; }
 
 /* ---------- 表单 ---------- */
 .field { margin-bottom: 12px; }
+.key-create-grid { align-items: end; }
+.key-create-grid .field { margin-bottom: 0; }
+.key-create-grid .input-row { gap: 8px; }
 .field label {
   display: block;
   margin-bottom: 5px;

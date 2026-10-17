@@ -106,3 +106,58 @@ func TestAPIKeyRateLimit(t *testing.T) {
 		t.Fatal("other keys have independent windows")
 	}
 }
+
+func TestListAPIKeysPrunesExpired(t *testing.T) {
+	setupAPIKeysBucket(t, "apikeys-prune")
+	token, item, err := CreateAPIKey("过期", RoleOps, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := loadAPIKeys()
+	rec := saved[item.ID]
+	rec.ExpiresAt = time.Now().Add(-time.Hour).Format(time.RFC3339)
+	saved[item.ID] = rec
+	saveAPIKeys(saved)
+	if list := ListAPIKeys(); len(list) != 0 {
+		t.Fatalf("expired keys should be pruned, got %d", len(list))
+	}
+	if verifyAPIKey(token) != nil {
+		t.Fatal("pruned token must not verify")
+	}
+}
+
+func TestRotateAPIKey(t *testing.T) {
+	setupAPIKeysBucket(t, "apikeys-rotate")
+	oldToken, item, err := CreateAPIKey("轮换测试", RoleOps, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newToken, next, err := RotateAPIKey(item.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newToken == oldToken || next.ID == item.ID {
+		t.Fatal("rotate should issue a new token and id")
+	}
+	if next.Label != item.Label || next.Scope != item.Scope || next.ExpiresAt != "" {
+		t.Fatalf("rotate should preserve label/scope/permanent policy: %+v", next)
+	}
+	if verifyAPIKey(oldToken) != nil {
+		t.Fatal("old token must be revoked")
+	}
+	if got := verifyAPIKey(newToken); got == nil || got.ID != next.ID {
+		t.Fatal("new token should verify")
+	}
+	if _, _, err := RotateAPIKey("missing", nil); err == nil {
+		t.Fatal("rotating a missing key should fail")
+	}
+	days := 7
+	_, renewed, err := RotateAPIKey(next.ID, &days)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exp, err := time.Parse(time.RFC3339, renewed.ExpiresAt)
+	if err != nil || time.Until(exp) < 6*24*time.Hour {
+		t.Fatalf("explicit expiry not applied: %q", renewed.ExpiresAt)
+	}
+}

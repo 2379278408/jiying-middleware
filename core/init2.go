@@ -20,6 +20,8 @@ var OpenServer *gin.RouterGroup
 func init() {
 	gin.SetMode(gin.DebugMode)
 	Server = gin.New()
+	// multipart 超过该内存阈值后落临时文件，避免大文件上传直接占满进程内存。
+	Server.MaxMultipartMemory = 8 << 20
 	Server.Use(gin.RecoveryWithWriter(io.Discard))
 	Server.Use(traceIDMiddleware())
 	Server.Use(accessLog())

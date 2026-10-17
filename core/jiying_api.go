@@ -2,9 +2,12 @@ package core
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -264,11 +267,12 @@ func registerJiyingAPI() {
 	g.GET("/conversation/capabilities", jiyingAPIConversationCapabilities)
 	g.POST("/send/image", requireRole(RoleOps), jiyingAPISendImage)
 	g.POST("/send/file", requireRole(RoleOps), jiyingAPISendFile)
+	g.POST("/upload", requireRole(RoleOps), jiyingAPIUpload)
 	g.POST("/send/card", requireRole(RoleOps), jiyingAPISendCard)
 	g.POST("/send/markdown", requireRole(RoleOps), jiyingAPISendMarkdown)
 	g.POST("/send/link", requireRole(RoleOps), jiyingAPISendLink)
 	g.POST("/send/chart", requireRole(RoleOps), jiyingAPISendChart)
-	g.GET("/logs", jiyingAPILogs)
+	g.GET("/logs", requireRole(RoleOps), jiyingAPILogs)
 	Server.GET("/jiying", func(c *gin.Context) {
 		c.Redirect(http.StatusFound, "/")
 	})
@@ -899,6 +903,130 @@ func jiyingAPISendImage(c *gin.Context) {
 	jiyingAPISendResolvedMedia(c, "media.image", func(ctx context.Context) (map[string]any, error) {
 		return buildImageMessage(ctx, strings.TrimSpace(c.PostForm("conversation_id")), src, c.PostForm("caption"), c.PostForm("caption_type"))
 	})
+}
+
+const (
+	maxUploadBytes        = 20 << 20
+	maxUploadRequestBytes = 30 << 20
+)
+
+// uploadSlots 限制并发上传数，避免多个大文件同时解码与缓冲放大内存峰值。
+var uploadSlots = make(chan struct{}, 2)
+
+// cleanUploadContentType 限制类型长度并校验语法，非法值回退为二进制流。
+func cleanUploadContentType(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" || len(v) > 100 || strings.ContainsAny(v, "\r\n") {
+		return "application/octet-stream"
+	}
+	if _, _, err := mime.ParseMediaType(v); err != nil {
+		return "application/octet-stream"
+	}
+	return v
+}
+
+func decodeUploadBase64(v string) ([]byte, error) {
+	v = strings.TrimSpace(v)
+	v = strings.NewReplacer("\r", "", "\n", "").Replace(v)
+	if v == "" {
+		return nil, fmt.Errorf("缺少文件内容")
+	}
+	if data, err := base64.StdEncoding.DecodeString(v); err == nil {
+		return data, nil
+	}
+	if data, err := base64.RawStdEncoding.DecodeString(v); err == nil {
+		return data, nil
+	}
+	return nil, fmt.Errorf("文件内容不是合法的 base64")
+}
+
+// jiyingAPIUpload 上传临时文件并返回 file_id，供 send/file 等接口引用。
+// 支持 multipart 的 file 字段，或表单字段 name/content_type/data_base64。
+func jiyingAPIUpload(c *gin.Context) {
+	select {
+	case uploadSlots <- struct{}{}:
+		defer func() { <-uploadSlots }()
+	default:
+		jiyingErr(c, "上传任务繁忙，请稍后重试")
+		return
+	}
+	if c.Request.ContentLength > maxUploadRequestBytes {
+		jiyingErr(c, fmt.Sprintf("上传内容过大，最大 %d MB", maxUploadBytes>>20))
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUploadRequestBytes)
+	name := strings.TrimSpace(c.PostForm("name"))
+	contentType := strings.TrimSpace(c.PostForm("content_type"))
+	var (
+		data []byte
+		err  error
+	)
+	if strings.HasPrefix(c.ContentType(), "multipart/form-data") {
+		fh, ferr := c.FormFile("file")
+		if ferr != nil {
+			jiyingErr(c, "读取上传文件失败: "+ferr.Error())
+			return
+		}
+		if fh.Size > maxUploadBytes {
+			jiyingErr(c, fmt.Sprintf("上传内容过大，最大 %d MB", maxUploadBytes>>20))
+			return
+		}
+		f, oerr := fh.Open()
+		if oerr != nil {
+			jiyingErr(c, "读取上传文件失败: "+oerr.Error())
+			return
+		}
+		data, err = io.ReadAll(io.LimitReader(f, maxUploadBytes+1))
+		f.Close()
+		if err != nil {
+			jiyingErr(c, "读取上传文件失败: "+err.Error())
+			return
+		}
+		if len(data) > maxUploadBytes {
+			jiyingErr(c, fmt.Sprintf("上传内容过大，最大 %d MB", maxUploadBytes>>20))
+			return
+		}
+		if name == "" {
+			name = fh.Filename
+		}
+		if contentType == "" {
+			contentType = fh.Header.Get("Content-Type")
+		}
+	} else {
+		raw := c.PostForm("data_base64")
+		if raw == "" {
+			raw = c.PostForm("content_base64")
+		}
+		data, err = decodeUploadBase64(raw)
+		if err != nil {
+			jiyingErr(c, err.Error())
+			return
+		}
+		if len(data) > maxUploadBytes {
+			jiyingErr(c, fmt.Sprintf("上传内容过大，最大 %d MB", maxUploadBytes>>20))
+			return
+		}
+	}
+	if len(data) == 0 {
+		jiyingErr(c, "上传内容为空")
+		return
+	}
+	if strings.TrimSpace(name) == "" {
+		jiyingErr(c, "请填写文件名")
+		return
+	}
+	name = sanitizeFilename(name)
+	contentType = cleanUploadContentType(contentType)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+	fileID, err := UserUploadFile(ctx, name, data, contentType)
+	if err != nil {
+		RecordAudit(consoleUser(c), "file.upload", name, fmt.Sprintf("%d bytes", len(data)), "失败: "+err.Error())
+		jiyingErr(c, err.Error())
+		return
+	}
+	RecordAudit(consoleUser(c), "file.upload", name, fmt.Sprintf("%d bytes · %s", len(data), contentType), "成功")
+	jiyingJSON(c, gin.H{"file_id": fileID, "name": name, "size": len(data), "content_type": contentType})
 }
 
 func jiyingAPISendFile(c *gin.Context) {

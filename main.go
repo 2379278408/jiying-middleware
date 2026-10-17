@@ -39,7 +39,13 @@ func main() {
 	}
 
 	core.InitCore()
-	ginpprof.Wrapper(core.Server)
+	// pprof 会暴露堆栈、内存与 CPU 采样，默认关闭；仅在显式设置 JIYING_PPROF=1 时挂载。
+	if os.Getenv("JIYING_PPROF") == "1" {
+		ginpprof.Wrapper(core.Server)
+		core.GetMyLog().Warn("pprof 调试端点已启用（/debug/pprof/），请勿暴露到公网")
+	} else {
+		core.GetMyLog().Info("pprof 未启用；如需调试请设置 JIYING_PPROF=1")
+	}
 	go monitorGoroutine()
 
 	port := 8080
