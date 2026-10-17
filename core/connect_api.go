@@ -55,7 +55,8 @@ func connectStatus(c *gin.Context) {
 			"connected":   def.Online,
 			"count":       len(apps),
 		},
-		"apps": apps,
+		"apps":     apps,
+		"accounts": AccountPoolSnapshot(),
 		"account": gin.H{
 			"configured":    acctConn.configured(),
 			"code_login":    acctConn.CodeLogin,

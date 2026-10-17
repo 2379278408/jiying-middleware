@@ -25,7 +25,7 @@ var aiEndpoints = []apiDoc{
 	{"POST", "/jiying/api/feature/install", "安装 HTTP 功能（转发到外部地址）", "ops", []string{"name", "url"}, ""},
 	{"POST", "/jiying/api/feature/delete", "删除功能；脚本型功能会同步删除插件文件", "ops", []string{"name"}, "破坏性操作，执行前确认"},
 	{"POST", "/jiying/api/feature/run", "执行功能并返回输出", "ops", []string{"name", "args"}, "args 为字符串，按功能自行解析"},
-	{"GET", "/jiying/api/scripts", "插件列表与清单（title/class/apps/description/rules/config_schema）", "readonly", nil, ""},
+	{"GET", "/jiying/api/scripts", "插件列表与清单（title/class/service/apps/description/rules/config_schema）", "readonly", nil, ""},
 	{"POST", "/jiying/api/script/get", "读取插件源码与语言", "ops", []string{"name"}, ""},
 	{"POST", "/jiying/api/script/install", "安装或覆盖插件源码", "ops", []string{"name", "code"}, "name 扩展名 .js/.py 决定运行方式"},
 	{"POST", "/jiying/api/script/delete", "删除插件文件与配置", "ops", []string{"name"}, "破坏性操作，执行前确认"},
@@ -54,7 +54,7 @@ var aiEndpoints = []apiDoc{
 	{"POST", "/jiying/api/send/link", "发送链接卡片", "ops", []string{"conversation_id", "url", "title", "reply_to"}, ""},
 	{"POST", "/jiying/api/send/chart", "发送图表", "ops", []string{"conversation_id", "chart_type", "title", "description", "data", "reply_to"}, "data 为 JSON 字符串"},
 	{"GET", "/jiying/api/logs", "读取运行日志", "ops", []string{"tail", "day"}, "tail 最大 2000；day 形如 20261017"},
-	{"GET", "/jiying/api/connect/status", "接入状态：应用、账号、运行时就绪度", "readonly", nil, ""},
+	{"GET", "/jiying/api/connect/status", "接入状态：应用列表、账号列表与资料、运行时就绪度", "readonly", nil, ""},
 	{"GET", "/jiying/api/connect/readiness", "接入就绪度检查", "readonly", nil, ""},
 	{"POST", "/jiying/api/connect/app", "配置即应应用（WebSocket 地址等）", "ops", []string{"ws_url", "app_id", "secret"}, "敏感字段用 **** 占位表示不修改"},
 	{"POST", "/jiying/api/connect/test-app", "测试应用连接", "ops", []string{"ws_url", "app_id", "secret"}, ""},
@@ -65,7 +65,7 @@ var aiEndpoints = []apiDoc{
 	{"POST", "/jiying/api/connect/account/health/check", "立即检查账号健康", "ops", nil, ""},
 	{"POST", "/jiying/api/connect/request-code", "请求邮箱验证码", "ops", []string{"email"}, ""},
 	{"POST", "/jiying/api/connect/login-code", "使用验证码登录", "ops", []string{"email", "code"}, ""},
-	{"GET", "/jiying/api/connections", "连接池快照（应用与账号）", "readonly", nil, ""},
+	{"GET", "/jiying/api/connections", "连接池快照（应用与账号，含昵称与头像）", "readonly", nil, ""},
 	{"POST", "/jiying/api/connections/app", "新增或更新连接池应用", "ops", []string{"app_id", "ws_url", "app_secret"}, "app_secret 传 **** 表示沿用已存密钥"},
 	{"POST", "/jiying/api/connections/app/delete", "从连接池删除应用", "ops", []string{"app_id"}, "破坏性操作，执行前确认"},
 	{"POST", "/jiying/api/connections/app/default", "设置默认应用", "ops", []string{"app_id"}, ""},
@@ -355,7 +355,7 @@ func buildAIGuide(base string) string {
 1. GET /jiying/api/ai/manifest：当前功能、定时任务、权限、就绪度、端点清单与插件规范
 2. GET /jiying/api/overview：连接、账号、任务与运行状态
 3. GET /jiying/api/features：功能名称与启用状态；执行用 POST /jiying/api/feature/run
-4. GET /jiying/api/scripts：插件清单、分类、应用白名单、说明、规则与 config_schema
+4. GET /jiying/api/scripts：插件清单、分类、服务分组、应用白名单、说明、规则与 config_schema
 5. GET /jiying/api/connect/status：应用是否连接、账号是否登录
 
 四、常用流程

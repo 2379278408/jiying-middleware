@@ -469,11 +469,12 @@
     "插件放在 scripts 目录下，安装后会自动登记为可调用功能。": "Plugins live in the scripts directory and are registered as callable features after installation.",
     "按分类归档的插件资产，支持一个插件服务多个应用；安装后会自动登记为可调用功能": "Plugins filed by category. One plugin can serve multiple apps and becomes a callable feature after installation.",
     "分类": "Category",
+    "服务": "Service",
     "目录": "Folders",
     "列表": "List",
     "全部应用": "All apps",
     "未分类": "Uncategorized",
-    "搜索插件 / 分类 / 应用": "Search plugins / categories / apps",
+    "搜索插件 / 分类 / 服务 / 应用": "Search plugins / categories / services / apps",
     "搜索插件": "Search plugins",
     "规则": "Rule",
     "平台": "Platform",
@@ -575,6 +576,13 @@
     "已移除": "Removed",
     "默认应用已切换": "Default app switched",
     "切换失败": "Switch failed",
+    "管理应用 →": "Manage apps →",
+    "正在切换到 ": "Switching to ",
+    "已切换账号": "Account switched",
+    "切换": "Switch",
+    "当前": "Current",
+    "个应用": "apps",
+    "个账号": "accounts",
     "插件市场加载失败": "Failed to load plugin market",
     "市场暂无插件": "No plugins in the market",
     "上架插件后会在这里展示，供按应用或个人账号范围安装分发。": "Published plugins appear here for installation by app or account scope.",
@@ -1057,10 +1065,12 @@
     if (s.indexOf("..") < 0 && s[0] !== "/" && /^[a-z0-9._/-]+\.(svg|png|jpe?g|gif|webp)$/i.test(s)) return '<img src="' + esc(s) + '" alt="" loading="lazy">';
     return '<span class="ico-emoji">' + esc(s) + "</span>";
   }
-  // 仅补齐「声明了 data-ico 但没有内联图标」的静态节点（顶栏头像、退出按钮）。
+  // 仅补齐「声明了 data-ico 但没有内联图标」的静态节点（退出按钮、语言按钮）。
+  // 顶栏头像是运行时渲染的图片/首字母，跳过它，避免切页面时被默认用户图标覆盖。
   function hydrateIcons() {
     $$("[data-ico]").forEach(function (el) {
-      if (el.querySelector("i, svg")) return;
+      if (el.id === "avatar") return;
+      if (el.querySelector("i, svg, img, .av-fb")) return;
       el.innerHTML = ico(el.getAttribute("data-ico"));
     });
   }
@@ -1156,11 +1166,37 @@
     var label = String(name || "U").trim() || "U";
     var ch = esc(label.charAt(0).toUpperCase());
     return '<span class="av-fb" style="--av-h:' + avatarHue(label) + '">' + ch + "</span>"
-      + (url ? '<img src="' + esc(url) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">' : "");
+      + (url ? '<img src="' + esc(url) + '" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">' : "");
   }
   function avatarHTML(url, name, cls) {
     var klass = "avatar" + (cls ? " " + cls : "");
     return '<span class="' + klass + '">' + avatarInner(url, name) + "</span>";
+  }
+  // 上游不同版本把头像放在 avatar/avatar_url/icon 或 peer/user/target 等嵌套对象里，
+  // 统一挑出第一个可用地址；缺失时返回空串，由首字母底色兜底，避免出现默认图标或空白。
+  function pickAvatarURL(obj, depth) {
+    if (!obj || typeof obj !== "object" || (depth || 0) > 3) return "";
+    var keys = ["avatar_url", "avatar", "icon", "photo", "avatarUrl"];
+    for (var i = 0; i < keys.length; i++) {
+      var v = obj[keys[i]];
+      if (typeof v === "string" && v.trim()) return v.trim();
+    }
+    var nested = ["peer", "user", "target", "contact", "sender", "profile", "owner", "from", "account"];
+    for (var j = 0; j < nested.length; j++) {
+      var got = pickAvatarURL(obj[nested[j]], (depth || 0) + 1);
+      if (got) return got;
+    }
+    if (Object.prototype.toString.call(obj.members) === "[object Array]") {
+      for (var k = 0; k < obj.members.length; k++) {
+        var m = pickAvatarURL(obj.members[k], (depth || 0) + 1);
+        if (m) return m;
+      }
+    }
+    return "";
+  }
+  function pickDisplayName(obj, fallback) {
+    if (!obj || typeof obj !== "object") return fallback || "";
+    return obj.nickname || obj.name || obj.title || obj.display_name || obj.email || fallback || "";
   }
   function avatarName(st) {
     var a = (st && st.account) || {};
@@ -1522,29 +1558,49 @@
   function cacheProfile(st) {
     if (!st) return;
     try {
+      var old = readProfileCache() || {};
+      var email = (st.account && st.account.email) || old.email || "";
+      var avatar = (st.account && st.account.avatar_url) || "";
+      // 资料接口偶发返回空头像时沿用同账号的旧缓存，避免顶栏头像被空值覆盖。
+      if (!avatar && old.email === email && old.avatar) avatar = old.avatar;
       localStorage.setItem(PROFILE_KEY, JSON.stringify({
-        name: (st.account && (st.account.nickname || st.account.email)) || "",
-        email: (st.account && st.account.email) || "",
-        avatar: (st.account && st.account.avatar_url) || "",
+        name: (st.account && (st.account.nickname || st.account.email)) || (old.email === email ? old.name : "") || "",
+        email: email,
+        avatar: avatar,
         app_name: (st.app && st.app.name) || "",
         app_avatar: (st.app && st.app.avatar_url) || "",
         at: Date.now()
       }));
     } catch (e) { /* 隐私模式下忽略 */ }
   }
+  function readProfileCache() {
+    try { return JSON.parse(localStorage.getItem(PROFILE_KEY) || "null"); } catch (e) { return null; }
+  }
   // 先用本机缓存渲染顶栏，刷新或网络抖动时头像不会闪烁成默认图标。
   function applyCachedProfile() {
-    var cached = null;
-    try { cached = JSON.parse(localStorage.getItem(PROFILE_KEY) || "null"); } catch (e) { cached = null; }
+    var cached = readProfileCache();
     if (!cached) return;
     var av = $("#avatar");
-    if (av && cached.avatar) {
+    if (av && (cached.avatar || cached.name || cached.email)) {
+      var label = cached.name || cached.email || "U";
       av.className = "avatar top-avatar";
-      av.innerHTML = avatarInner(cached.avatar, cached.name || cached.email || "U");
-      av.dataset.sig = cached.avatar + "|" + (cached.name || "");
+      av.innerHTML = avatarInner(cached.avatar, label);
+      av.dataset.sig = (cached.avatar || "") + "|" + label;
+      av.title = label;
     }
     var un = $("#userName");
     if (un && cached.name && un.textContent === "管理员") un.textContent = cached.name;
+  }
+  function renderTopAvatar(url, name) {
+    var av = $("#avatar");
+    if (!av) return;
+    var label = name || "U";
+    var sig = (url || "") + "|" + label;
+    if (av.dataset.sig === sig && av.querySelector("img, .av-fb")) return;
+    av.dataset.sig = sig;
+    av.className = "avatar top-avatar";
+    av.innerHTML = avatarInner(url, label);
+    av.title = label;
   }
   function refreshConnUI(st) {
     if (!st) return;
@@ -1568,16 +1624,18 @@
       cw.title = wsOk && st.app && st.app.name ? st.app.name : "";
     }
     if (ca) { ca.className = "chip " + (acctOk ? "chip-success" : "chip-danger"); if (acctName) ca.textContent = acctName; else ca.textContent = t("chip.acct.off"); }
-    var av = $("#avatar");
-    if (av) {
-      var sig = (st.account && st.account.avatar_url || "") + "|" + (acctName || "");
-      if (av.dataset.sig !== sig) {
-        av.dataset.sig = sig;
-        av.className = "avatar top-avatar";
-        av.innerHTML = avatarInner(st.account && st.account.avatar_url, acctName || "U");
-      }
-      av.title = acctOk ? (acctName + (st.account.email && st.account.nickname ? " · " + st.account.email : "")) : "未登录账号";
+    // 已登录时以服务端资料为准；服务端暂时没给头像时沿用本机缓存，
+    // 避免状态轮询的瞬时空值把顶栏头像覆盖成默认图标。
+    var cached = readProfileCache();
+    if (acctOk && (st.account.avatar_url || acctName)) {
+      renderTopAvatar(st.account.avatar_url || (cached && cached.avatar) || "", acctName || "U");
+    } else if (cached && (cached.avatar || cached.name || cached.email)) {
+      renderTopAvatar(cached.avatar || "", cached.name || cached.email || "U");
     }
+    var av = $("#avatar");
+    if (av) av.title = acctOk ? (acctName + (st.account.email && st.account.nickname ? " · " + st.account.email : "")) : "未登录账号";
+    var un = $("#userName");
+    if (un && acctOk && acctName) un.textContent = acctName;
   }
 
   function loadConnectStatus(cb) {
@@ -1863,12 +1921,77 @@
     });
   }
 
+  // 应用通道头像堆叠：默认应用优先，最多展示 4 个，其余用 +N 表示。
+  function connAppAvatars(apps) {
+    apps = apps || [];
+    if (!apps.length) return "";
+    var sorted = apps.slice().sort(function (a, b) { return (b.is_default ? 1 : 0) - (a.is_default ? 1 : 0); });
+    var head = sorted.slice(0, 4).map(function (a) {
+      return '<span class="conn-av" title="' + esc((a.name || a.app_id) + (a.online ? " · 已连接" : " · 未连接")) + '">' + avatarHTML(a.avatar_url, a.name || a.app_id, "conn-avatar") + "</span>";
+    }).join("");
+    if (sorted.length > 4) head += '<span class="conn-av-more">+' + (sorted.length - 4) + "</span>";
+    return '<span class="conn-av-stack">' + head + "</span>";
+  }
+  function connAppList(apps) {
+    apps = apps || [];
+    if (!apps.length) return "";
+    return '<div class="conn-app-list">' + apps.map(function (a) {
+      var nm = a.name || shortID(a.app_id);
+      return '<span class="app-chip" title="' + esc(a.app_id) + '">'
+        + '<span class="app-chip-av">' + avatarInner(a.avatar_url, nm) + "</span>"
+        + esc(nm)
+        + '<span class="dot ' + (a.online ? "on" : "off") + '" style="width:5px;height:5px"></span>'
+        + (a.is_default ? '<span class="muted" style="font-size:10px">默认</span>' : "")
+        + "</span>";
+    }).join("") + "</div>";
+  }
+  function connAccountList(accounts, activeEmail) {
+    accounts = accounts || [];
+    if (!accounts.length) {
+      return '<div class="muted" style="font-size:12px">还没有账号，先在右侧用密码或邮箱验证码登录。</div>';
+    }
+    return '<div class="conn-acct-list" id="connAccounts">' + accounts.map(function (a) {
+      var nm = a.nickname || a.email;
+      var active = a.active || a.email === activeEmail;
+      return '<div class="conn-acct-row' + (active ? " active" : "") + '" data-email="' + esc(a.email) + '">'
+        + avatarHTML(a.avatar_url, nm, "conn-avatar")
+        + '<div class="conn-acct-main"><b title="' + esc(nm) + '">' + esc(nm) + '</b><small title="' + esc(a.email) + '">' + esc(a.email) + "</small></div>"
+        + '<span class="badge ' + (a.logged_in ? "badge-ok" : "badge-off") + '">' + (a.logged_in ? "已登录" : "未登录") + "</span>"
+        + (active ? '<span class="badge badge-info">当前</span>'
+          : '<button type="button" class="btn btn-ghost btn-sm" data-acct-switch="' + esc(a.email) + '">切换</button>'
+          + '<button type="button" class="btn btn-outline-danger btn-sm" data-acct-del="' + esc(a.email) + '">移除</button>')
+        + "</div>";
+    }).join("") + "</div>";
+  }
+  function switchAccount(email) {
+    if (!email) return;
+    toast("正在切换到 " + email, "info");
+    api("/jiying/api/connections/account/select", { method: "POST", form: { email: email } }).then(function (r) {
+      if (r.code === 200) {
+        toast("已切换账号", "ok");
+        loadConnectStatus(function (st) { renderConnStatus(st); });
+      } else toast(r.msg || "账号切换失败", "err");
+    });
+  }
+  function removeAccount(email) {
+    confirmDialog("移除账号", "从连接池移除 " + email + "？已保存的登录令牌会一并清除。", "移除", function () {
+      api("/jiying/api/connections/account/delete", { method: "POST", form: { email: email } }).then(function (r) {
+        if (r.code === 200) {
+          toast("已移除账号", "ok");
+          loadConnectStatus(function (st) { renderConnStatus(st); });
+        } else toast(r.msg || "移除失败", "err");
+      });
+    });
+  }
+
   function renderConnStatus(st) {
     var box = $("#connStatus");
     if (!box) return;
     var d = st && st.data ? st.data : null;
     if (!d) { errorState(box, "link", "接入状态加载失败", "网络异常，请检查服务状态。", function () { loadConnectStatus(); }); return; }
     refreshConnUI(d);
+    var apps = d.apps || [];
+    var accounts = d.accounts || [];
     var appOn = d.app.connected, acctOn = d.account.logged_in;
     var readiness = d.readiness || {};
     // 接入页两个通道都可直接编辑：仅在存在待处理项时提示，且不重复给出跳转按钮。
@@ -1877,8 +2000,20 @@
     state.account = d.account;
     var h = d.account.health || {};
     var health = accountHealthView(h, d.account);
-    box.innerHTML = '<div class="conn-state ' + (appOn ? "on" : "off") + '"><span class="dot ' + (appOn ? "on" : "off") + '"></span><div><b>应用通道</b><div class="muted" style="font-size:12px">' + esc((appOn ? "已连接 · " : "未连接") + (d.app.name ? d.app.name + " · " : "") + (d.app.ws_url || "")) + "</div></div></div>"
-      + '<div class="conn-state mt-8 ' + (acctOn ? "on" : "off") + '"><span class="dot ' + (acctOn ? "on" : "off") + '"></span><div class="conn-account"><div class="conn-account-head">' + (acctOn ? avatarHTML(d.account.avatar_url, d.account.nickname || d.account.email, "conn-avatar") : "") + "<b>账号通道</b></div><div class=\"muted\" style=\"font-size:12px\">" + esc(acctOn ? (d.account.nickname ? d.account.nickname + " · " + d.account.email : d.account.email) : d.account.status || "未登录") + "</div></div></div>"
+    box.innerHTML = '<div class="conn-state ' + (appOn ? "on" : "off") + '"><span class="dot ' + (appOn ? "on" : "off") + '"></span><div class="conn-main">'
+      + '<div class="conn-account-head">' + connAppAvatars(apps) + "<b>应用通道</b>"
+      + (apps.length ? '<span class="badge badge-off">' + apps.length + " 个应用</span>" : "")
+      + '<a href="javascript:Relay.go(\'pool\')" class="hint" style="margin-left:auto">管理应用 →</a>'
+      + "</div>"
+      + '<div class="muted" style="font-size:12px">' + esc((appOn ? "已连接 · " : "未连接") + (d.app.name ? d.app.name + " · " : "") + (d.app.ws_url || "")) + "</div>"
+      + connAppList(apps)
+      + "</div></div>"
+      + '<div class="conn-state mt-8 ' + (acctOn ? "on" : "off") + '"><span class="dot ' + (acctOn ? "on" : "off") + '"></span><div class="conn-main"><div class="conn-account-head"><b>账号通道</b>'
+      + (accounts.length ? '<span class="badge badge-off">' + accounts.length + " 个账号</span>" : "")
+      + "</div>"
+      + '<div class="muted" style="font-size:12px">' + esc(acctOn ? (d.account.nickname ? d.account.nickname + " · " + d.account.email : d.account.email) : d.account.status || "未登录") + "</div>"
+      + connAccountList(accounts, d.account.email)
+      + "</div></div>"
       + '<div class="health-card mt-12"><div class="health-head"><b>账号会话</b>' + health.badge + '</div>'
       + '<div class="muted" style="font-size:12px">' + esc(health.detail) + "</div>"
       + (h.message && health.key !== "unconfigured" ? '<div class="muted clamp2" style="font-size:12px;color:var(--err);margin-top:4px" title="' + esc(h.message) + '">' + esc(h.message) + "</div>" : "")
@@ -1898,6 +2033,12 @@
     if (rl) rl.addEventListener("click", reloginAccount);
     var lo = $("#acctLogout");
     if (lo) lo.addEventListener("click", logoutAccount);
+    $$("#connAccounts [data-acct-switch]").forEach(function (b) {
+      b.addEventListener("click", function () { switchAccount(b.getAttribute("data-acct-switch")); });
+    });
+    $$("#connAccounts [data-acct-del]").forEach(function (b) {
+      b.addEventListener("click", function () { removeAccount(b.getAttribute("data-acct-del")); });
+    });
   }
 
   /* ---------- 消息收发 ---------- */
@@ -1964,11 +2105,11 @@
       if (!box) return;
       if (!list.length) { box.innerHTML = emptyState("message", "暂无会话", "收到或发起会话后，会在这里列出。"); return; }
       box.innerHTML = list.map(function (c, i) {
-        var name = c.name || c.title || c.id;
+        var peer = c.peer || c.user || c.target || c.contact || {};
+        var name = c.name || c.title || pickDisplayName(peer, "") || c.id;
         var active = state.conv && state.conv.id === c.id;
-        var av = c.avatar_url || c.avatar || (state.app && state.app.avatar_url) || "";
-        var lead = av ? avatarHTML(av, name, "conv-avatar") : '<span class="conv-ico" data-ico="message">' + ico("message") + "</span>";
-        return '<button type="button" class="conv-item' + (active ? " active" : "") + '" data-conv-index="' + i + '">' + lead + '<span class="cname">' + esc(name) + "</span></button>";
+        var av = pickAvatarURL(c) || (state.app && state.app.avatar_url) || "";
+        return '<button type="button" class="conv-item' + (active ? " active" : "") + '" data-conv-index="' + i + '" title="' + esc(name) + '">' + avatarHTML(av, name, "conv-avatar") + '<span class="cname">' + esc(name) + "</span></button>";
       }).join("");
       $$("[data-conv-index]", box).forEach(function (item) {
         item.addEventListener("click", function () { pickConv(Number(item.getAttribute("data-conv-index"))); });
@@ -2055,22 +2196,25 @@
     var box = $("#chatStream");
     if (!box) return;
     if (!state.msgs.length) { box.innerHTML = emptyState("message", "暂无消息", "在下方输入框发送内容，中间件会按功能或 Agent 自动回复。"); return; }
+    var app = state.app || {};
+    var acct = state.account || {};
+    var convAv = pickAvatarURL(state.conv);
     box.innerHTML = state.msgs.map(function (m) {
-      var content = "";
       var body = m.body || {};
-      if (body.type === "text") content = body.content || "";
+      var content = "";
+      if (typeof body === "string") content = body;
+      else if (body.type === "text") content = body.content || body.text || "";
       else if (body.type === "image") content = "[图片]";
-      else content = m.summary || JSON.stringify(body || "");
-      var sender = m.sender || {};
-      var out = sender.type === "app" || sender.type === "assistant";
-      var t = fmtTime(m.created_at);
-      // 入站消息把原始 sender.type 映射为中文，避免直接暴露 user / system 等协议字段。
-      var acct = state.account || {};
-      var app = state.app || {};
-      var who = sender.nickname || sender.name || (out ? (app.name || "Relay") : (SENDER_LABEL[sender.type || ""] || sender.type || (acct.nickname || acct.email) || "对方"));
-      var av = sender.avatar || sender.avatar_url || (out ? (app.avatar_url || "") : "");
+      else if (body.type === "file") content = "[文件] " + (body.name || body.filename || "");
+      else content = m.summary || body.content || body.text || (body.type ? "[" + body.type + "]" : "");
+      var sender = (m.sender && typeof m.sender === "object") ? m.sender : {};
+      var out = sender.type === "app" || sender.type === "assistant" || m.direction === "out" || m.is_out === true;
+      var t = fmtTime(m.created_at || m.createdAt || m.time);
+      var who = pickDisplayName(sender, "") || m.sender_name || (out ? (app.name || acct.nickname || acct.email || "Relay") : (SENDER_LABEL[sender.type || ""] || sender.type || pickDisplayName(state.conv, "") || "对方"));
+      // 入站优先用发送者头像，其次用会话头像；出站回退到应用/当前账号头像。
+      var av = pickAvatarURL(sender) || (out ? (app.avatar_url || acct.avatar_url || "") : convAv);
       return '<div class="msg-item ' + (out ? "msg-item-out" : "msg-item-in") + '">' + avatarHTML(av, who, "msg-avatar")
-        + '<div class="msg-main"><span class="msg-meta">' + esc(who) + " · " + esc(t) + '</span><div class="msg-bubble ' + (out ? "msg-out" : "msg-in") + '">' + esc(content) + "</div></div></div>";
+        + '<div class="msg-main"><span class="msg-meta" title="' + esc(who) + '">' + esc(who) + " · " + esc(t) + '</span><div class="msg-bubble ' + (out ? "msg-out" : "msg-in") + '">' + esc(content) + "</div></div></div>";
     }).join("");
     box.scrollTop = box.scrollHeight;
   }
@@ -2136,7 +2280,7 @@
       + '<div class="panel"><div class="plugin-toolbar">'
       + '<div class="plugin-tree-map" id="scriptTreeMap"></div>'
       + '<div class="spacer"></div>'
-      + '<input class="input plugin-search" id="scriptSearch" type="search" placeholder="搜索插件 / 分类 / 应用" aria-label="搜索插件">'
+      + '<input class="input plugin-search" id="scriptSearch" type="search" placeholder="搜索插件 / 分类 / 服务 / 应用" aria-label="搜索插件">'
       + '<div class="seg" id="scriptViewToggle" role="group" aria-label="插件视图"><button type="button" data-sview="tree">目录</button><button type="button" data-sview="list">列表</button></div>'
       + '</div><div class="panel-body" id="scriptList">' + loadingState() + '</div></div>'
       + '<div class="panel mt-16"><div class="panel-head"><h3>技能</h3><span class="hint">可被插件 require 复用的 JS 模块，或 Markdown 说明；安装前会隔离试跑</span><div class="spacer"></div><button class="btn btn-primary btn-sm" id="newSkill">安装技能</button></div><div class="panel-body" id="skillList">' + loadingState() + '</div></div>';
@@ -2192,9 +2336,13 @@
     var c = String((s && s.class) || "").trim();
     return c || "未分类";
   }
+  // 服务用于把同一业务/项目的多个插件收进一个子文件夹，与分类形成「分类 → 服务 → 插件」三层。
+  function scriptService(s) {
+    return String((s && s.service) || "").trim();
+  }
   function scriptFilterText(s) {
     var apps = (s.apps || []).map(function (id) { var a = state.appNames[id]; return (a && a.name) || id; });
-    return [s.title, s.name, s.class, s.description, (s.rules || []).join(" "), (s.platform || []).join(" "), apps.join(" ")].join(" ").toLowerCase();
+    return [s.title, s.name, s.class, s.service, s.description, (s.rules || []).join(" "), (s.platform || []).join(" "), apps.join(" ")].join(" ").toLowerCase();
   }
   function scriptAppChips(s) {
     var apps = s.apps || [];
@@ -2234,11 +2382,17 @@
     if (!el) return;
     var groups = scriptGroups(SCRIPT_CACHE || []);
     var classes = Object.keys(groups).sort(function (a, b) { return a.localeCompare(b, "zh"); });
-    var appSet = {};
-    (SCRIPT_CACHE || []).forEach(function (s) { (s.apps || []).forEach(function (id) { if (id !== "*") appSet[id] = 1; }); });
+    var appSet = {}, serviceSet = {};
+    (SCRIPT_CACHE || []).forEach(function (s) {
+      (s.apps || []).forEach(function (id) { if (id !== "*") appSet[id] = 1; });
+      var svc = scriptService(s);
+      if (svc) serviceSet[scriptClass(s) + "//" + svc] = 1;
+    });
     el.innerHTML = '<span class="ptm-node"><span class="ico">' + ico("puzzle") + "</span><b>" + (SCRIPT_CACHE || []).length + "</b> 插件</span>"
       + '<span class="ptm-link" aria-hidden="true"></span>'
       + '<span class="ptm-node"><span class="ico">' + ico("folder") + "</span><b>" + classes.length + "</b> 分类</span>"
+      + '<span class="ptm-link" aria-hidden="true"></span>'
+      + '<span class="ptm-node"><span class="ico">' + ico("layers") + "</span><b>" + Object.keys(serviceSet).length + "</b> 服务</span>"
       + '<span class="ptm-link" aria-hidden="true"></span>'
       + '<span class="ptm-node"><span class="ico">' + ico("layers") + "</span><b>" + Object.keys(appSet).length + "</b> 应用</span>";
   }
@@ -2254,8 +2408,13 @@
       return;
     }
     if (state.scriptView === "list") {
-      box.innerHTML = '<div class="list">' + list.slice().sort(function (a, b) { return scriptClass(a).localeCompare(scriptClass(b), "zh") || String(a.name).localeCompare(String(b.name)); }).map(function (s) {
-        return '<div class="plugin-flat"><span class="plugin-class-tag">' + esc(scriptClass(s)) + "</span>" + scriptRow(s) + "</div>";
+      box.innerHTML = '<div class="list">' + list.slice().sort(function (a, b) {
+        return scriptClass(a).localeCompare(scriptClass(b), "zh") || scriptService(a).localeCompare(scriptService(b), "zh") || String(a.name).localeCompare(String(b.name));
+      }).map(function (s) {
+        var svc = scriptService(s);
+        return '<div class="plugin-flat"><span class="plugin-class-tag">' + esc(scriptClass(s)) + "</span>"
+          + (svc ? '<span class="plugin-class-tag plugin-service-tag">' + esc(svc) + "</span>" : "")
+          + scriptRow(s) + "</div>";
       }).join("") + "</div>";
       hydrateIcons();
       return;
@@ -2265,9 +2424,27 @@
     box.innerHTML = classes.map(function (cls) {
       var folded = state.scriptFolders[cls] === false;
       var items = groups[cls].slice().sort(function (a, b) { return String(a.name).localeCompare(String(b.name)); });
+      var direct = [], services = {};
+      items.forEach(function (s) {
+        var svc = scriptService(s);
+        if (svc) (services[svc] = services[svc] || []).push(s);
+        else direct.push(s);
+      });
+      var svcNames = Object.keys(services).sort(function (a, b) { return a.localeCompare(b, "zh"); });
+      var body = svcNames.map(function (svc) {
+        var key = cls + "//" + svc;
+        var subFolded = state.scriptFolders[key] === false;
+        var svcItems = services[svc].slice().sort(function (a, b) { return String(a.name).localeCompare(String(b.name)); });
+        return '<section class="plugin-folder plugin-folder-sub' + (subFolded ? " folded" : "") + '" data-folder="' + esc(key) + '">'
+          + '<button type="button" class="plugin-folder-head" aria-expanded="' + (subFolded ? "false" : "true") + '"><span class="pf-chevron">' + ico("chevron-down") + '</span><span class="pf-ico">' + ico("layers") + '</span><b>' + esc(svc) + '</b><span class="pf-count">' + svcItems.length + '</span><span class="pf-line" aria-hidden="true"></span></button>'
+          + '<div class="plugin-folder-body"><div class="list">' + svcItems.map(scriptRow).join("") + "</div></div></section>";
+      }).join("");
+      if (direct.length) body += '<div class="list">' + direct.map(scriptRow).join("") + "</div>";
       return '<section class="plugin-folder' + (folded ? " folded" : "") + '" data-folder="' + esc(cls) + '">'
-        + '<button type="button" class="plugin-folder-head" aria-expanded="' + (folded ? "false" : "true") + '"><span class="pf-chevron">' + ico("chevron-down") + '</span><span class="pf-ico">' + ico("folder") + '</span><b>' + esc(cls) + '</b><span class="pf-count">' + items.length + '</span><span class="pf-line" aria-hidden="true"></span></button>'
-        + '<div class="plugin-folder-body"><div class="list">' + items.map(scriptRow).join("") + "</div></div></section>";
+        + '<button type="button" class="plugin-folder-head" aria-expanded="' + (folded ? "false" : "true") + '"><span class="pf-chevron">' + ico("chevron-down") + '</span><span class="pf-ico">' + ico("folder") + '</span><b>' + esc(cls) + '</b><span class="pf-count">' + items.length + '</span>'
+        + (svcNames.length ? '<span class="pf-svc-count">' + svcNames.length + " 服务</span>" : "")
+        + '<span class="pf-line" aria-hidden="true"></span></button>'
+        + '<div class="plugin-folder-body">' + body + "</div></section>";
     }).join("");
     bindScriptFolders();
     hydrateIcons();
@@ -2306,7 +2483,7 @@
       + '<div class="grid grid-2"><div class="field"><label>插件文件名</label><input class="input" id="sm_name" value="' + esc(name) + '" placeholder="demo.js"></div>'
       + '<div class="field"><label>语言</label><select class="select" id="sm_lang"><option value="js">JavaScript</option><option value="python">Python</option></select></div></div>'
       + '<div class="field"><label>插件代码</label><textarea class="input code-editor" id="sm_code" rows="16" spellcheck="false"></textarea></div>'
-      + '<p style="color:var(--muted);font-size:12px;margin:6px 0 0">JavaScript 用 <code>result</code> 返回结果；Python 用标准输出返回结果，以 <code>SEND:</code> 开头的行会作为会话消息回发。头部注释可用 <code>[title: ...]</code>、<code>[rule: ...]</code>、<code>[cron: ...]</code>、<code>[admin: true]</code> 声明元数据（兼容 AutMan），安装后自动登记到插件列表。</p>',
+      + '<p style="color:var(--muted);font-size:12px;margin:6px 0 0">JavaScript 用 <code>result</code> 返回结果；Python 用标准输出返回结果，以 <code>SEND:</code> 开头的行会作为会话消息回发。头部注释可用 <code>[title: ...]</code>、<code>[class: 分类]</code>、<code>[service: 服务名]</code>、<code>[apps: 应用ID]</code>、<code>[rule: ...]</code>、<code>[cron: ...]</code>、<code>[admin: true]</code> 声明元数据（兼容 AutMan）；同一 <code>service</code> 的插件会收进同一服务文件夹。</p>',
       '<button class="btn btn-ghost" onclick="Relay.closeModal()">取消</button><button class="btn btn-primary" id="sm_save">' + (isEdit ? "保存" : "安装") + "</button>");
     var codeEl = $("#sm_code"), langEl = $("#sm_lang"), nameEl = $("#sm_name");
     codeEl.value = code;
@@ -2563,6 +2740,7 @@
       + metaBadge(FEATURE_SCOPE[f.scope] || f.scope, f.scope === "public" ? "badge-info" : "badge-off") + " "
       + metaBadge(FEATURE_IDENTITY[f.identity] || f.identity, "badge-off")
       + (f.class ? " " + metaBadge(f.class, "badge-info") : "")
+      + (f.service ? " " + metaBadge(f.service, "badge-off") : "")
       + (f.confirm ? " " + metaBadge("需确认", "badge-warn") : "") + "</div>"
       + (f.kind === "script" ? '<div class="app-chips">' + scriptAppChips(f) + "</div>" : "")
       + '<div class="desc mono clip" title="' + esc(f.target) + '">' + esc(f.target || "-") + "</div></div>"

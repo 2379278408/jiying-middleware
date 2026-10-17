@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 )
 
 const (
 	accountPoolKey        = "relay_accounts"
 	activeAccountEmailKey = "relay_active_account"
+	accountProfilesKey    = "relay_account_profiles"
 )
 
 // loadAccountConns 读取账号池；旧版单账号配置会自动作为首个账号迁移使用。
@@ -86,6 +88,74 @@ type AccountPoolItem struct {
 	CodeLogin bool   `json:"code_login"`
 	Active    bool   `json:"active"`
 	LoggedIn  bool   `json:"logged_in"`
+	Nickname  string `json:"nickname,omitempty"`
+	AvatarURL string `json:"avatar_url,omitempty"`
+}
+
+// accountProfileStore 按邮箱缓存账号昵称与头像，供多账号列表稳定展示。
+// 资料只在登录或状态轮询拿到 /api/client/me 时写入，不额外按账号发起请求。
+var accountProfileStore = struct {
+	sync.Mutex
+	loaded bool
+	items  map[string]AccountProfile
+}{items: map[string]AccountProfile{}}
+
+func loadAccountProfilesLocked() {
+	if accountProfileStore.loaded {
+		return
+	}
+	accountProfileStore.loaded = true
+	if BucketApp == nil {
+		return
+	}
+	raw := BucketApp.GetString(accountProfilesKey)
+	if raw == "" {
+		return
+	}
+	var items map[string]AccountProfile
+	if json.Unmarshal([]byte(raw), &items) != nil {
+		return
+	}
+	for email, p := range items {
+		email = strings.TrimSpace(email)
+		if email == "" {
+			continue
+		}
+		p.Email = firstNonEmpty(p.Email, email)
+		accountProfileStore.items[email] = p
+	}
+}
+
+// SaveAccountProfile 持久化单账号资料；内容未变化时不重复写盘。
+func SaveAccountProfile(profile AccountProfile) {
+	email := strings.TrimSpace(firstNonEmpty(profile.Email, UserSessionEmail()))
+	if email == "" {
+		return
+	}
+	profile.Email = email
+	accountProfileStore.Lock()
+	defer accountProfileStore.Unlock()
+	loadAccountProfilesLocked()
+	if old, ok := accountProfileStore.items[email]; ok && old.Nickname == profile.Nickname && old.AvatarURL == profile.AvatarURL {
+		return
+	}
+	accountProfileStore.items[email] = profile
+	if BucketApp == nil {
+		return
+	}
+	raw, err := json.Marshal(accountProfileStore.items)
+	if err != nil {
+		return
+	}
+	BucketApp.Set(accountProfilesKey, string(raw))
+}
+
+// SavedAccountProfile 读取已缓存的账号资料；未登录过的新账号返回零值。
+func SavedAccountProfile(email string) AccountProfile {
+	accountProfileStore.Lock()
+	defer accountProfileStore.Unlock()
+	loadAccountProfilesLocked()
+	return accountProfileStore.items[strings.TrimSpace(email)]
 }
 
 func AccountPoolSnapshot() []AccountPoolItem {
@@ -97,9 +167,11 @@ func AccountPoolSnapshot() []AccountPoolItem {
 	}
 	out := make([]AccountPoolItem, 0, len(list))
 	for _, account := range list {
+		profile := SavedAccountProfile(account.Email)
 		out = append(out, AccountPoolItem{
 			BaseURL: stripURLCredentials(account.BaseURL), Email: account.Email, CodeLogin: account.CodeLogin,
 			Active: account.Email == active, LoggedIn: account.Email != "" && account.Email == loggedEmail,
+			Nickname: profile.Nickname, AvatarURL: profile.AvatarURL,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {

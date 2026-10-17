@@ -53,3 +53,36 @@ func TestAccountPoolFallsBackToLegacyAccount(t *testing.T) {
 		t.Fatalf("legacy account fallback mismatch: %+v", list)
 	}
 }
+
+func TestAccountProfilePersistsAcrossReload(t *testing.T) {
+	setupAccountPoolBucket(t, "accountpool-profile")
+	saveAccountConns([]AccountConn{{BaseURL: "https://chat.example", Email: "moli@example.com", Secret: "secret"}})
+
+	accountProfileStore.Lock()
+	accountProfileStore.loaded = false
+	accountProfileStore.items = map[string]AccountProfile{}
+	accountProfileStore.Unlock()
+	t.Cleanup(func() {
+		BucketApp.Delete(accountProfilesKey)
+		accountProfileStore.Lock()
+		accountProfileStore.loaded = false
+		accountProfileStore.items = map[string]AccountProfile{}
+		accountProfileStore.Unlock()
+	})
+
+	SaveAccountProfile(AccountProfile{Email: "moli@example.com", Nickname: "茉莉", AvatarURL: "https://cdn.example/moli.png"})
+	if got := SavedAccountProfile("moli@example.com"); got.Nickname != "茉莉" || got.AvatarURL != "https://cdn.example/moli.png" {
+		t.Fatalf("profile not stored: %+v", got)
+	}
+
+	// 模拟重启：清空内存后应从桶中恢复，供多账号列表展示。
+	accountProfileStore.Lock()
+	accountProfileStore.loaded = false
+	accountProfileStore.items = map[string]AccountProfile{}
+	accountProfileStore.Unlock()
+
+	snap := AccountPoolSnapshot()
+	if len(snap) != 1 || snap[0].Nickname != "茉莉" || snap[0].AvatarURL != "https://cdn.example/moli.png" {
+		t.Fatalf("snapshot missing persisted profile: %+v", snap)
+	}
+}

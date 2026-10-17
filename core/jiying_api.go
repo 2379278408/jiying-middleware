@@ -408,6 +408,7 @@ func jiyingAPIScripts(c *gin.Context) {
 		Version     string              `json:"version,omitempty"`
 		Author      string              `json:"author,omitempty"`
 		Class       string              `json:"class,omitempty"`
+		Service     string              `json:"service,omitempty"`
 		Apps        []string            `json:"apps,omitempty"`
 		Description string              `json:"description,omitempty"`
 		Rules       []string            `json:"rules,omitempty"`
@@ -446,6 +447,7 @@ func jiyingAPIScripts(c *gin.Context) {
 				Version:     m.Version,
 				Author:      m.Author,
 				Class:       m.Class,
+				Service:     m.Service,
 				Apps:        m.Apps,
 				Description: m.Description,
 				Rules:       m.Rules,

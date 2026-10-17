@@ -25,6 +25,7 @@ type Feature struct {
 	Identity string   `json:"identity"`
 	Enabled  bool     `json:"enabled"`
 	Class    string   `json:"class,omitempty"`
+	Service  string   `json:"service,omitempty"`
 	Apps     []string `json:"apps,omitempty"`
 }
 
@@ -65,22 +66,23 @@ func (t *featureTable) scanScripts() {
 		}
 		t.ensure(name, "script", e.Name(), scope, false, "app")
 		m := ParsePluginManifest(string(data))
-		t.setScriptMeta(name, m.Class, m.Apps)
+		t.setScriptMeta(name, m.Class, m.Service, m.Apps)
 	}
 }
 
 // setScriptMeta 把插件清单元数据同步到功能记录；插件文件更新后重启即可生效。
-func (t *featureTable) setScriptMeta(name, class string, apps []string) {
+func (t *featureTable) setScriptMeta(name, class, service string, apps []string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	f, ok := t.items[name]
 	if !ok || f == nil {
 		return
 	}
-	if f.Class == class && sameStringSet(f.Apps, apps) {
+	if f.Class == class && f.Service == service && sameStringSet(f.Apps, apps) {
 		return
 	}
 	f.Class = class
+	f.Service = service
 	f.Apps = append([]string(nil), apps...)
 	t.saveLocked()
 }

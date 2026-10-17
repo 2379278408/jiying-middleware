@@ -209,8 +209,12 @@ const accountProfileTTL = 5 * time.Minute
 
 func storeAccountProfile(profile AccountProfile) {
 	if profile.Email == "" {
+		profile.Email = UserSessionEmail()
+	}
+	if profile.Email == "" {
 		return
 	}
+	SaveAccountProfile(profile)
 	accountProfileCache.Lock()
 	accountProfileCache.email = UserSessionEmail()
 	accountProfileCache.profile = profile
