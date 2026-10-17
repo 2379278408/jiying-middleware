@@ -306,3 +306,34 @@
 - 静态加密：连接密钥、账号密码、应用密钥、模型密钥与会话令牌统一 AES-GCM（随机 nonce）；密钥不可用时中止保存，禁止回退明文。AES-CBC 与 SM4-CBC 改为随机 IV 并带版本头；rank 编码密钥改由 `JIYING_RANK3_KEY` / `JIYING_RANK4_KEY` 提供，未配置时失败关闭。
 - 暴露面与响应头：默认 `gin.ReleaseMode`，仅 `JIYING_DEBUG=1` 开启调试；移除 `GET /exit`、`GET /js/debug`，插件启停改为 POST；`/local/msg` 拒绝携带浏览器上下文头的请求；静态资源移除接入测试页；全局下发 `X-Frame-Options: DENY`、CSP `frame-ancestors 'none'`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`，HTTPS 下追加 HSTS。
 - 文件权限：数据、日志、配置目录统一 `0700`，日志与配置、BoltDB 文件 `0600`，脚本目录 `0750`；启动时同步收紧已存在目录权限。
+
+## 当前实现补充（2026-10-18）
+
+### 消息计数与就绪判定
+
+- 收发计数落盘：`jiyingMsgStats` 以桶键 `jiying_msg_stats` 保存当日 `inbound` / `outbound` 与日期，首次读取时懒加载；跨日自动清零并立即落盘，进程重启不再归零。计数仍在内存聚合，落盘失败只记日志，不影响消息处理。
+- 验证码账号就绪：`accountReadiness` 接受「已保存密码」或 `code_login=true` 两种凭据；已登录时直接判定 `connected`，未登录才按配置完整性返回 `configured` / `invalid`。`UserLogin` 与 `connect/status` 同步暴露 `CodeLogin`，避免验证码账号被误报为缺少密钥。
+
+### Agent 回复与工具调用
+
+- 回复格式：Agent 最终答复优先走 `ReplyMarkdown`（即应 `markdown` 富文本），标题、列表、表格与代码块可正常渲染；发送失败自动回退纯文本。`SendMarkdownToConv` 与纯文本共用 `clampOutboundText`，超长内容按上限截断。
+- 身份注入：`agentSystemPrompt` 在系统提示末尾追加「当前用户ID（主控权限/普通用户）」与可信度约束（实时数据先调工具、失败如实说明、不编造数据或图片）；用户自定义 system 不再覆盖这两项，身份为空时仍保留可信度约束。
+- 实时意图强制工具：`agentToolChoice` 在首轮命中天气、新闻、股价、快递、实时等关键词且存在匹配工具时，向模型传 `tool_choice=required`；未命中或没有对应工具仍为 `auto`，避免为普通对话强行调用工具。
+- 失败可感知：工具执行被拒绝、超时或失败时，回灌内容以 `FAILED:` 开头并附带「不要编造结果」提示，模型据此如实回复；成功结果保持原样。
+- 图片降级：模型最终文本中的 Markdown 图片语法 `![alt](url)` 统一改写为 `[图片：alt](url)`。Agent 需要发图必须调用图片工具，防止未真正发送却让客户端渲染出图片。
+- 静默任务可追溯：`taskq` 为静默任务保留最近 50 条内存副本（`RecentSilentTasks`），`GET /jiying/api/tasks?silent=1` 返回；控制台任务队列新增「含 Agent 调用」开关，Agent 行带标记并只提供详情，不参与重试/删除。静默任务仍不进入持久层，重启即清空。
+
+### 插件运行环境与失败详情
+
+- 控制台环境注入：Python 插件子进程新增 `JIYING_PORT`、`JIYING_BASE_URL`（本机 `127.0.0.1` 控制台地址）、`JIYING_CONSOLE_USER`、`JIYING_CONSOLE_PASS`（当前账号，密码存在时）。插件可直接调用 `/jiying/api/send/*`、`/upload` 等接口，无需再猜测端口或手工配置账号。仅管理员安装的插件可执行；插件自身配置的同名变量仍可覆盖。
+- 失败详情：脚本非零退出时合并 `stderr` 与 `stdout`（各带标签，总计截断 2000 字符）返回。插件把错误 JSON 打印到 stdout 时不再只剩 `exit status 1`，Agent 与任务列表都能看到真实原因。
+- 账号通道边界：账号通道只有 HTTP 会话与 token，不存在应用通道那样的实时事件流；「账号侧收到入站消息」依赖应用通道，文档与就绪检查均按此语义描述。
+
+### 总览会话数缓存
+
+- `overviewConversationCount` 以「账号 BaseURL + 邮箱」为键缓存会话数 30 秒，切号后键变化自然失效；上游调用失败时回退该账号上次结果，没有历史结果则返回 0。避免控制台每次刷新都拉取远端会话列表，同时保证切号不串数据。
+
+### 媒体发送的部署限制
+
+- 即应服务端拉取媒体时执行 SSRF 防护，`localhost`、回环、私网与链路本地地址一律拒绝。中间件部署在私网时，图片/文件必须先上传到公网可访问的地址（对象存储、带公网域名的静态服务等），不能直接使用本机临时文件路径。
+- 发送失败会返回明确错误（`URL 不允许访问` 或下载超限），控制台、脚本与 Agent 工具调用都应把失败原样告知用户，并降级为文字说明或链接，不要假定图片已送达。

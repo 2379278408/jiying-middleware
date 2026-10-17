@@ -83,7 +83,7 @@ func CurrentAppConfig() JiyingConfig {
 func CurrentAccountConfig() UserLogin {
 	account := CurrentAccountConn()
 	if account.configured() {
-		return UserLogin{BaseURL: account.BaseURL, Email: account.Email, Password: account.Secret}
+		return UserLogin{BaseURL: account.BaseURL, Email: account.Email, Password: account.Secret, CodeLogin: account.CodeLogin}
 	}
 	return loadRelayConn().effectiveAccount()
 }

@@ -1014,6 +1014,27 @@ func (s *JiyingSender) Reply(msg interface{}) bool {
 	return s.send(fmt.Sprint(msg), s.MsgID)
 }
 
+// ReplyMarkdown 以 markdown 富文本回复，客户端会渲染标题、列表与表格。
+// 发送失败返回 false，调用方据此回退纯文本。
+func (s *JiyingSender) ReplyMarkdown(msg interface{}) bool {
+	text := clampOutboundText(strings.TrimSpace(fmt.Sprint(msg)))
+	if s.client == nil || text == "" {
+		return false
+	}
+	if topicClosed(s.ChatID) {
+		GetMyLog().Warn("话题已关闭，拒绝发送")
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	// 直接复用当前发送者的客户端，避免多应用场景下按会话猜测到其他应用通道。
+	if _, err := s.client.SendMessage(ctx, s.ChatID, s.MsgID, MarkdownMessage(text)); err != nil {
+		GetMyLog().Warn("即应发送失败：%v", err)
+		return false
+	}
+	return true
+}
+
 func (s *JiyingSender) send(text, replyTo string) bool {
 	if s.client == nil || text == "" {
 		return false

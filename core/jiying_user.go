@@ -15,9 +15,10 @@ import (
 )
 
 type UserLogin struct {
-	BaseURL  string
-	Email    string
-	Password string
+	BaseURL   string
+	Email     string
+	Password  string
+	CodeLogin bool
 }
 
 func UserLoginFromEnv() UserLogin {

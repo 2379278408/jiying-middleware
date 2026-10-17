@@ -185,6 +185,8 @@
     "已安装": "Installed",
     "删除": "Delete",
     "任务队列": "Task queue",
+    "含 Agent 调用": "Include agent calls",
+    "Agent 调用": "Agent call",
     "已连接": "Connected",
     "安装失败": "Install failed",
     "删除失败": "Delete failed",
@@ -1132,7 +1134,7 @@
     if (b && retry) b.addEventListener("click", retry);
   }
 
-  var state = { view: "home", cerr: null, convs: [], conv: null, msgs: [], interval: null, baseUptime: null, uptimeAt: 0, uptimeTimer: null, chatEpoch: 0, chatRequest: 0, chatConvID: "", logLines: [], logShown: [], logPending: "", logTimer: null, logLevel: "all", logPinned: true, logFromBottom: 0, logLoadedAt: "", logDay: "", tasks: [], tasksErr: "", role: "", auditRows: [], auditErr: "", executions: [], executionsErr: "", execFilter: { kind: "", status: "", name: "" }, chatCaps: null, account: null, app: null, appProfiles: {}, appNames: {}, scriptView: "tree", scriptFolders: {} };
+  var state = { view: "home", cerr: null, convs: [], conv: null, msgs: [], interval: null, baseUptime: null, uptimeAt: 0, uptimeTimer: null, chatEpoch: 0, chatRequest: 0, chatConvID: "", logLines: [], logShown: [], logPending: "", logTimer: null, logLevel: "all", logPinned: true, logFromBottom: 0, logLoadedAt: "", logDay: "", tasks: [], tasksErr: "", silentTasks: [], role: "", auditRows: [], auditErr: "", executions: [], executionsErr: "", execFilter: { kind: "", status: "", name: "" }, chatCaps: null, account: null, app: null, appProfiles: {}, appNames: {}, scriptView: "tree", scriptFolders: {} };
   var VIEW_KEY = "relay-view";
   var PROFILE_KEY = "relay-profile";
   var ROLE_LABEL = { master: "主人", ops: "运营", readonly: "只读" };
@@ -3214,12 +3216,14 @@
     var cont = $("#view-tasks");
     cont.innerHTML = '<div class="page-head"><div><h2>任务队列</h2><p>功能执行记录与状态</p></div><div class="spacer"></div>'
       + '<select class="select" id="taskStatus" style="width:130px" title="按状态筛选"><option value="">全部状态</option><option value="failed">失败 / 超时</option><option value="running">执行中</option><option value="pending">排队中</option><option value="waiting">待确认</option><option value="done">完成</option><option value="canceled">已取消</option></select>'
+      + '<label class="muted nowrap" style="font-size:12px;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="taskSilent"> 含 Agent 调用</label>'
       + '<input class="input" id="taskFilter" placeholder="筛选功能 / 会话 / 结果" style="width:200px">'
       + '<button class="btn btn-ghost btn-sm" onclick="Relay.loadTasks()">刷新</button></div>'
       + '<div class="panel"><div class="table-wrap"><table class="table align-middle"><thead><tr><th style="width:128px">ID</th><th class="nowrap" style="width:88px">功能</th><th style="width:120px">会话</th><th class="nowrap" style="width:88px">状态</th><th>结果</th><th class="nowrap text-right" style="width:120px">操作</th></tr></thead><tbody id="taskList"><tr><td colspan="6">' + loadingState() + '</td></tr></tbody></table></div></div>'
       + '<div class="muted" id="taskMeta" style="margin-top:8px;font-size:12px"></div>';
     $("#taskStatus").addEventListener("change", paintTasks);
     $("#taskFilter").addEventListener("input", paintTasks);
+    $("#taskSilent").addEventListener("change", loadTasks);
     Relay.loadTasks();
   }
   // 状态筛选把 timeout 归入「失败」，与徽标语义一致。
@@ -3229,11 +3233,15 @@
     return (TASK_STATUS_GROUP[want] || [want]).indexOf(String(t.status)) >= 0;
   }
   function loadTasks() {
-    api("/jiying/api/tasks").then(function (r) {
+    var withSilent = !!($("#taskSilent") && $("#taskSilent").checked);
+    var silentReq = withSilent ? api("/jiying/api/tasks?silent=1&limit=50") : Promise.resolve(null);
+    Promise.all([api("/jiying/api/tasks"), silentReq]).then(function (res) {
+      var r = res[0], sr = res[1];
       var box = $("#taskList");
       if (!box) return;
       if (r.code !== 200) {
         state.tasks = [];
+        state.silentTasks = [];
         state.tasksErr = r.msg || r.message || "请稍后重试。";
         tableError(box, 6, "list", r.code === 403 ? "权限不足" : "任务列表加载失败", state.tasksErr, function () { state.tasksErr = ""; loadTasks(); });
         setTaskMeta(0, 0);
@@ -3241,11 +3249,13 @@
       }
       state.tasksErr = "";
       state.tasks = r.data ? r.data : [];
+      state.silentTasks = (sr && sr.code === 200 && sr.data) ? sr.data : [];
       paintTasks();
     }).catch(function () {
       var box = $("#taskList");
       if (!box) return;
       state.tasks = [];
+      state.silentTasks = [];
       state.tasksErr = "网络异常，请稍后重试。";
       tableError(box, 6, "list", "任务列表加载失败", state.tasksErr, function () { state.tasksErr = ""; loadTasks(); });
       setTaskMeta(0, 0);
@@ -3255,7 +3265,8 @@
     var box = $("#taskList");
     if (!box) return;
     if (state.tasksErr) return;
-    var all = state.tasks || [];
+    var all = (state.tasks || []).concat(state.silentTasks || []);
+    all.sort(function (a, b) { return String(b.created_at || "").localeCompare(String(a.created_at || "")); });
     if (!all.length) { box.innerHTML = '<tr><td colspan="6">' + emptyState("list", "暂无任务", "功能执行后会在这里留下记录。") + "</td></tr>"; setTaskMeta(0, 0); return; }
     var want = (($("#taskStatus") || {}).value || "");
     var kw = (($("#taskFilter") || {}).value || "").trim().toLowerCase();
@@ -3269,12 +3280,17 @@
         var tid = String(t.id || "-");
         var cid = String(t.conversation_id || "");
         var res = String(t.result || "");
+        var isAgent = !!t.silent;
+        var featureCell = esc(t.feature) + (isAgent ? ' <span class="badge badge-run" title="Agent 工具调用">Agent</span>' : "");
+        var actions = isAgent
+          ? '<button class="btn btn-ghost btn-sm" onclick="Relay.taskDetail(' + jsArg(tid) + ')">详情</button>'
+          : (t.status === "failed" ? '<button class="btn btn-ghost btn-sm" onclick="Relay.retryTask(' + jsArg(tid) + ')">重试</button> ' : "") + '<button class="btn btn-outline-danger btn-sm" onclick="Relay.delTask(' + jsArg(tid) + ')">删除</button>';
         return '<tr><td class="mono clip" title="' + esc(tid) + '"><a href="javascript:void(0)" onclick="Relay.taskDetail(' + jsArg(tid) + ')">' + esc(shortID(tid)) + "</a></td>"
-          + '<td class="nowrap">' + esc(t.feature) + "</td>"
+          + '<td class="nowrap">' + featureCell + "</td>"
           + '<td class="mono clip" title="' + esc(cid) + '">' + esc(cid ? shortID(cid) : "-") + "</td>"
           + '<td class="nowrap">' + stb + "</td>"
           + '<td class="muted"><div class="clamp2" title="' + esc(res) + '">' + esc(res) + "</div><small class=\"muted\">" + esc(t.error_code || "") + (t.duration_ms ? " · " + esc(String(t.duration_ms)) + " ms" : "") + "</small></td>"
-          + '<td class="text-right nowrap">' + (t.status === "failed" ? '<button class="btn btn-ghost btn-sm" onclick="Relay.retryTask(' + jsArg(tid) + ')">重试</button> ' : "") + '<button class="btn btn-outline-danger btn-sm" onclick="Relay.delTask(' + jsArg(tid) + ')">删除</button></td></tr>';
+          + '<td class="text-right nowrap">' + actions + "</td></tr>";
       }).join("") || '<tr><td colspan="6"><div class="empty">没有符合筛选条件的任务</div></td></tr>';
     setTaskMeta(shown.length, all.length);
   }
@@ -3288,7 +3304,7 @@
   }
   function retryTask(id) { api("/jiying/api/task/retry", { method: "POST", form: { id: id } }).then(function (r) { toast(r.code === 200 ? "已重试" : r.msg, r.code === 200 ? "ok" : "err"); loadTasks(); }); }
   function taskDetail(id) {
-    var t = (state.tasks || []).filter(function (x) { return String(x.id) === String(id); })[0];
+    var t = (state.tasks || []).concat(state.silentTasks || []).filter(function (x) { return String(x.id) === String(id); })[0];
     if (!t) { toast("任务已不在列表中，请刷新", "err"); return; }
     var rows = [
       ["任务 ID", t.id],

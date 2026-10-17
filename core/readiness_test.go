@@ -26,6 +26,21 @@ func TestAgentReadiness(t *testing.T) {
 	}
 }
 
+func TestAccountReadinessCodeLogin(t *testing.T) {
+	code := accountReadiness(UserLogin{BaseURL: "https://h", Email: "a@b.c", CodeLogin: true})
+	if code.Status != "configured" {
+		t.Fatalf("验证码账号应 configured，got %q (%+v)", code.Status, code.Issues)
+	}
+	missing := accountReadiness(UserLogin{BaseURL: "https://h", Email: "a@b.c"})
+	if missing.Status != "invalid" || len(missing.Issues) == 0 || missing.Issues[0].Code != "missing_secret" {
+		t.Fatalf("无密码且非验证码应 invalid，got %q (%+v)", missing.Status, missing.Issues)
+	}
+	noEmail := accountReadiness(UserLogin{BaseURL: "https://h", CodeLogin: true})
+	if noEmail.Status != "invalid" {
+		t.Fatalf("缺邮箱仍应 invalid，got %q", noEmail.Status)
+	}
+}
+
 func TestIsUUID(t *testing.T) {
 	cases := map[string]bool{
 		"a6567dc0-9bef-872a-4c3e-8f0a1b2c3d4e":     true,

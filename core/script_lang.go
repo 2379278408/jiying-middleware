@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -110,6 +111,46 @@ func validatePythonScript(path string) error {
 	return nil
 }
 
+// scriptConsoleEnv 为脚本注入本机控制台地址与控制台账号，插件可直接调用
+// /jiying/api/* 发送消息或上传文件，无需自行猜测端口。
+// 仅管理员安装的脚本会拿到这些变量；普通用户脚本由功能权限控制。
+func scriptConsoleEnv() map[string]string {
+	port := 8080
+	if BucketApp != nil {
+		if p := BucketApp.GetInt("port"); p != 0 {
+			port = p
+		}
+	}
+	env := map[string]string{
+		"JIYING_PORT":     strconv.Itoa(port),
+		"JIYING_BASE_URL": fmt.Sprintf("http://127.0.0.1:%d", port),
+	}
+	cfg := CurrentAccountConfig()
+	if cfg.Email != "" {
+		env["JIYING_CONSOLE_USER"] = cfg.Email
+	}
+	if cfg.Password != "" {
+		env["JIYING_CONSOLE_PASS"] = cfg.Password
+	}
+	return env
+}
+
+// scriptFailureDetail 合并 stderr 与 stdout，便于插件失败时定位真实原因。
+// 非零退出时 stdout 常含插件自己打印的错误信息，不能被丢弃。
+func scriptFailureDetail(stdout, stderr string, err error) string {
+	parts := make([]string, 0, 2)
+	if s := strings.TrimSpace(stderr); s != "" {
+		parts = append(parts, "stderr:\n"+s)
+	}
+	if s := strings.TrimSpace(stdout); s != "" {
+		parts = append(parts, "stdout:\n"+s)
+	}
+	if len(parts) == 0 {
+		return err.Error()
+	}
+	return truncateRunes(strings.Join(parts, "\n"), 2000)
+}
+
 // runPythonScript 在子进程里执行 Python 脚本，捕获标准输出作为结果。
 // 标准输出中以 "SEND:" 开头的行会被当作会话消息回发；无会话上下文时忽略。
 func runPythonScript(path, args, convID, replyTo string, cfgEnv map[string]string) (string, error) {
@@ -125,6 +166,9 @@ func runPythonScript(path, args, convID, replyTo string, cfgEnv map[string]strin
 		"JIYING_CONV_ID":  convID,
 		"JIYING_REPLY_TO": replyTo,
 		"JIYING_RES_HOME": utils.GetResHome(),
+	}
+	for k, v := range scriptConsoleEnv() {
+		extra[k] = v
 	}
 	for k, v := range cfgEnv {
 		extra[k] = v
@@ -144,11 +188,7 @@ func runPythonScript(path, args, convID, replyTo string, cfgEnv map[string]strin
 	}
 	result := deliverScriptOutput(out.String(), emit)
 	if runErr != nil {
-		msg := strings.TrimSpace(errBuf.String())
-		if msg == "" {
-			msg = runErr.Error()
-		}
-		return "", fmt.Errorf("%s", msg)
+		return "", fmt.Errorf("%s", scriptFailureDetail(out.String(), errBuf.String(), runErr))
 	}
 	return result, nil
 }

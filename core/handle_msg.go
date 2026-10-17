@@ -112,7 +112,10 @@ func dispatchAgentReply(sender *JiyingSender, prompt string) {
 		}
 		GetMyLog().Info("Agent 自动回复成功 conv=%s user=%s 提示=%d字 回复=%d字 耗时=%s",
 			sender.ChatID, sender.UserID, len([]rune(prompt)), len([]rune(out)), time.Since(started).Round(time.Millisecond))
-		_ = sender.Reply(out)
+		// Agent 输出常含标题、列表与表格，优先按 Markdown 渲染；发送失败再回退纯文本。
+		if !sender.ReplyMarkdown(out) {
+			_ = sender.Reply(out)
+		}
 	}()
 }
 

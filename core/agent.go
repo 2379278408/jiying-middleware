@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -399,6 +400,74 @@ func agentContext(ctx context.Context, convID string, seq int64) []chatMessage {
 	return getAgentHistory(convID)
 }
 
+// agentGroundRule 是每次对话都追加的可信度约束：实时数据先调工具，失败就如实说明。
+const agentGroundRule = "回答实时数据前必须先调用工具；工具失败或没有结果时，如实说明无法获取，不要编造数据或图片链接。"
+
+// agentSystemPrompt 把当前用户身份与可信度约束注入系统提示。
+// 用户可在控制台自定义 system，身份与约束始终追加在末尾，避免被覆盖。
+func agentSystemPrompt(base, userID string) string {
+	parts := make([]string, 0, 3)
+	if base = strings.TrimSpace(base); base != "" {
+		parts = append(parts, base)
+	}
+	if userID != "" {
+		role := "普通用户"
+		if privilegedUser(userID) {
+			role = "主控权限"
+		}
+		parts = append(parts, "当前用户ID："+userID+"（"+role+"）")
+	}
+	parts = append(parts, agentGroundRule)
+	return strings.Join(parts, "\n\n")
+}
+
+// agentRealtimeKeywords 是实时数据类意图的关键词；命中且存在同名/同描述工具时，
+// 首轮强制模型选择工具，减少「不调用工具直接编造数据」的概率。
+var agentRealtimeKeywords = []string{
+	"天气", "气温", "降雨", "空气质量", "新闻", "热搜", "股价", "股票", "基金",
+	"汇率", "油价", "金价", "比分", "赛程", "航班", "快递", "物流", "彩票",
+	"限行", "实时", "现在几点", "当前时间",
+}
+
+// agentToolChoice 决定本轮 tool_choice：命中实时意图且有对应工具时返回 required。
+func agentToolChoice(prompt string, defs []map[string]any) string {
+	p := strings.ToLower(prompt)
+	hit := ""
+	for _, k := range agentRealtimeKeywords {
+		if strings.Contains(p, k) {
+			hit = k
+			break
+		}
+	}
+	if hit == "" {
+		return ""
+	}
+	for _, d := range defs {
+		fn, ok := d["function"].(map[string]any)
+		if !ok {
+			continue
+		}
+		name := fmt.Sprint(fn["name"])
+		desc := fmt.Sprint(fn["description"])
+		if strings.Contains(name, hit) || strings.Contains(desc, hit) {
+			return "required"
+		}
+	}
+	return ""
+}
+
+// agentMarkdownImageRE 匹配 Markdown 图片语法；Agent 未真正发送图片时降级为普通链接。
+var agentMarkdownImageRE = regexp.MustCompile(`!\[([^\]]*)\]\(([^)\s]+)\)`)
+
+// sanitizeAgentReply 阻止模型用 Markdown 图片语法伪造「已发送图片」。
+// Agent 需要发图时必须调用对应工具，最终文本里的图片语法统一降级为链接。
+func sanitizeAgentReply(out string) string {
+	if strings.TrimSpace(out) == "" {
+		return out
+	}
+	return agentMarkdownImageRE.ReplaceAllString(out, "[图片：$1]($2)")
+}
+
 // RunAgent 执行一轮薄 Agent：模型决策、调用功能、回灌结果，直到出最终答复。
 // seq 为触发消息的会话序号，用于读取服务端历史；无序号时回退本地历史。
 func RunAgent(ctx context.Context, convID, userID, prompt string, seq int64) (string, error) {
@@ -409,8 +478,8 @@ func RunAgent(ctx context.Context, convID, userID, prompt string, seq int64) (st
 	defs, index, _ := buildAgentTools(userID)
 	runtime := newAgentRuntime(cfg)
 	msgs := []chatMessage{}
-	if cfg.System != "" {
-		msgs = append(msgs, chatMessage{Role: "system", Content: cfg.System})
+	if sys := agentSystemPrompt(cfg.System, userID); sys != "" {
+		msgs = append(msgs, chatMessage{Role: "system", Content: sys})
 	}
 	msgs = append(msgs, agentContext(ctx, convID, seq)...)
 	msgs = append(msgs, chatMessage{Role: "user", Content: prompt})
@@ -420,7 +489,12 @@ func RunAgent(ctx context.Context, convID, userID, prompt string, seq int64) (st
 		turns = 6
 	}
 	for i := 0; i < turns; i++ {
-		resp, err := runtime.Complete(ctx, msgs, defs)
+		// 首轮命中实时类意图时强制选择工具，避免模型直接编造实时数据。
+		choice := ""
+		if i == 0 {
+			choice = agentToolChoice(prompt, defs)
+		}
+		resp, err := runtime.Complete(ctx, msgs, defs, choice)
 		if err != nil {
 			return "", err
 		}
@@ -429,8 +503,9 @@ func RunAgent(ctx context.Context, convID, userID, prompt string, seq int64) (st
 		}
 		msg := resp.Choices[0].Message
 		if len(msg.ToolCalls) == 0 {
-			appendAgentHistory(convID, chatMessage{Role: "user", Content: prompt}, chatMessage{Role: "assistant", Content: msg.Content})
-			return msg.Content, nil
+			out := sanitizeAgentReply(msg.Content)
+			appendAgentHistory(convID, chatMessage{Role: "user", Content: prompt}, chatMessage{Role: "assistant", Content: out})
+			return out, nil
 		}
 		msgs = append(msgs, msg)
 		for _, tc := range msg.ToolCalls {
@@ -578,7 +653,7 @@ func buildArgsForTool(rawArgs string, params []string) string {
 // runAgentTool 执行一次 Agent 工具调用：先按功能推导参数，再走任务队列（含限流配额），同步等待结果。
 func runAgentTool(ctx context.Context, feature, rawArgs, userID, convID string) string {
 	if feature == "" {
-		return "未知工具"
+		return "FAILED: 未知工具"
 	}
 	params := []string{}
 	if fn := functionByTitle(feature); fn != nil {
@@ -594,26 +669,29 @@ func runAgentTool(ctx context.Context, feature, rawArgs, userID, convID string) 
 	})
 	if err != nil {
 		RecordAudit(userID, "agent.tool", feature, args, "拒绝: "+err.Error())
-		return "执行被拒绝: " + err.Error()
+		return "FAILED: 执行被拒绝: " + err.Error()
 	}
 	done := WaitForTaskDone(t.ID, 60*time.Second)
 	if done == nil {
 		RecordAudit(userID, "agent.tool", feature, args, "执行超时")
-		return "执行超时"
+		return "FAILED: 执行超时"
 	}
 	if done.Status == taskFailed {
 		RecordAudit(userID, "agent.tool", feature, args, "失败: "+done.Result)
-		return "执行失败: " + done.Result
+		return "FAILED: " + done.Result + "\n工具执行失败，请如实告知用户，不要编造结果。"
 	}
 	RecordAudit(userID, "agent.tool", feature, args, "成功")
 	return done.Result
 }
 
-func callChat(ctx context.Context, cfg AgentConfig, model string, msgs []chatMessage, tools []map[string]any) (*chatResponse, error) {
+func callChat(ctx context.Context, cfg AgentConfig, model string, msgs []chatMessage, tools []map[string]any, toolChoice string) (*chatResponse, error) {
 	body := map[string]any{"model": model, "messages": msgs}
 	if len(tools) > 0 {
 		body["tools"] = tools
-		body["tool_choice"] = "auto"
+		if toolChoice == "" {
+			toolChoice = "auto"
+		}
+		body["tool_choice"] = toolChoice
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {

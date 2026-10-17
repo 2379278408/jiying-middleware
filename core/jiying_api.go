@@ -28,12 +28,50 @@ var jiyingMsgStats = struct {
 	out     int
 }{}
 
-// traceIDContextKey 在请求上下文中缓存追踪 ID，供响应体与访问日志共用同一值。
-const traceIDContextKey = "jiying_trace_id"
+// jiyingMsgStatsKey 持久化今日收发计数；进程重启后从桶中恢复，面板不再归零。
+const jiyingMsgStatsKey = "jiying_msg_stats"
+
+// loadJiyingMsgStatsLocked 在持有 jiyingMsgStats 锁时按需恢复计数，只读一次盘。
+func loadJiyingMsgStatsLocked() {
+	if jiyingMsgStats.day != "" || BucketApp == nil {
+		return
+	}
+	raw := BucketApp.GetString(jiyingMsgStatsKey)
+	if raw == "" {
+		return
+	}
+	var saved struct {
+		Day     string `json:"day"`
+		Inbound int    `json:"inbound"`
+		Out     int    `json:"out"`
+	}
+	if json.Unmarshal([]byte(raw), &saved) == nil {
+		jiyingMsgStats.day = saved.Day
+		jiyingMsgStats.inbound = saved.Inbound
+		jiyingMsgStats.out = saved.Out
+	}
+}
+
+// saveJiyingMsgStatsLocked 把当天计数写入桶；调用方需持有锁，避免并发覆盖。
+func saveJiyingMsgStatsLocked() {
+	if BucketApp == nil || jiyingMsgStats.day == "" {
+		return
+	}
+	raw, err := json.Marshal(map[string]any{
+		"day":     jiyingMsgStats.day,
+		"inbound": jiyingMsgStats.inbound,
+		"out":     jiyingMsgStats.out,
+	})
+	if err != nil {
+		return
+	}
+	BucketApp.Set(jiyingMsgStatsKey, string(raw))
+}
 
 func jiyingCountInbound() {
 	jiyingMsgStats.Lock()
 	defer jiyingMsgStats.Unlock()
+	loadJiyingMsgStatsLocked()
 	day := time.Now().Format("2006-01-02")
 	if jiyingMsgStats.day != day {
 		jiyingMsgStats.day = day
@@ -41,11 +79,13 @@ func jiyingCountInbound() {
 		jiyingMsgStats.out = 0
 	}
 	jiyingMsgStats.inbound++
+	saveJiyingMsgStatsLocked()
 }
 
 func jiyingCountOutbound() {
 	jiyingMsgStats.Lock()
 	defer jiyingMsgStats.Unlock()
+	loadJiyingMsgStatsLocked()
 	day := time.Now().Format("2006-01-02")
 	if jiyingMsgStats.day != day {
 		jiyingMsgStats.day = day
@@ -53,16 +93,21 @@ func jiyingCountOutbound() {
 		jiyingMsgStats.out = 0
 	}
 	jiyingMsgStats.out++
+	saveJiyingMsgStatsLocked()
 }
 
 func jiyingMsgCounts() (int, int) {
 	jiyingMsgStats.Lock()
 	defer jiyingMsgStats.Unlock()
+	loadJiyingMsgStatsLocked()
 	if jiyingMsgStats.day != time.Now().Format("2006-01-02") {
 		return 0, 0
 	}
 	return jiyingMsgStats.inbound, jiyingMsgStats.out
 }
+
+// traceIDContextKey 在请求上下文中缓存追踪 ID，供响应体与访问日志共用同一值。
+const traceIDContextKey = "jiying_trace_id"
 
 // jiyingRateLimitedTotal 累计应用通道被服务端限流（rate_limited）的调用次数。
 var jiyingRateLimitedTotal atomic.Int64
@@ -278,6 +323,61 @@ func registerJiyingAPI() {
 	})
 }
 
+// overviewConvTTL 是总览会话数的缓存时长；会话数变化不频繁，避免每次刷新都打远端接口。
+const overviewConvTTL = 30 * time.Second
+
+var overviewConvCache = struct {
+	sync.Mutex
+	key   string
+	count int
+	at    time.Time
+}{}
+
+// overviewConversationCount 返回当前账号的会话数：30 秒内复用缓存，
+// 远端失败时回退到该账号的上次结果，切号后按账号隔离。
+func overviewConversationCount(parent context.Context) int {
+	cfg := CurrentAccountConfig()
+	key := cfg.BaseURL + "|" + cfg.Email
+	now := time.Now()
+	overviewConvCache.Lock()
+	if overviewConvCache.key == key && now.Sub(overviewConvCache.at) < overviewConvTTL {
+		n := overviewConvCache.count
+		overviewConvCache.Unlock()
+		return n
+	}
+	stale := overviewConvCache.count
+	staleKey := overviewConvCache.key
+	overviewConvCache.Unlock()
+
+	ctx, cancel := context.WithTimeout(parent, 8*time.Second)
+	defer cancel()
+	raw, err := UserCall(ctx, http.MethodGet, "/api/client/conversations", nil)
+	if err != nil {
+		if staleKey == key {
+			return stale
+		}
+		return 0
+	}
+	var parsed struct {
+		Data struct {
+			Conversations []json.RawMessage `json:"conversations"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(raw, &parsed) != nil {
+		if staleKey == key {
+			return stale
+		}
+		return 0
+	}
+	n := len(parsed.Data.Conversations)
+	overviewConvCache.Lock()
+	overviewConvCache.key = key
+	overviewConvCache.count = n
+	overviewConvCache.at = now
+	overviewConvCache.Unlock()
+	return n
+}
+
 func jiyingAPIOverview(c *gin.Context) {
 	in, out := jiyingMsgCounts()
 	plugins := 0
@@ -286,19 +386,7 @@ func jiyingAPIOverview(c *gin.Context) {
 			plugins++
 		}
 	}
-	convs := 0
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 8*time.Second)
-	defer cancel()
-	if raw, err := UserCall(ctx, http.MethodGet, "/api/client/conversations", nil); err == nil {
-		var parsed struct {
-			Data struct {
-				Conversations []json.RawMessage `json:"conversations"`
-			} `json:"data"`
-		}
-		if json.Unmarshal(raw, &parsed) == nil {
-			convs = len(parsed.Data.Conversations)
-		}
-	}
+	convs := overviewConversationCount(c.Request.Context())
 	appID := CurrentAppConfig().AppID
 	jiyingJSON(c, gin.H{
 		"ws":             JiyingState(),
@@ -697,6 +785,11 @@ func jiyingAPITasks(c *gin.Context) {
 		if _, err := fmt.Sscanf(raw, "%d", &limit); err != nil || limit <= 0 {
 			limit = 100
 		}
+	}
+	// silent=1 返回 Agent 工具调用等静默任务的最近记录，便于排查未展示的调用。
+	if v := strings.TrimSpace(c.Query("silent")); v == "1" || strings.EqualFold(v, "true") {
+		jiyingJSON(c, RecentSilentTasks(limit))
+		return
 	}
 	jiyingJSON(c, listTaskItems(TaskFilter{
 		Status:  strings.TrimSpace(c.Query("status")),

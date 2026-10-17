@@ -10,7 +10,7 @@ import (
 // AgentRuntime 抽象对话模型后端。内置实现走 OpenAI 兼容的 /chat/completions，
 // 后续可替换为外部 agent SDK，而不影响工具契约与薄循环逻辑。
 type AgentRuntime interface {
-	Complete(ctx context.Context, msgs []chatMessage, tools []map[string]any) (*chatResponse, error)
+	Complete(ctx context.Context, msgs []chatMessage, tools []map[string]any, toolChoice string) (*chatResponse, error)
 }
 
 // openAIRuntime 是 AgentRuntime 的内置 OpenAI 兼容实现。
@@ -18,10 +18,10 @@ type openAIRuntime struct {
 	cfg AgentConfig
 }
 
-func (r openAIRuntime) Complete(ctx context.Context, msgs []chatMessage, tools []map[string]any) (*chatResponse, error) {
+func (r openAIRuntime) Complete(ctx context.Context, msgs []chatMessage, tools []map[string]any, toolChoice string) (*chatResponse, error) {
 	models := candidateModels(r.cfg)
 	return completeWithFallback(ctx, models, func(ctx context.Context, model string) (*chatResponse, error) {
-		return callChat(ctx, r.cfg, model, msgs, tools)
+		return callChat(ctx, r.cfg, model, msgs, tools, toolChoice)
 	})
 }
 

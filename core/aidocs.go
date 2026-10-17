@@ -38,7 +38,7 @@ var aiEndpoints = []apiDoc{
 	{"POST", "/jiying/api/cron/delete", "删除定时任务", "ops", []string{"id"}, "破坏性操作，执行前确认"},
 	{"POST", "/jiying/api/cron/run", "立即执行一次定时任务", "ops", []string{"id"}, ""},
 	{"GET", "/jiying/api/executions", "执行账本", "readonly", []string{"kind", "name", "status", "limit"}, "kind: cron/feature/task/message"},
-	{"GET", "/jiying/api/tasks", "任务队列", "readonly", []string{"status", "feature", "user_id", "limit"}, ""},
+	{"GET", "/jiying/api/tasks", "任务队列", "readonly", []string{"status", "feature", "user_id", "limit", "silent"}, "silent=1 返回最近 50 条 Agent 工具调用（静默任务）"},
 	{"POST", "/jiying/api/task/retry", "重试任务", "ops", []string{"id"}, ""},
 	{"POST", "/jiying/api/task/delete", "删除任务", "ops", []string{"id"}, ""},
 	{"GET", "/jiying/api/conversations", "会话列表（来自即应账号）", "readonly", nil, "需要账号已登录"},

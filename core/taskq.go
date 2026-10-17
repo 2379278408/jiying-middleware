@@ -52,7 +52,12 @@ type taskQueue struct {
 	wake   chan struct{}
 	// waits 保存静默任务（如 Agent 工具调用）的完成通知；值 chan 容量 1，非阻塞发送。
 	waits map[string]chan *Task
+	// silentRecent 保留最近的静默任务，供控制台排查 Agent 工具调用，不进入持久层。
+	silentRecent []*Task
 }
+
+// silentTaskHistory 是静默任务环形缓冲的容量上限。
+const silentTaskHistory = 50
 
 var tasks = &taskQueue{items: map[string]*Task{}, wake: make(chan struct{}, 1), waits: map[string]chan *Task{}}
 
@@ -222,22 +227,23 @@ func (q *taskQueue) run(t *Task) {
 	waiter := q.waits[t.ID]
 	q.mu.Unlock()
 	if t.Silent {
+		q.mu.Lock()
+		fin := q.items[t.ID]
+		var cp *Task
+		if fin != nil {
+			c := *fin
+			cp = &c
+			q.appendSilentLocked(cp)
+		}
+		delete(q.waits, t.ID)
+		q.mu.Unlock()
 		if waiter != nil {
-			q.mu.Lock()
-			fin := q.items[t.ID]
-			var cp *Task
-			if fin != nil {
-				c := *fin
-				cp = &c
-			}
-			delete(q.waits, t.ID)
-			q.mu.Unlock()
 			select {
 			case waiter <- cp:
 			default:
 			}
 		}
-		// 静默任务报完结果即从队列清除，不进入任务列表与持久层。
+		// 静默任务报完结果即从队列清除，只保留在内存环形缓冲中供排查。
 		DeleteTask(t.ID)
 		return
 	}
@@ -434,6 +440,35 @@ func taskLoopReady() bool {
 
 func ListTaskItems(limit int) []*Task {
 	return listTaskItems(TaskFilter{Limit: limit})
+}
+
+// appendSilentLocked 在持有锁时写入静默任务环形缓冲。
+func (q *taskQueue) appendSilentLocked(t *Task) {
+	q.silentRecent = append(q.silentRecent, t)
+	if len(q.silentRecent) > silentTaskHistory {
+		q.silentRecent = q.silentRecent[len(q.silentRecent)-silentTaskHistory:]
+	}
+}
+
+// RecentSilentTasks 返回最近的静默任务（Agent 工具调用），按时间正序。
+// 静默任务结束后会从任务队列删除，这里返回的是内存中的副本。
+func RecentSilentTasks(limit int) []*Task {
+	tasks.mu.Lock()
+	defer tasks.mu.Unlock()
+	n := len(tasks.silentRecent)
+	if limit <= 0 || limit > n {
+		limit = n
+	}
+	start := n - limit
+	if start < 0 {
+		start = 0
+	}
+	out := make([]*Task, 0, limit)
+	for _, t := range tasks.silentRecent[start:] {
+		cp := *t
+		out = append(out, &cp)
+	}
+	return out
 }
 
 // TaskFilter 控制任务列表的筛选条件，空字段表示不过滤。

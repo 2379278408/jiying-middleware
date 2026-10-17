@@ -69,8 +69,8 @@ func accountReadiness(cfg UserLogin) readinessCheck {
 	if strings.TrimSpace(cfg.Email) == "" {
 		issues = append(issues, readinessIssue{Code: "missing_email", Message: "缺少账号邮箱", Hint: "填写用于登录 MagicChat 的邮箱"})
 	}
-	if strings.TrimSpace(cfg.Password) == "" {
-		issues = append(issues, readinessIssue{Code: "missing_secret", Message: "缺少登录凭据", Hint: "填写密码或使用验证码登录"})
+	if strings.TrimSpace(cfg.Password) == "" && !cfg.CodeLogin {
+		issues = append(issues, readinessIssue{Code: "missing_secret", Message: "缺少登录凭据", Hint: "填写密码，或改用邮箱验证码登录"})
 	}
 	if len(issues) > 0 {
 		return readinessCheck{Status: "invalid", Issues: issues}
@@ -117,8 +117,10 @@ func connectionReadiness() map[string]any {
 		}
 	}
 	account := accountReadiness(CurrentAccountConfig())
-	if account.Status == "configured" && userLoggedIn() {
-		account.Status = "connected"
+	// 验证码登录的账号没有保存密码，登录态有效即视为连接正常；
+	// 未登录时按配置完整性判断，避免把可用的验证码账号误报为 invalid。
+	if userLoggedIn() {
+		account = readinessCheck{Status: "connected"}
 	}
 	return map[string]any{
 		"storage": map[string]any{"status": map[bool]string{true: "ready", false: "blocked"}[BucketApp != nil]},

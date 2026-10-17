@@ -132,6 +132,10 @@ func SendFileToConv(ctx context.Context, conversationID, src, name string, size 
 }
 
 func SendMarkdownToConv(ctx context.Context, conversationID, content, replyTo string) error {
+	content = clampOutboundText(strings.TrimSpace(content))
+	if content == "" {
+		return fmt.Errorf("缺少内容")
+	}
 	_, err := SendMediaToConv(ctx, conversationID, replyTo, MarkdownMessage(content))
 	return err
 }
