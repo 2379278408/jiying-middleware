@@ -151,21 +151,30 @@ func accountProfile(ctx context.Context) AccountProfile {
 	if err != nil {
 		return AccountProfile{}
 	}
+	return parseAccountProfile(raw)
+}
+
+// parseAccountProfile 解析 /api/client/me 响应；用户对象位于 data.user 一层。
+func parseAccountProfile(raw []byte) AccountProfile {
 	var parsed struct {
 		Data struct {
-			Email     string `json:"email"`
-			Nickname  string `json:"nickname"`
-			Avatar    string `json:"avatar"`
-			AvatarURL string `json:"avatar_url"`
+			User struct {
+				Email     string `json:"email"`
+				Name      string `json:"name"`
+				Nickname  string `json:"nickname"`
+				Avatar    string `json:"avatar"`
+				AvatarURL string `json:"avatar_url"`
+			} `json:"user"`
 		} `json:"data"`
 	}
 	if json.Unmarshal(raw, &parsed) != nil {
 		return AccountProfile{}
 	}
+	user := parsed.Data.User
 	return AccountProfile{
-		Email:     parsed.Data.Email,
-		Nickname:  parsed.Data.Nickname,
-		AvatarURL: firstNonEmpty(parsed.Data.AvatarURL, parsed.Data.Avatar),
+		Email:     user.Email,
+		Nickname:  firstNonEmpty(user.Nickname, user.Name),
+		AvatarURL: firstNonEmpty(user.Avatar, user.AvatarURL),
 	}
 }
 
