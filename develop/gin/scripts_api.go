@@ -3,7 +3,6 @@ package gin
 import (
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"jiying/middleware/core"
@@ -20,17 +19,28 @@ func initScriptsAPI() {
 }
 
 func scriptTarget(c *gin.Context, name string) (full, rel string, ok bool) {
-	sub := strings.TrimSpace(c.Query("path"))
-	name = strings.TrimSpace(name)
-	if name == "" || strings.Contains(name, "..") || strings.Contains(sub, "..") {
+	root := filepath.Join(utils.GetResHome(), "scripts")
+	sub, ok := safeUploadRel(c.Query("path"))
+	if !ok {
 		return "", "", false
 	}
-	rel = name
-	if sub != "" && sub != "/" {
-		rel = sub + "/" + name
+	cleanName, ok := safeUploadName(name, ".js")
+	if !ok {
+		return "", "", false
 	}
-	full = filepath.Join(utils.GetResHome(), "scripts", filepath.FromSlash(rel))
-	return full, rel, true
+	dir, ok := safeJoinUnder(root, sub)
+	if !ok {
+		return "", "", false
+	}
+	full, ok = safeJoinUnder(dir, cleanName)
+	if !ok || filepath.Dir(full) != dir {
+		return "", "", false
+	}
+	rel, err := filepath.Rel(root, full)
+	if err != nil {
+		return "", "", false
+	}
+	return full, filepath.ToSlash(rel), true
 }
 
 func getScriptContent(c *gin.Context) {
@@ -59,21 +69,41 @@ func saveScript(c *gin.Context) {
 		jsonFailMsg(c, "参数错误")
 		return
 	}
-	if strings.Contains(req.Filename, "..") || strings.Contains(req.Path, "..") {
+	root := filepath.Join(utils.GetResHome(), "scripts")
+	sub, ok := safeUploadRel(req.Path)
+	if !ok {
 		jsonFailMsg(c, "非法路径")
 		return
 	}
-	dir := filepath.Join(utils.GetResHome(), "scripts")
-	rel := req.Filename
-	if p := strings.TrimSpace(req.Path); p != "" && p != "/" {
-		dir = filepath.Join(dir, filepath.FromSlash(p))
-		rel = p + "/" + req.Filename
+	dir, ok := safeJoinUnder(root, sub)
+	if !ok {
+		jsonFailMsg(c, "非法路径")
+		return
 	}
+	name, ok := safeUploadName(req.Filename, ".js")
+	if !ok {
+		jsonFailMsg(c, "非法文件名")
+		return
+	}
+	if len(req.Content) > maxUploadBytes {
+		jsonFailMsg(c, "脚本内容超出限制")
+		return
+	}
+	full, ok := safeJoinUnder(dir, name)
+	if !ok || filepath.Dir(full) != dir {
+		jsonFailMsg(c, "非法路径")
+		return
+	}
+	rel, err := filepath.Rel(root, full)
+	if err != nil {
+		jsonFailMsg(c, "非法路径")
+		return
+	}
+	rel = filepath.ToSlash(rel)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		jsonFailMsg(c, "目录创建失败")
 		return
 	}
-	full := filepath.Join(dir, req.Filename)
 	if err := os.WriteFile(full, []byte(req.Content), 0o644); err != nil {
 		jsonFailMsg(c, "写入失败")
 		return
@@ -90,15 +120,33 @@ func deleteScript(c *gin.Context) {
 		jsonFailMsg(c, "参数错误")
 		return
 	}
-	if strings.Contains(req.Filename, "..") || strings.Contains(req.Path, "..") {
+	root := filepath.Join(utils.GetResHome(), "scripts")
+	sub, ok := safeUploadRel(req.Path)
+	if !ok {
 		jsonFailMsg(c, "非法路径")
 		return
 	}
-	rel := req.Filename
-	if p := strings.TrimSpace(req.Path); p != "" && p != "/" {
-		rel = p + "/" + req.Filename
+	dir, ok := safeJoinUnder(root, sub)
+	if !ok {
+		jsonFailMsg(c, "非法路径")
+		return
 	}
-	full := filepath.Join(utils.GetResHome(), "scripts", filepath.FromSlash(rel))
+	name, ok := safeUploadName(req.Filename, ".js")
+	if !ok {
+		jsonFailMsg(c, "非法文件名")
+		return
+	}
+	full, ok := safeJoinUnder(dir, name)
+	if !ok || filepath.Dir(full) != dir {
+		jsonFailMsg(c, "非法路径")
+		return
+	}
+	rel, err := filepath.Rel(root, full)
+	if err != nil {
+		jsonFailMsg(c, "非法路径")
+		return
+	}
+	rel = filepath.ToSlash(rel)
 	if err := os.Remove(full); err != nil && !os.IsNotExist(err) {
 		jsonFailMsg(c, "删除失败")
 		return

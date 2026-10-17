@@ -159,21 +159,38 @@ func uploadTextFile(c *gin.Context, sub string) {
 		jsonFailMsg(c, "未收到文件")
 		return
 	}
-	path := strings.TrimSpace(c.PostForm("path"))
-	dir := filepath.Join(utils.GetResHome(), "scripts")
+	if file.Size <= 0 || file.Size > maxUploadBytes {
+		jsonFailMsg(c, "文件大小超出限制")
+		return
+	}
+	root := filepath.Join(utils.GetResHome(), "scripts")
 	if sub == "/skill" {
-		dir = filepath.Join(utils.GetResHome(), "skills")
+		root = filepath.Join(utils.GetResHome(), "skills")
 	}
-	if path != "" && path != "/" {
-		dir = filepath.Join(dir, path)
+	dir, ok := safeJoinUnder(root, c.PostForm("path"))
+	if !ok {
+		jsonFailMsg(c, "非法路径")
+		return
 	}
-	_ = os.MkdirAll(dir, 0o755)
-	dst := filepath.Join(dir, filepath.Base(file.Filename))
+	name, ok := safeUploadName(file.Filename, ".js", ".md", ".json", ".txt", ".yaml", ".yml")
+	if !ok {
+		jsonFailMsg(c, "不支持的文件类型")
+		return
+	}
+	dst, ok := safeJoinUnder(dir, name)
+	if !ok || filepath.Dir(dst) != dir {
+		jsonFailMsg(c, "非法文件名")
+		return
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		jsonFailMsg(c, "目录创建失败")
+		return
+	}
 	if err := c.SaveUploadedFile(file, dst); err != nil {
 		jsonFailMsg(c, "保存失败")
 		return
 	}
-	jsonOK(c, file.Filename)
+	jsonOK(c, name)
 }
 
 func getCronCmds(c *gin.Context) {
@@ -182,7 +199,8 @@ func getCronCmds(c *gin.Context) {
 
 func postCronCmds(c *gin.Context) {
 	fields := bodyMap(c)
-	cmd := core.AddCronCmdFrom(fields)
+	actor, role := core.ConsoleActor(c)
+	cmd := core.AddCronCmdFrom(fields, actor, role)
 	jsonOK(c, cmd)
 }
 
@@ -194,7 +212,8 @@ func putCronCmds(c *gin.Context) {
 	} else if v, ok := fields["id"].(float64); ok {
 		id = fmt.Sprintf("%.0f", v)
 	}
-	cmd := core.UpdateCronCmdFrom(id, fields)
+	actor, role := core.ConsoleActor(c)
+	cmd := core.UpdateCronCmdFrom(id, fields, actor, role)
 	jsonOK(c, cmd)
 }
 
@@ -204,7 +223,8 @@ func deleteCronCmds(c *gin.Context) {
 	if err := json.Unmarshal(raw, &ids); err != nil || len(ids) == 0 {
 		ids = splitStr(c.PostForm("ids"))
 	}
-	n := core.DeleteCronCmdsByIds(ids)
+	actor, role := core.ConsoleActor(c)
+	n := core.DeleteCronCmdsByIds(ids, actor, role)
 	jsonOK(c, gin.H{"deleted": n})
 }
 

@@ -3,7 +3,10 @@ package core
 import (
 	"encoding/json"
 	"sort"
+	"sync"
 )
+
+var pluginAuthMu sync.Mutex
 
 type BucketAuth struct {
 	BucketName string `json:"bucket_name"`
@@ -42,6 +45,8 @@ func saveAuthTable(rows []PluginAuthRow) {
 }
 
 func GetPluginAuthTable() []PluginAuthRow {
+	pluginAuthMu.Lock()
+	defer pluginAuthMu.Unlock()
 	saved := loadAuthTable()
 	idx := map[string]int{}
 	for i, r := range saved {
@@ -80,6 +85,8 @@ func GetPluginAuthTable() []PluginAuthRow {
 }
 
 func SetPluginAuth(name, author string, origin bool, bucket string, rw bool) {
+	pluginAuthMu.Lock()
+	defer pluginAuthMu.Unlock()
 	rows := loadAuthTable()
 	for i := range rows {
 		if rows[i].PluginName == name && rows[i].Origin == origin {
@@ -106,6 +113,8 @@ func SetPluginAuth(name, author string, origin bool, bucket string, rw bool) {
 }
 
 func GetPluginAuthPermission(name, author string, origin bool, bucket string) bool {
+	pluginAuthMu.Lock()
+	defer pluginAuthMu.Unlock()
 	for _, r := range loadAuthTable() {
 		if r.PluginName == name && r.Origin == origin {
 			for _, a := range r.Auth {

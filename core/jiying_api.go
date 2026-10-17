@@ -625,7 +625,8 @@ func jiyingAPICronAdd(c *gin.Context) {
 			}
 		}
 	}
-	cmd := &CronCmd{Name: name, Cron: spec, Command: command, Status: true, Type: []string{"web"}, Owner: consoleUser(c), OwnerRole: UserRole(consoleUser(c))}
+	actor, role := ConsoleActor(c)
+	cmd := &CronCmd{Name: name, Cron: spec, Command: command, Status: true, Type: []string{"web"}, Owner: actor, OwnerRole: role}
 	if chat != "" {
 		cmd.GroupManager = []string{chat}
 	}
@@ -637,7 +638,8 @@ func jiyingAPICronAdd(c *gin.Context) {
 func jiyingAPICronToggle(c *gin.Context) {
 	id := strings.TrimSpace(c.PostForm("id"))
 	on := c.PostForm("enabled") == "true" || c.PostForm("enabled") == "1"
-	if !SetCronCmdStatus(id, on) {
+	actor, role := ConsoleActor(c)
+	if !SetCronCmdStatus(id, on, actor, role) {
 		RecordAudit(consoleUser(c), "cron.toggle", id, fmt.Sprintf("enabled=%v", on), "失败: 定时不存在")
 		jiyingErr(c, "定时不存在")
 		return
@@ -648,7 +650,8 @@ func jiyingAPICronToggle(c *gin.Context) {
 
 func jiyingAPICronRun(c *gin.Context) {
 	id := strings.TrimSpace(c.PostForm("id"))
-	if RunCronCmdsByIds([]string{id}) == 0 {
+	actor, role := ConsoleActor(c)
+	if RunCronCmdsByIds([]string{id}, actor, role) == 0 {
 		jiyingErr(c, "定时不存在")
 		return
 	}
@@ -673,7 +676,8 @@ func jiyingAPIExecutions(c *gin.Context) {
 
 func jiyingAPICronDelete(c *gin.Context) {
 	id := strings.TrimSpace(c.PostForm("id"))
-	if DeleteCronCmdsByIds([]string{id}) == 0 {
+	actor, role := ConsoleActor(c)
+	if DeleteCronCmdsByIds([]string{id}, actor, role) == 0 {
 		RecordAudit(consoleUser(c), "cron.delete", id, "", "失败: 定时不存在")
 		jiyingErr(c, "定时不存在")
 		return

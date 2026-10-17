@@ -238,12 +238,14 @@ func runCronCmd(cmd *CronCmd) {
 	if cmd == nil {
 		return
 	}
+	// 读取快照后立即释放锁，执行期间不阻塞定时任务管理操作。
+	ccs.RLock()
 	owner := strings.TrimSpace(cmd.Owner)
-	execUser := "system"
-	if cmd.OwnerRole == RoleOps || cmd.OwnerRole == RoleReadonly || (cmd.OwnerRole == "" && owner != "" && owner != "system") {
-		execUser = owner
-	}
-	execID := beginExecution(executionKindCron, cmd.Name, cmd.Command, owner)
+	execUser := cronIdentity(cmd)
+	name, command := cmd.Name, cmd.Command
+	isOnce := cmd.IsOnce
+	execID := beginExecution(executionKindCron, name, command, owner)
+	ccs.RUnlock()
 	status, detail, errText := executionSuccess, "", ""
 	defer func() {
 		if r := recover(); r != nil {
@@ -251,6 +253,7 @@ func runCronCmd(cmd *CronCmd) {
 			errText = fmt.Sprintf("执行异常: %v", r)
 			GetMyLog().Warn("定时任务 %s 执行异常: %v", cmd.ID, r)
 		}
+		ccs.Lock()
 		cmd.LastRun = time.Now().Format("2006-01-02 15:04:05")
 		cmd.RunCount++
 		if status == executionSuccess {
@@ -268,21 +271,24 @@ func runCronCmd(cmd *CronCmd) {
 			}
 		}
 		ccs.save(cmd)
+		ccs.Unlock()
 		finishExecution(execID, status, detail, errText)
 		if status != executionSuccess {
 			GetMyLog().Warn("定时任务 %s 执行失败: %s", cmd.Name, errText)
 		}
 	}()
+	ccs.Lock()
 	cmd.LastRunningTime = time.Now().Format("2006-01-02 15:04:05")
-	if cmd.IsOnce {
+	ccs.Unlock()
+	if isOnce {
 		defer ccs.cleanOnceTasks()
 	}
-	if strings.TrimSpace(cmd.Command) == "" {
+	if strings.TrimSpace(command) == "" {
 		status = executionSkipped
 		return
 	}
-	GetMyLog().Info("定时任务 %s 执行: %s", cmd.Name, cmd.Command)
-	out, err := dispatchLocalCommandFor(cmd.Command, execUser)
+	GetMyLog().Info("定时任务 %s 执行: %s", name, command)
+	out, err := dispatchLocalCommandFor(command, execUser)
 	detail = out
 	if err != nil {
 		status = executionFailed
@@ -344,7 +350,60 @@ func nextCronRun(spec string, now time.Time) string {
 	return next.Format("2006-01-02 15:04:05")
 }
 
-func RunCronCmdsByIds(ids []string) int {
+// cronIdentity 返回定时任务执行时采用的身份。
+// 只有主控任务以 system 运行，其余任务必须绑定创建者本人，避免普通任务获得系统权限。
+func cronIdentity(cmd *CronCmd) string {
+	if cmd == nil {
+		return "system"
+	}
+	owner := strings.TrimSpace(cmd.Owner)
+	switch cmd.OwnerRole {
+	case RoleMaster:
+		return "system"
+	case RoleOps, RoleReadonly:
+		if owner != "" && owner != "system" {
+			return owner
+		}
+		return "system"
+	}
+	if owner == "" || owner == "system" {
+		return "system"
+	}
+	return owner
+}
+
+// cronManageable 判断操作者能否管理某条定时任务：主控可管理全部，其他人仅限自己创建的。
+func cronManageable(cmd *CronCmd, actor, role string) bool {
+	if cmd == nil {
+		return false
+	}
+	actor = strings.TrimSpace(actor)
+	if role == RoleMaster || privilegedUser(actor) {
+		return true
+	}
+	return actor != "" && cmd.Owner == actor
+}
+
+// cronTaskAllows 判断用户是否有权触发名为 label 的定时任务。
+func cronTaskAllows(label, userID string) bool {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return false
+	}
+	if privilegedUser(userID) {
+		return true
+	}
+	ccs.RLock()
+	defer ccs.RUnlock()
+	for _, p := range ccs.Pts {
+		if p != nil && p.Name == label && cronIdentity(p) == userID {
+			return true
+		}
+	}
+	return false
+}
+
+func RunCronCmdsByIds(ids []string, actor, role string) int {
 	ccs.RLock()
 	defer ccs.RUnlock()
 	ran := 0
@@ -352,6 +411,9 @@ func RunCronCmdsByIds(ids []string) int {
 		for _, p := range ccs.Pts {
 			if p == nil || p.ID != id {
 				continue
+			}
+			if !cronManageable(p, actor, role) {
+				break
 			}
 			go runCronCmd(p)
 			ran++
@@ -361,14 +423,21 @@ func RunCronCmdsByIds(ids []string) int {
 	return ran
 }
 
-func AddCronCmdFrom(fields map[string]interface{}) *CronCmd {
+// AddCronCmdFrom 创建定时任务，归属与角色由服务端会话决定，客户端传入的 owner 一律忽略。
+func AddCronCmdFrom(fields map[string]interface{}, actor, role string) *CronCmd {
+	actor = strings.TrimSpace(actor)
+	role = strings.TrimSpace(role)
+	if actor == "" || actor == "unknown" || roleRank[role] == 0 {
+		return nil
+	}
 	cmd := &CronCmd{
-		Name:    strField(fields, "name"),
-		Command: strField(fields, "command"),
-		Cron:    strField(fields, "cron"),
-		Status:  true,
-		Type:    []string{"web"},
-		Owner:   strField(fields, "owner"),
+		Name:      strField(fields, "name"),
+		Command:   strField(fields, "command"),
+		Cron:      strField(fields, "cron"),
+		Status:    true,
+		Type:      []string{"web"},
+		Owner:     actor,
+		OwnerRole: role,
 	}
 	if v, ok := fields["status"].(bool); ok {
 		cmd.Status = v
@@ -382,12 +451,16 @@ func AddCronCmdFrom(fields map[string]interface{}) *CronCmd {
 	return cmd
 }
 
-func UpdateCronCmdFrom(id string, fields map[string]interface{}) *CronCmd {
+// UpdateCronCmdFrom 更新定时任务；仅创建者或主控可改，归属与角色保持原值。
+func UpdateCronCmdFrom(id string, fields map[string]interface{}, actor, role string) *CronCmd {
 	ccs.Lock()
 	defer ccs.Unlock()
 	for _, p := range ccs.Pts {
 		if p == nil || p.ID != id {
 			continue
+		}
+		if !cronManageable(p, actor, role) {
+			return nil
 		}
 		if v, ok := fields["name"].(string); ok && v != "" {
 			p.Name = v
@@ -411,14 +484,14 @@ func UpdateCronCmdFrom(id string, fields map[string]interface{}) *CronCmd {
 	return nil
 }
 
-func DeleteCronCmdsByIds(ids []string) int {
+func DeleteCronCmdsByIds(ids []string, actor, role string) int {
 	ccs.Lock()
 	defer ccs.Unlock()
 	deleted := 0
 	for _, id := range ids {
 		out := ccs.Pts[:0]
 		for _, p := range ccs.Pts {
-			if p != nil && p.ID == id {
+			if p != nil && p.ID == id && cronManageable(p, actor, role) {
 				if ccs.cronSched != nil && p.CronEntityId > 0 {
 					ccs.cronSched.Remove(p.CronEntityId)
 				}
@@ -438,12 +511,15 @@ func DeleteCronCmdsByIds(ids []string) int {
 	return deleted
 }
 
-func SetCronCmdStatus(id string, on bool) bool {
+func SetCronCmdStatus(id string, on bool, actor, role string) bool {
 	ccs.Lock()
 	defer ccs.Unlock()
 	for _, p := range ccs.Pts {
 		if p == nil || p.ID != id {
 			continue
+		}
+		if !cronManageable(p, actor, role) {
+			return false
 		}
 		p.Status = on
 		p.UpdateOn = time.Now().Format("2006-01-02 15:04:05")

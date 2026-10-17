@@ -55,8 +55,14 @@ func TestJiyingMessageRoundTrip(t *testing.T) {
 	sock := &fakeSock{in: make(chan jiyingEnvelope, 8), out: make(chan jiyingEnvelope, 8)}
 	client := NewJiyingClient(JiyingConfig{WSURL: "ws://example", AppID: "app", Secret: "sec"}, nil)
 	client.conn = sock
+	appConnPool.mu.Lock()
 	activeJiying = client
-	defer func() { activeJiying = nil }()
+	appConnPool.mu.Unlock()
+	defer func() {
+		appConnPool.mu.Lock()
+		activeJiying = nil
+		appConnPool.mu.Unlock()
+	}()
 
 	old := Senders
 	Senders = make(chan Sender, 1)
@@ -210,8 +216,14 @@ func TestStartSenderStatusPingsAppConversation(t *testing.T) {
 	sock := &fakeSock{in: make(chan jiyingEnvelope, 8), out: make(chan jiyingEnvelope, 8)}
 	client := NewJiyingClient(JiyingConfig{AppID: "app"}, nil)
 	client.conn = sock
+	appConnPool.mu.Lock()
 	activeJiying = client
-	defer func() { activeJiying = nil }()
+	appConnPool.mu.Unlock()
+	defer func() {
+		appConnPool.mu.Lock()
+		activeJiying = nil
+		appConnPool.mu.Unlock()
+	}()
 
 	got := make(chan jiyingEnvelope, 1)
 	go func() {
@@ -247,8 +259,14 @@ func TestCommandPanicStillAcks(t *testing.T) {
 	sock := &fakeSock{in: make(chan jiyingEnvelope, 8), out: make(chan jiyingEnvelope, 8)}
 	client := NewJiyingClient(JiyingConfig{AppID: "app"}, nil)
 	client.conn = sock
+	appConnPool.mu.Lock()
 	activeJiying = client
-	defer func() { activeJiying = nil }()
+	appConnPool.mu.Unlock()
+	defer func() {
+		appConnPool.mu.Lock()
+		activeJiying = nil
+		appConnPool.mu.Unlock()
+	}()
 
 	cmdRouter.Store("panic-test", func() { panic("boom") })
 	defer cmdRouter.Delete("panic-test")
@@ -429,8 +447,14 @@ func TestReactionReceiptOnCommand(t *testing.T) {
 	sock := &fakeSock{in: make(chan jiyingEnvelope, 8), out: make(chan jiyingEnvelope, 8)}
 	client := NewJiyingClient(JiyingConfig{AppID: "app"}, nil)
 	client.conn = sock
+	appConnPool.mu.Lock()
 	activeJiying = client
-	defer func() { activeJiying = nil }()
+	appConnPool.mu.Unlock()
+	defer func() {
+		appConnPool.mu.Lock()
+		activeJiying = nil
+		appConnPool.mu.Unlock()
+	}()
 
 	cmdRouter.Store("receipt-test", func() {})
 	defer cmdRouter.Delete("receipt-test")
@@ -625,7 +649,7 @@ func TestChoiceResume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bindChoice("choice-1", t1.ID)
+	bindChoice("choice-1", t1)
 	if err := resumeChoice(context.Background(), "choice-1", "u1", "c1", []string{"no"}); err != nil {
 		t.Fatal(err)
 	}

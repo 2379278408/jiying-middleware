@@ -129,6 +129,9 @@ func connectionReadiness() map[string]any {
 }
 
 func testAppConnection(ctx context.Context, cfg AppConn) error {
+	if err := validateOutboundURL(cfg.WSURL, true); err != nil {
+		return fmt.Errorf("应用地址不可用: %w", err)
+	}
 	check := appReadiness(cfg)
 	if check.Status != "configured" {
 		if len(check.Issues) > 0 {

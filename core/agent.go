@@ -74,7 +74,12 @@ func SaveAgentConfig(cfg AgentConfig) {
 		return
 	}
 	stored := cfg
-	stored.APIKey = sealSecret(cfg.APIKey)
+	sealed, err := sealSecret(cfg.APIKey)
+	if err != nil {
+		GetMyLog().Error("模型密钥加密失败，已取消保存: %v", err)
+		return
+	}
+	stored.APIKey = sealed
 	raw, _ := json.Marshal(stored)
 	BucketApp.Set(agentConfigKey, string(raw))
 }
@@ -485,14 +490,24 @@ func runAgentAskChoice(ctx context.Context, convID, userID, rawArgs string) stri
 }
 
 // resumeAgentChoice 在用户选择后异步恢复 Agent，并把最终答复发回会话。
-func resumeAgentChoice(choiceMessageID, conversationID string, optionIDs []string) bool {
-	v, ok := agentChoiceWaits.LoadAndDelete(choiceMessageID)
+func resumeAgentChoice(choiceMessageID, conversationID, userID string, optionIDs []string) bool {
+	v, ok := agentChoiceWaits.Load(choiceMessageID)
 	if !ok {
 		return false
 	}
 	w := v.(agentChoiceWait)
+	if w.ConversationID != "" && conversationID != "" && w.ConversationID != conversationID {
+		return false
+	}
+	if w.UserID != "" && userID != "" && w.UserID != userID {
+		return false
+	}
+	agentChoiceWaits.Delete(choiceMessageID)
 	if w.ConversationID != "" {
 		conversationID = w.ConversationID
+	}
+	if w.UserID != "" {
+		userID = w.UserID
 	}
 	chosen := make([]string, 0, len(optionIDs))
 	for _, id := range optionIDs {

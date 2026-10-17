@@ -43,7 +43,20 @@ func CheckCookie(c *gin.Context) bool {
 		return false
 	}
 	id, _ := s.Values["user"].(string)
-	return id != ""
+	if id == "" {
+		return false
+	}
+	// 会话代次在改密、禁用、删除用户时递增，旧 Cookie 随即失效。
+	var epoch int64
+	switch n := s.Values["epoch"].(type) {
+	case int64:
+		epoch = n
+	case int:
+		epoch = int64(n)
+	case float64:
+		epoch = int64(n)
+	}
+	return epoch == SessionEpoch(id)
 }
 
 type BaseSender struct {

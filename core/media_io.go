@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
@@ -20,9 +21,16 @@ const maxMediaDownloadBytes = 20 << 20
 
 // sanitizeFilename 去除文件名中的路径与敏感字符，防止 multipart 部分注入。
 func sanitizeFilename(name string) string {
-	name = strings.TrimSpace(strings.ReplaceAll(name, "/", "_"))
-	name = strings.ReplaceAll(name, `\`, "_")
-	name = strings.TrimLeft(name, ".")
+	name = strings.Map(func(r rune) rune {
+		switch {
+		case r == '/' || r == '\\' || r == '"':
+			return '_'
+		case r == '\r' || r == '\n' || r == '\t' || r == 0x7f || r < 0x20 || r == 0x2028 || r == 0x2029:
+			return '_'
+		}
+		return r
+	}, strings.TrimSpace(name))
+	name = strings.Trim(name, ". ")
 	if name == "" {
 		return "file"
 	}
@@ -32,14 +40,21 @@ func sanitizeFilename(name string) string {
 	return name
 }
 
+// safeContentType 只接受语法合法的媒体类型，丢弃参数并回退到二进制流。
+func safeContentType(raw string) string {
+	mt, _, err := mime.ParseMediaType(strings.TrimSpace(raw))
+	if err != nil || mt == "" || strings.ContainsAny(mt, "\r\n") {
+		return "application/octet-stream"
+	}
+	return mt
+}
+
 // UserUploadFile 以账号身份把字节上传为临时文件，返回 file_id。
 func UserUploadFile(ctx context.Context, name string, data []byte, contentType string) (string, error) {
 	if len(data) == 0 {
 		return "", fmt.Errorf("上传内容为空")
 	}
-	if contentType == "" {
-		contentType = "application/octet-stream"
-	}
+	contentType = safeContentType(contentType)
 	if !userLoggedIn() {
 		cfg := CurrentAccountConfig()
 		if err := loginUser(ctx, cfg); err != nil {

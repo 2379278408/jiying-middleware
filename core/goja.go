@@ -86,7 +86,7 @@ func InitGoja() {
 
 	registerBasicApis(runtime)
 	registerSendApis(runtime, "", "")
-	if err := os.MkdirAll(scriptsDir(), 0o777); err != nil {
+	if err := os.MkdirAll(scriptsDir(), 0o750); err != nil {
 		GetMyLog().Warn("创建脚本目录失败: %v", err)
 	}
 	loadScripts()

@@ -40,7 +40,9 @@ var (
 func GetMyLog() Loggers {
 	getOnce.Do(func() {
 		myLog.path = path.Join(utils.GetResHome(), "logs")
-		os.MkdirAll(myLog.path, 0o777)
+		if err := os.MkdirAll(myLog.path, 0o700); err == nil {
+			_ = os.Chmod(myLog.path, 0o700)
+		}
 		myLog.newLoggersFile()
 		go func() {
 			for {
@@ -104,7 +106,7 @@ func (l *Loggers) isOneDay() bool {
 func (l *Loggers) newLoggersFile() {
 	t := time.Now()
 	fullPath := path.Join(l.path, t.Format("20060102")+".log")
-	w, err := os.OpenFile(fullPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o777)
+	w, err := os.OpenFile(fullPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		fmt.Println("日志文件打开失败:", fullPath, err)
 		return
@@ -143,7 +145,7 @@ func (l *Loggers) writeToLoggers(level int, msg string) {
 	_, file, line, _ := runtime.Caller(3)
 	fn, _ := os.Hostname()
 	_ = fn
-	logstr := fmt.Sprintf("[[ %s ] [ %s ] [ %s : %d ] %s]", time.Now().Format("2006-01-02 15:04:05"), levelChar, file, line, msg)
+	logstr := fmt.Sprintf("[[ %s ] [ %s ] [ %s : %d ] %s]", time.Now().Format("2006-01-02 15:04:05"), levelChar, file, line, sanitizeLogText(msg))
 
 	if logChan != nil {
 		logChan <- logstr
@@ -151,6 +153,16 @@ func (l *Loggers) writeToLoggers(level int, msg string) {
 	if l.logfilelevel <= int8(level) {
 		fmt.Fprintln(l.file, logstr)
 	}
+}
+
+// sanitizeLogText 去除换行与其它控制字符，避免用户可控字段伪造日志行。
+func sanitizeLogText(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' || r == '\t' || r == 0x7f || r < 0x20 || r == 0x2028 || r == 0x2029 {
+			return ' '
+		}
+		return r
+	}, s)
 }
 
 func (l Loggers) Debug(format string, args ...interface{}) {

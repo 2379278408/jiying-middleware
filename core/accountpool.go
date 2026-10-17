@@ -41,7 +41,12 @@ func saveAccountConns(list []AccountConn) {
 	}
 	sealed := make([]AccountConn, 0, len(list))
 	for _, account := range list {
-		account.Secret = sealSecret(account.Secret)
+		value, err := sealSecret(account.Secret)
+		if err != nil {
+			GetMyLog().Error("账号密钥加密失败，已取消保存: %v", err)
+			return
+		}
+		account.Secret = value
 		sealed = append(sealed, account)
 	}
 	raw, _ := json.Marshal(sealed)

@@ -44,11 +44,11 @@ func auditURL(raw string) string {
 func RecordAudit(actor, action, target, detail, result string) {
 	entry := AuditEntry{
 		Time:   time.Now().Format(time.RFC3339),
-		Actor:  strings.TrimSpace(actor),
-		Action: strings.TrimSpace(action),
-		Target: strings.TrimSpace(target),
-		Detail: truncateRunes(strings.TrimSpace(detail), 200),
-		Result: strings.TrimSpace(result),
+		Actor:  sanitizeLogText(strings.TrimSpace(actor)),
+		Action: sanitizeLogText(strings.TrimSpace(action)),
+		Target: sanitizeLogText(strings.TrimSpace(target)),
+		Detail: sanitizeLogText(truncateRunes(strings.TrimSpace(detail), 200)),
+		Result: sanitizeLogText(strings.TrimSpace(result)),
 	}
 	if entry.Actor == "" {
 		entry.Actor = "unknown"
@@ -121,8 +121,21 @@ func consoleUser(c *gin.Context) string {
 	return "unknown"
 }
 
+// ConsoleActor 返回当前操作者及其有效角色：API Key 请求以 Key 作用域为准，
+// 会话请求以用户角色为准。定时任务归属与权限判定统一使用该结果。
+func ConsoleActor(c *gin.Context) (string, string) {
+	actor := consoleUser(c)
+	role := UserRole(actor)
+	if v, ok := c.Get(ctxAPIKeyScope); ok {
+		if scope, _ := v.(string); roleRank[scope] > 0 {
+			role = scope
+		}
+	}
+	return actor, role
+}
+
 func registerAuditAPI() {
-	g := Server.Group("/jiying/api", requireLogin)
+	g := Server.Group("/jiying/api", requireLogin, requireRole(RoleOps))
 	g.GET("/audit", func(c *gin.Context) {
 		limit := 100
 		if v, err := strconv.Atoi(c.Query("limit")); err == nil && v > 0 && v <= auditKeep {

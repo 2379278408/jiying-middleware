@@ -107,7 +107,7 @@ func dispatchAgentReply(sender *JiyingSender, prompt string) {
 		if err != nil {
 			GetMyLog().Warn("Agent 自动回复失败 conv=%s user=%s 耗时=%s 错误=%v",
 				sender.ChatID, sender.UserID, time.Since(started).Round(time.Millisecond), err)
-			_ = sender.Reply("Agent 执行失败: " + err.Error())
+			_ = sender.Reply("Agent 执行失败，请稍后重试。")
 			return
 		}
 		GetMyLog().Info("Agent 自动回复成功 conv=%s user=%s 提示=%d字 回复=%d字 耗时=%s",

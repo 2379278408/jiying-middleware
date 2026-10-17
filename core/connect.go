@@ -44,8 +44,18 @@ func saveRelayConn(cfg RelayConn) {
 		return
 	}
 	// 调用方传入的始终是明文（load 时已解密），落库前统一加密。
-	cfg.App.AppSecret = sealSecret(cfg.App.AppSecret)
-	cfg.Account.Secret = sealSecret(cfg.Account.Secret)
+	appSecret, err := sealSecret(cfg.App.AppSecret)
+	if err != nil {
+		GetMyLog().Error("应用密钥加密失败，已取消保存: %v", err)
+		return
+	}
+	accountSecret, err := sealSecret(cfg.Account.Secret)
+	if err != nil {
+		GetMyLog().Error("账号密钥加密失败，已取消保存: %v", err)
+		return
+	}
+	cfg.App.AppSecret = appSecret
+	cfg.Account.Secret = accountSecret
 	raw, _ := json.Marshal(cfg)
 	BucketApp.Set("relay_conn", string(raw))
 }

@@ -64,7 +64,7 @@ func MkFileDir(file string) error {
 	if dir == "" || dir == "." {
 		return nil
 	}
-	return os.MkdirAll(dir, 0o777)
+	return os.MkdirAll(dir, 0o700)
 }
 
 func String(v interface{}) string {

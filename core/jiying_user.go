@@ -76,6 +76,9 @@ func loginAccount(ctx context.Context, cfg UserLogin, code bool) error {
 	if !cfg.configured() {
 		return fmt.Errorf("账号通道未配置")
 	}
+	if err := validateOutboundURL(cfg.BaseURL, false); err != nil {
+		return fmt.Errorf("服务地址不可用: %w", err)
+	}
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Timeout: 20 * time.Second, Jar: jar}
 	loginBody := map[string]string{"email": cfg.Email}
@@ -153,6 +156,9 @@ func postJSONClient(ctx context.Context, client *http.Client, url string, body m
 }
 
 func RequestLoginCode(ctx context.Context, base, email string) (int, int, error) {
+	if err := validateOutboundURL(base, false); err != nil {
+		return 0, 0, err
+	}
 	client := &http.Client{Timeout: 20 * time.Second}
 	raw, _, err := postJSONClient(ctx, client, strings.TrimRight(base, "/")+"/api/client/auth/email-code/request", map[string]string{"email": email})
 	if err != nil {

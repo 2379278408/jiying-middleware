@@ -28,7 +28,7 @@ func NewBucket(name string, count int32) (*Store, error) {
 		dir := path.Join(utils.GetDataHome(), "data", "buckets")
 		dbPath_ = path.Join(dir, "middleware.db")
 		utils.MkFileDir(dbPath_)
-		db, dbErrl = bolt.Open(dbPath_, 0o666, &bolt.Options{Timeout: 3 * 1000 * 1000 * 1000})
+		db, dbErrl = bolt.Open(dbPath_, 0o600, &bolt.Options{Timeout: 3 * 1000 * 1000 * 1000})
 		if dbErrl == nil {
 			dbErrl = db.Update(func(tx *bolt.Tx) error {
 				_, err := tx.CreateBucketIfNotExists([]byte("buckets"))

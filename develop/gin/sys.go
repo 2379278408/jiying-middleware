@@ -30,7 +30,6 @@ func initSystem() {
 	g.GET("/statistics", getStatisticsReal)
 	g.GET("/theme", getTheme)
 	g.POST("/restart", requireConsoleMaster(), doRestart)
-	g.GET("/exit", requireConsoleMaster(), doRestart)
 	g.GET("/buckets", requireConsoleMaster(), getBuckets)
 	g.GET("/notice/config", getNoticeConfig)
 	g.POST("/notice/read-all", readAllNotices)

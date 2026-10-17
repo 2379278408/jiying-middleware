@@ -24,12 +24,12 @@ func ReadYaml(path string) string {
 		return text
 	}
 	dir := filepath.Dir(path)
-	if mdErr := os.MkdirAll(dir, 0o777); mdErr != nil {
+	if mdErr := os.MkdirAll(dir, 0o700); mdErr != nil {
 		GetMyLog().Error("创建配置目录失败 %s: %v", dir, mdErr)
 		return ""
 	}
 	content := defaultConfYaml()
-	if f, openErr := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o777); openErr == nil {
+	if f, openErr := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600); openErr == nil {
 		_, _ = f.WriteString(content)
 		_ = f.Close()
 		GetMyLog().Info("已生成默认配置文件 %s", path)

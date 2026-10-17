@@ -9,7 +9,10 @@ import (
 func TestSealOpenSecretRoundTrip(t *testing.T) {
 	key := bytes.Repeat([]byte{0x2a}, 32)
 	plain := "example-app-connection-secret"
-	sealed := sealWithKey(key, plain)
+	sealed, err := sealWithKey(key, plain)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.HasPrefix(sealed, secretEncPrefix) {
 		t.Fatalf("sealed missing prefix: %s", sealed)
 	}
@@ -23,8 +26,11 @@ func TestSealOpenSecretRoundTrip(t *testing.T) {
 
 func TestSealSecretIdempotentAndLegacyPlaintext(t *testing.T) {
 	key := bytes.Repeat([]byte{0x11}, 32)
-	sealed := sealWithKey(key, "s3cr3t")
-	if again := sealWithKey(key, sealed); again != sealed {
+	sealed, err := sealWithKey(key, "s3cr3t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again, err := sealWithKey(key, sealed); err != nil || again != sealed {
 		t.Fatal("sealing an already-sealed value must be idempotent")
 	}
 	// 历史明文值：不带前缀，读取时原样返回，无需迁移。
@@ -35,7 +41,10 @@ func TestSealSecretIdempotentAndLegacyPlaintext(t *testing.T) {
 
 func TestOpenSecretRejectsTamperedAndWrongKey(t *testing.T) {
 	key := bytes.Repeat([]byte{0x33}, 32)
-	sealed := sealWithKey(key, "top-secret")
+	sealed, err := sealWithKey(key, "top-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got := openWithKey(bytes.Repeat([]byte{0x44}, 32), sealed); got != "" {
 		t.Fatalf("wrong key must fail closed, got %q", got)
 	}
@@ -46,7 +55,7 @@ func TestOpenSecretRejectsTamperedAndWrongKey(t *testing.T) {
 
 func TestSealEmptyStaysEmpty(t *testing.T) {
 	key := bytes.Repeat([]byte{0x55}, 32)
-	if got := sealWithKey(key, ""); got != "" {
+	if got, err := sealWithKey(key, ""); err != nil || got != "" {
 		t.Fatalf("empty got %q", got)
 	}
 	if got := openWithKey(key, ""); got != "" {

@@ -46,6 +46,33 @@ func LoginBlocked(key string) bool {
 	return false
 }
 
+// ReserveLoginAttempt 原子地检查锁定并预留一次尝试额度，
+// 避免“先检查后计数”的竞态被并发请求绕过。返回 false 表示应直接拒绝。
+func ReserveLoginAttempt(key string) bool {
+	if key == "" {
+		return true
+	}
+	loginGuard.mu.Lock()
+	defer loginGuard.mu.Unlock()
+	now := time.Now()
+	a := loginGuard.m[key]
+	if a != nil && a.until.After(now) {
+		return false
+	}
+	if a == nil || now.Sub(a.first) > loginFailWindow {
+		a = &loginAttempt{first: now}
+		loginGuard.m[key] = a
+	}
+	a.count++
+	if a.count > loginMaxFailures {
+		a.until = now.Add(loginLockWindow)
+		pruneLoginGuardLocked(now)
+		return false
+	}
+	pruneLoginGuardLocked(now)
+	return true
+}
+
 // NoteLoginFailure 记录一次失败，达到阈值后开启锁定窗口。
 func NoteLoginFailure(key string) {
 	if key == "" {

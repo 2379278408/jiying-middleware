@@ -19,12 +19,12 @@ func init() {
 }
 
 func initLogin() {
-	core.Server.POST("/login", PostLogin)
+	core.Server.POST("/login", sameOriginOnly(), PostLogin)
 	core.Server.GET("/login", GetLogin)
 	core.Server.GET("/icp", GetICPP)
-	core.Server.POST("/sendCode2", SendCode2)
-	core.Server.POST("/forgetPassword", ForgetPassword)
-	core.Server.POST("/logout", PostLogout)
+	core.Server.POST("/sendCode2", sameOriginOnly(), SendCode2)
+	core.Server.POST("/forgetPassword", sameOriginOnly(), ForgetPassword)
+	core.Server.POST("/logout", sameOriginOnly(), PostLogout)
 }
 
 func initUsers() {

@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,37 +75,36 @@ func decodeKey(s string) ([]byte, error) {
 var errKeyFormat = errors.New("密钥格式无效，需为 32 字节的 hex 或 base64")
 
 // sealSecret 加密连接密钥；空值保持为空，已加密值幂等返回。
-func sealSecret(s string) string {
+// 加密不可用时返回错误，调用方必须中止持久化，禁止回退为明文落盘。
+func sealSecret(s string) (string, error) {
 	if s == "" {
-		return s
+		return s, nil
 	}
 	key, err := relaySecretKey()
 	if err != nil {
-		// 无法加密时保留原值，避免丢失配置。
-		GetMyLog().Warn("连接密钥加密不可用，暂以明文保存: %v", err)
-		return s
+		return "", fmt.Errorf("静态加密密钥不可用: %w", err)
 	}
 	return sealWithKey(key, s)
 }
 
-func sealWithKey(key []byte, s string) string {
+func sealWithKey(key []byte, s string) (string, error) {
 	if s == "" || strings.HasPrefix(s, secretEncPrefix) {
-		return s
+		return s, nil
 	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return s
+		return "", err
 	}
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
-		return s
+		return "", err
 	}
 	nonce := make([]byte, gcm.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
-		return s
+		return "", err
 	}
 	out := gcm.Seal(nonce, nonce, []byte(s), nil)
-	return secretEncPrefix + base64.StdEncoding.EncodeToString(out)
+	return secretEncPrefix + base64.StdEncoding.EncodeToString(out), nil
 }
 
 // openSecret 解密连接密钥；历史明文值原样返回。

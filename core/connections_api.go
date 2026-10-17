@@ -134,21 +134,35 @@ func connectionsAppProfile(c *gin.Context) {
 func connectionsAppUpsert(c *gin.Context) {
 	secret := c.PostForm("app_secret")
 	appID := strings.TrimSpace(c.PostForm("app_id"))
+	submittedWS := strings.TrimSpace(c.PostForm("ws_url"))
 	if appID != "" && !isUUID(appID) {
 		RecordAudit(consoleUser(c), "app.upsert", appID, "", "失败: 应用 ID 不是 UUID")
 		jiyingErr(c, "应用 ID 必须是 UUID（8-4-4-4-12），请从 MagicChat 应用详情复制")
 		return
 	}
+	wsURL := resolveAppWSURL(submittedWS, appID)
 	if secret == "****" {
-		for _, a := range loadAppConns() {
-			if a.AppID == appID {
-				secret = a.AppSecret
-				break
-			}
+		stored, ok := findAppConn(appID)
+		if !ok || strings.TrimSpace(stored.AppSecret) == "" {
+			RecordAudit(consoleUser(c), "app.upsert", appID, "", "失败: 已保存密钥不存在")
+			jiyingErr(c, "应用尚未保存密钥，请填写完整密钥")
+			return
 		}
+		if !maskedSentinel(submittedWS) && !endpointsEqual(submittedWS, stored.WSURL) {
+			RecordAudit(consoleUser(c), "app.upsert", appID, "", "失败: 密钥占位时更换地址")
+			jiyingErr(c, "使用已保存密钥时不能更换应用地址")
+			return
+		}
+		secret = stored.AppSecret
+		wsURL = stored.WSURL
+	}
+	if err := validateOutboundURL(wsURL, true); err != nil {
+		RecordAudit(consoleUser(c), "app.upsert", appID, "", "失败: "+err.Error())
+		jiyingErr(c, "应用地址不可用: "+err.Error())
+		return
 	}
 	cfg := AppConn{
-		WSURL:     resolveAppWSURL(c.PostForm("ws_url"), appID),
+		WSURL:     wsURL,
 		AppID:     appID,
 		AppSecret: secret,
 	}

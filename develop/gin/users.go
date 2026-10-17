@@ -84,6 +84,9 @@ func SaveUser(c *gin.Context) {
 		jsonErr(c, err.Error())
 		return
 	}
+	if !created && (password != "" || u.Disable) {
+		core.BumpSessionEpoch(username)
+	}
 	core.GetMyLog().Info("用户 %s 已保存", username)
 	jsonOK(c, nil)
 }
@@ -104,6 +107,7 @@ func DeleteUser(c *gin.Context) {
 		return
 	}
 	dropUserFromMemory(username)
+	core.BumpSessionEpoch(username)
 	core.GetMyLog().Info("用户 %s 已删除", username)
 	jsonOK(c, nil)
 }

@@ -2,31 +2,19 @@ package core
 
 import "testing"
 
-func TestLoginGuardLockout(t *testing.T) {
-	key := "203.0.113.9"
-	ResetLoginFailures(key)
-	if LoginBlocked(key) {
-		t.Fatal("初始状态不应锁定")
+func TestReserveLoginAttemptBlocksAfterThreshold(t *testing.T) {
+	key := "test-reserve|user"
+	for i := 0; i < loginMaxFailures; i++ {
+		if !ReserveLoginAttempt(key) {
+			t.Fatalf("第 %d 次尝试应放行", i+1)
+		}
 	}
-	for i := 0; i < loginMaxFailures-1; i++ {
-		NoteLoginFailure(key)
-	}
-	if LoginBlocked(key) {
-		t.Fatal("未达阈值不应锁定")
-	}
-	NoteLoginFailure(key)
-	if !LoginBlocked(key) {
-		t.Fatal("达到阈值应锁定")
+	if ReserveLoginAttempt(key) {
+		t.Fatal("超过阈值后应拒绝")
 	}
 	ResetLoginFailures(key)
-	if LoginBlocked(key) {
-		t.Fatal("重置后应解除锁定")
+	if !ReserveLoginAttempt(key) {
+		t.Fatal("重置后应重新放行")
 	}
-}
-
-func TestLoginGuardEmptyKey(t *testing.T) {
-	NoteLoginFailure("")
-	if LoginBlocked("") {
-		t.Fatal("空来源不应被锁定")
-	}
+	ResetLoginFailures(key)
 }

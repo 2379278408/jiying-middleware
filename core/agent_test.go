@@ -230,7 +230,7 @@ func TestBuildAgentToolsIncludesAskChoice(t *testing.T) {
 }
 
 func TestResumeAgentChoiceUnknownReturnsFalse(t *testing.T) {
-	if resumeAgentChoice("missing", "conv", []string{"yes"}) {
+	if resumeAgentChoice("missing", "conv", "u1", []string{"yes"}) {
 		t.Fatal("unknown choice must not resume")
 	}
 }

@@ -60,7 +60,13 @@ func persistSavedSessions() {
 	savedSessions.Lock()
 	sealed := make(map[string]savedUserSession, len(savedSessions.items))
 	for email, item := range savedSessions.items {
-		item.Token = sealSecret(item.Token)
+		value, err := sealSecret(item.Token)
+		if err != nil {
+			savedSessions.Unlock()
+			GetMyLog().Error("会话令牌加密失败，已取消保存: %v", err)
+			return
+		}
+		item.Token = value
 		sealed[email] = item
 	}
 	savedSessions.Unlock()

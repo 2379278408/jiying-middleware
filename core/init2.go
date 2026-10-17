@@ -18,11 +18,17 @@ import (
 var OpenServer *gin.RouterGroup
 
 func init() {
-	gin.SetMode(gin.DebugMode)
+	// 默认发布模式，仅在显式设置 JIYING_DEBUG=1 时启用调试输出。
+	if os.Getenv("JIYING_DEBUG") == "1" {
+		gin.SetMode(gin.DebugMode)
+	} else {
+		gin.SetMode(gin.ReleaseMode)
+	}
 	Server = gin.New()
 	// multipart 超过该内存阈值后落临时文件，避免大文件上传直接占满进程内存。
 	Server.MaxMultipartMemory = 8 << 20
 	Server.Use(gin.RecoveryWithWriter(io.Discard))
+	Server.Use(securityHeaders())
 	Server.Use(traceIDMiddleware())
 	Server.Use(accessLog())
 
@@ -61,6 +67,21 @@ func accessLog() gin.HandlerFunc {
 	}
 }
 
+// securityHeaders 为所有响应补齐基础安全头，压制点击劫持、MIME 嗅探与 Referer 泄露。
+func securityHeaders() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		h := c.Writer.Header()
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("Content-Security-Policy", "frame-ancestors 'none'; object-src 'none'; base-uri 'self'")
+		if c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https") {
+			h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
+		c.Next()
+	}
+}
+
 // traceIDMiddleware 为每个请求分配并回传 X-Trace-ID，便于把一次调用与运行日志按同一 ID 关联。
 func traceIDMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -71,8 +92,11 @@ func traceIDMiddleware() gin.HandlerFunc {
 
 func initWeb() {
 	wd := utils.GetResHome()
-	_ = os.MkdirAll(filepath.Join(wd, "data"), 0o777)
-	_ = os.MkdirAll(filepath.Join(wd, "logs"), 0o777)
+	for _, dir := range []string{filepath.Join(wd, "data"), filepath.Join(wd, "logs")} {
+		if err := os.MkdirAll(dir, 0o700); err == nil {
+			_ = os.Chmod(dir, 0o700)
+		}
+	}
 
 	assetsRoot := filepath.Join(wd, "views2", "assets")
 	if _, err := os.Stat(assetsRoot); err != nil {

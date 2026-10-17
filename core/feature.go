@@ -263,8 +263,11 @@ func featureAllowedFor(userID string, f *Feature) bool {
 func executeFeature(ctx context.Context, name, args, userID, chatID string) (string, error) {
 	if strings.HasPrefix(name, "cron:") {
 		label := strings.TrimPrefix(name, "cron:")
+		if !cronTaskAllows(label, userID) {
+			return "", fmt.Errorf("无权限")
+		}
 		if args != "" && chatID != "" {
-			dispatchChatCommand(chatID, args)
+			dispatchChatCommand(chatID, args, userID)
 		}
 		return "定时已触发 " + label, nil
 	}

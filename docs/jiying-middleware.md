@@ -280,3 +280,14 @@
 - 端点目录一致性：`core/aidocs_test.go` 把 `aiEndpoints` 与 `Server.Routes()` 的 `/jiying/api/` 路由双向比对，新增或改名接口未同步文档时测试直接失败；同时校验 OpenAPI 的 `bearerAuth` / `cookieAuth` 与操作总数。
 - OpenAPI 增强：写接口附带可直接替换的 form 示例，统一成功响应包含 `ok/code/message/trace_id/data` 结构，错误响应补充 401、403、429 语义，并输出 `x-required-role`。
 - 工程化：新增顶层 `README.md`，说明构建、资源目录、环境变量、数据目录、文档入口与测试命令；仓库根目录准备了 GitHub Actions 工作流，需使用具备 `workflow` 权限的令牌推送后生效。
+
+### 安全审计修复（第二轮，2026-10-17）
+
+- 权限与身份：定时任务的创建、修改、删除、执行、启停均按会话或 API Key 身份判定；主控任务仅主控可管，其余用户只能管理自己的任务。调度与手动执行共用 `cronIdentity`，只有主控任务以 `system` 运行。`cron:` 前缀在完成鉴权后才允许派发。
+- 凭据保护：连接地址统一经 `validateOutboundURL` 校验，默认拒绝回环、私网、链路本地与云元数据地址；内网自建部署可设 `JIYING_ALLOW_PRIVATE_HOSTS=1`。掩码密钥只能复用同一应用的已存端点，杜绝借测试接口外带凭据。
+- 认证会话：重置验证码改为服务端票据（Cookie 仅存随机票据 ID，验证码只存 SHA-256、10 分钟有效、一次性、限次）；会话 Cookie 增加代次校验，改密、禁用、删除用户后旧会话立即失效；登录/发码/重置/退出增加同源校验，HTTPS 下自动加 `Secure`。
+- 上传与渲染：上传与脚本路径统一走 `safeUploadRel` / `safeJoinUnder`，限制根目录、扩展名与单文件 4 MB；multipart 文件名剥离 CR/LF/引号，Content-Type 经 `mime.ParseMediaType` 校验；控制台功能列表改用 `jsArg` 编码内联参数，修复存储型 XSS。
+- 日志与并发：应用日志、审计与访问日志在落盘前剥离控制字符；发送者上下文改为按 goroutine 隔离；确认卡片绑定发起人与会话；插件权限表加互斥锁；定时任务状态更新加锁，任务队列使用原子桶引用消除后台竞态。
+- 静态加密：连接密钥、账号密码、应用密钥、模型密钥与会话令牌统一 AES-GCM（随机 nonce）；密钥不可用时中止保存，禁止回退明文。AES-CBC 与 SM4-CBC 改为随机 IV 并带版本头；rank 编码密钥改由 `JIYING_RANK3_KEY` / `JIYING_RANK4_KEY` 提供，未配置时失败关闭。
+- 暴露面与响应头：默认 `gin.ReleaseMode`，仅 `JIYING_DEBUG=1` 开启调试；移除 `GET /exit`、`GET /js/debug`，插件启停改为 POST；`/local/msg` 拒绝携带浏览器上下文头的请求；静态资源移除接入测试页；全局下发 `X-Frame-Options: DENY`、CSP `frame-ancestors 'none'`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`，HTTPS 下追加 HSTS。
+- 文件权限：数据、日志、配置目录统一 `0700`，日志与配置、BoltDB 文件 `0600`，脚本目录 `0750`；启动时同步收紧已存在目录权限。

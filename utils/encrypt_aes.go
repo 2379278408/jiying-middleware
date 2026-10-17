@@ -3,10 +3,13 @@ package utils
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/rand"
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"os"
+	"strings"
 
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/pbkdf2"
@@ -56,6 +59,9 @@ func clampKey(key []byte) []byte {
 	return out
 }
 
+const aesCBCVersion byte = 0x02
+
+// aesEncrypt 使用随机 IV 的 AES-CBC，输出格式为 版本号 || IV || 密文。
 func aesEncrypt(key []byte, origData []byte) []byte {
 	fixedKey := clampKey(key)
 	block, err := aes.NewCipher(fixedKey)
@@ -64,11 +70,18 @@ func aesEncrypt(key []byte, origData []byte) []byte {
 		return nil
 	}
 	blockSize := block.BlockSize()
+	iv := make([]byte, blockSize)
+	if _, err := rand.Read(iv); err != nil {
+		return nil
+	}
 	src := pkcs7Padding(origData, blockSize)
 	dst := make([]byte, len(src))
-	mode := cipher.NewCBCEncrypter(block, fixedKey[:blockSize])
+	mode := cipher.NewCBCEncrypter(block, iv)
 	mode.CryptBlocks(dst, src)
-	return dst
+	out := make([]byte, 0, 1+len(iv)+len(dst))
+	out = append(out, aesCBCVersion)
+	out = append(out, iv...)
+	return append(out, dst...)
 }
 
 func aesDecrypt(key []byte, crypted []byte) []byte {
@@ -78,19 +91,24 @@ func aesDecrypt(key []byte, crypted []byte) []byte {
 		return nil
 	}
 	blockSize := block.BlockSize()
-	if len(crypted) < blockSize || len(crypted)%blockSize != 0 {
+	if len(crypted) < 1+blockSize || crypted[0] != aesCBCVersion {
 		return nil
 	}
-	dst := make([]byte, len(crypted))
-	mode := cipher.NewCBCDecrypter(block, fixedKey[:blockSize])
-	mode.CryptBlocks(dst, crypted)
+	iv := crypted[1 : 1+blockSize]
+	body := crypted[1+blockSize:]
+	if len(body) == 0 || len(body)%blockSize != 0 {
+		return nil
+	}
+	dst := make([]byte, len(body))
+	mode := cipher.NewCBCDecrypter(block, iv)
+	mode.CryptBlocks(dst, body)
 	return pkcs7Unpadding(dst)
 }
 
 func EncryptByAes(key, s string) string {
 	data := aesEncrypt([]byte(key), []byte(s))
 	if data == nil {
-		return "@\x11\x11\x11\x11\x11\x11\x11\x11\x11\x11\x11\x11\x11\x11\x11\x11\x11\x11\x11\x11\x11\x11\x11\x11\x11\x11\x11\x11\x11\x11\x11\x11\x11\x11\x11$?TODO"
+		return ""
 	}
 	return base64.StdEncoding.EncodeToString(data)
 }
@@ -98,7 +116,7 @@ func EncryptByAes(key, s string) string {
 func DecryptByAes(key, s string) string {
 	data, err := base64.StdEncoding.DecodeString(s)
 	if err != nil {
-		return "decrypt error"
+		return ""
 	}
 	out := aesDecrypt([]byte(key), data)
 	return string(out)
@@ -189,6 +207,9 @@ func sm4BlockDec(b []byte, rk [32]uint32) {
 	sm4BlockEnc(b, rr)
 }
 
+const sm4CBCVersion byte = 0x02
+
+// Sm4EncryptCbc 使用随机 IV，输出格式为 版本号 || IV || 密文。
 func Sm4EncryptCbc(key []byte, data []byte) []byte {
 	if len(key) < 16 {
 		return nil
@@ -197,8 +218,11 @@ func Sm4EncryptCbc(key []byte, data []byte) []byte {
 	copy(mk[:], key[:16])
 	rk := sm4KeyExpansion(mk)
 	src := pkcs7Padding(data, 16)
+	iv := make([]byte, 16)
+	if _, err := rand.Read(iv); err != nil {
+		return nil
+	}
 	dst := make([]byte, len(src))
-	iv := mk[:]
 	prev := append([]byte(nil), iv...)
 	for i := 0; i < len(src); i += 16 {
 		for j := 0; j < 16; j++ {
@@ -207,38 +231,49 @@ func Sm4EncryptCbc(key []byte, data []byte) []byte {
 		sm4BlockEnc(prev, rk)
 		copy(dst[i:], prev)
 	}
-	return dst
+	out := make([]byte, 0, 1+len(iv)+len(dst))
+	out = append(out, sm4CBCVersion)
+	out = append(out, iv...)
+	return append(out, dst...)
 }
 
 func Sm4DecryptCbc(key []byte, data []byte) []byte {
-	if len(key) < 16 || len(data) == 0 || len(data)%16 != 0 {
+	if len(key) < 16 || len(data) < 1+16 || data[0] != sm4CBCVersion {
+		return nil
+	}
+	body := data[1+16:]
+	if len(body) == 0 || len(body)%16 != 0 {
 		return nil
 	}
 	var mk [16]byte
 	copy(mk[:], key[:16])
 	rk := sm4KeyExpansion(mk)
-	dst := make([]byte, len(data))
-	iv := mk[:]
+	iv := data[1 : 1+16]
+	dst := make([]byte, len(body))
 	prev := append([]byte(nil), iv...)
 	var cur [16]byte
-	for i := 0; i < len(data); i += 16 {
-		copy(cur[:], data[i:i+16])
+	for i := 0; i < len(body); i += 16 {
+		copy(cur[:], body[i:i+16])
 		sm4BlockDec(cur[:], rk)
 		for j := 0; j < 16; j++ {
 			cur[j] ^= prev[j]
 		}
 		copy(dst[i:], cur[:])
-		prev = data[i : i+16]
+		prev = body[i : i+16]
 	}
 	return pkcs7Unpadding(dst)
 }
 
-var (
-	rank3Key = []byte("A7*&^%$#@!5a")
-	rank4Key = []byte("S2*&^%$#@!3s")
-
-	KeyCloud = "Jiying::Cloud::SecretKey::2026"
-)
+// rankKeyFromEnv 从部署环境读取 rank 密钥，禁止在二进制中内置可复用密钥。
+func rankKeyFromEnv(name, label string) ([]byte, bool) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if len(raw) < 32 {
+		return nil, false
+	}
+	key := make([]byte, 32)
+	copy(key, raw)
+	return key, true
+}
 
 func rankKDF(key []byte, saltTxt string) []byte {
 	k1 := pbkdf2.Key(key, key, 1000, 32, sha1.New)
@@ -246,33 +281,43 @@ func rankKDF(key []byte, saltTxt string) []byte {
 }
 
 func EncodeRank3(s string) string {
-	k := rankKDF(rank3Key, "rank3")
-	c := Sm4EncryptCbc(k, []byte(s))
-	return hex.EncodeToString(c)
+	key, ok := rankKeyFromEnv("JIYING_RANK3_KEY", "rank3")
+	if !ok {
+		return ""
+	}
+	return hex.EncodeToString(Sm4EncryptCbc(rankKDF(key, "rank3"), []byte(s)))
 }
 
 func DecodeRank3(s string) string {
+	key, ok := rankKeyFromEnv("JIYING_RANK3_KEY", "rank3")
+	if !ok {
+		return ""
+	}
 	c, err := hex.DecodeString(s)
 	if err != nil {
 		return ""
 	}
-	k := rankKDF(rank3Key, "rank3")
-	return string(Sm4DecryptCbc(k, c))
+	return string(Sm4DecryptCbc(rankKDF(key, "rank3"), c))
 }
 
 func EncodeRank4(s string) string {
-	k := rankKDF(rank4Key, "rank4")
-	c := Sm4EncryptCbc(k, []byte(s))
-	return hex.EncodeToString(c)
+	key, ok := rankKeyFromEnv("JIYING_RANK4_KEY", "rank4")
+	if !ok {
+		return ""
+	}
+	return hex.EncodeToString(Sm4EncryptCbc(rankKDF(key, "rank4"), []byte(s)))
 }
 
 func DecodeRank4(s string) string {
+	key, ok := rankKeyFromEnv("JIYING_RANK4_KEY", "rank4")
+	if !ok {
+		return ""
+	}
 	c, err := hex.DecodeString(s)
 	if err != nil {
 		return ""
 	}
-	k := rankKDF(rank4Key, "rank4")
-	return string(Sm4DecryptCbc(k, c))
+	return string(Sm4DecryptCbc(rankKDF(key, "rank4"), c))
 }
 
 type os_StderrLike struct{}

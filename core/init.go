@@ -33,7 +33,7 @@ func initBuckets() {
 }
 
 func initDataHome() {
-	if _, err := os.Stat(DataHome); err != nil {
-		os.MkdirAll(DataHome, 0o777)
+	if err := os.MkdirAll(DataHome, 0o700); err == nil {
+		_ = os.Chmod(DataHome, 0o700)
 	}
 }

@@ -55,6 +55,25 @@ export JIYING_APP_SECRET='<应用连接密钥>'
 JIYING_PPROF=1 ./jymw
 ```
 
+Gin 默认以发布模式运行，排障时再显式打开调试日志：
+
+```bash
+JIYING_DEBUG=1 ./jymw
+```
+
+出站连接默认拒绝回环、私网与云元数据地址；确认部署在内网且需要访问内网服务时：
+
+```bash
+JIYING_ALLOW_PRIVATE_HOSTS=1 ./jymw
+```
+
+rank 编码使用部署侧密钥，未配置时相关编码直接失败关闭：
+
+```bash
+export JIYING_RANK3_KEY='<32 字节以上随机串>'
+export JIYING_RANK4_KEY='<32 字节以上随机串>'
+```
+
 ## 文档与接口
 
 - 开发方案：`docs/jiying-middleware.md`

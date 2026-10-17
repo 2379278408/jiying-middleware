@@ -71,7 +71,12 @@ func saveAppConns(list []AppConn) {
 	}
 	sealed := make([]AppConn, 0, len(list))
 	for _, c := range list {
-		c.AppSecret = sealSecret(c.AppSecret)
+		value, err := sealSecret(c.AppSecret)
+		if err != nil {
+			GetMyLog().Error("应用密钥加密失败，已取消保存: %v", err)
+			return
+		}
+		c.AppSecret = value
 		sealed = append(sealed, c)
 	}
 	raw, _ := json.Marshal(sealed)

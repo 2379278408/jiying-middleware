@@ -44,10 +44,12 @@ const (
 const taskRunTimeout = 2 * time.Minute
 
 type taskQueue struct {
-	mu    sync.Mutex
-	items map[string]*Task
-	order []string
-	wake  chan struct{}
+	mu sync.Mutex
+	// bucket 在初始化时固定为当前存储；后台循环通过原子值读取，避免测试或热切换时与全局变量竞态。
+	bucket atomic.Value
+	items  map[string]*Task
+	order  []string
+	wake   chan struct{}
 	// waits 保存静默任务（如 Agent 工具调用）的完成通知；值 chan 容量 1，非阻塞发送。
 	waits map[string]chan *Task
 }
@@ -57,6 +59,9 @@ var tasks = &taskQueue{items: map[string]*Task{}, wake: make(chan struct{}, 1), 
 var taskLoopStarted atomic.Bool
 
 func initTaskQueue() {
+	if BucketApp != nil {
+		tasks.bucket.Store(BucketApp)
+	}
 	tasks.load()
 	if !taskLoopStarted.Swap(true) {
 		go tasks.loop()
@@ -64,10 +69,11 @@ func initTaskQueue() {
 }
 
 func (q *taskQueue) load() {
-	if BucketApp == nil {
+	if q.bucket.Load() == nil {
 		return
 	}
-	raw := BucketApp.GetString("jiying_tasks")
+	bucket := q.bucket.Load().(Bucket)
+	raw := bucket.GetString("jiying_tasks")
 	if raw == "" {
 		return
 	}
@@ -91,9 +97,10 @@ func (q *taskQueue) load() {
 }
 
 func (q *taskQueue) saveLocked() {
-	if BucketApp == nil {
+	if q.bucket.Load() == nil {
 		return
 	}
+	bucket := q.bucket.Load().(Bucket)
 	// 内存中保留全部任务但限制规模；持久层只落非静默任务，避免 Agent 工具调用冲刷队列。
 	if len(q.order) > 200 {
 		drop := q.order[:len(q.order)-200]
@@ -112,7 +119,7 @@ func (q *taskQueue) saveLocked() {
 		list = list[len(list)-200:]
 	}
 	raw, _ := json.Marshal(list)
-	BucketApp.Set("jiying_tasks", string(raw))
+	bucket.Set("jiying_tasks", string(raw))
 }
 
 func EnqueueTask(t Task) (*Task, error) {
@@ -561,16 +568,20 @@ func enqueueCron(cmd *CronCmd) {
 		Feature:        "cron:" + cmd.Name,
 		Args:           cmd.Command,
 		ConversationID: chat,
-		UserID:         "system",
+		UserID:         cronIdentity(cmd),
 	})
 	if err != nil {
 		GetMyLog().Warn("定时入队失败 %s", cmd.Name)
 	}
 }
 
-func bindChoice(choiceMessageID, taskID string) {
-	if choiceMessageID == "" || taskID == "" {
+func bindChoice(choiceMessageID string, task *Task) {
+	if choiceMessageID == "" || task == nil || task.ID == "" {
 		return
 	}
-	choiceWaits.Store(choiceMessageID, choiceWait{TaskID: taskID})
+	choiceWaits.Store(choiceMessageID, choiceWait{
+		TaskID:         task.ID,
+		UserID:         task.UserID,
+		ConversationID: task.ConversationID,
+	})
 }

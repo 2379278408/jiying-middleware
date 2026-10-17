@@ -30,7 +30,7 @@ func monitorGoroutine() {
 }
 
 func main() {
-	resPath := flag.String("c", utils.ExecPath, "resource path")
+	resPath := flag.String("c", "", "resource path")
 	disableTerminal := flag.Bool("d", false, "disable terminal")
 	enableTerminal := flag.Bool("t", false, "enable terminal")
 	flag.Parse()

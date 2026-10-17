@@ -53,6 +53,13 @@ func isLoopbackRemote(remoteAddr string) bool {
 }
 
 func httpMsgHook(c *gin.Context) {
+	// 浏览器发起的跨站表单会携带 Origin/Referer/Sec-Fetch-*，
+	// 本地命令行工具不会；据此阻断浏览器借回环地址触发命令。
+	if c.GetHeader("Origin") != "" || c.GetHeader("Referer") != "" ||
+		c.GetHeader("Sec-Fetch-Site") != "" || c.GetHeader("Sec-Fetch-Mode") != "" {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"code": 403, "message": "拒绝浏览器上下文请求"})
+		return
+	}
 	msg := c.PostForm("msg")
 	if strings.TrimSpace(msg) == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 1, "message": "缺少 msg"})
@@ -186,8 +193,11 @@ func dispatchLocalCommandFor(cmd, userID string) (string, error) {
 	return "命令已执行: " + handle, nil
 }
 
-func dispatchChatCommand(chatID, cmd string) string {
-	s := &Faker{Message: cmd, Type: 2, UserID: "system", ChatID: chatID}
+func dispatchChatCommand(chatID, cmd, userID string) string {
+	if strings.TrimSpace(userID) == "" {
+		userID = "system"
+	}
+	s := &Faker{Message: cmd, Type: 2, UserID: userID, ChatID: chatID}
 	s.FromGroupID = chatID
 	withSender(s, func() {
 		if handled, _ := dispatchMiddleware(s, s.GetMsg()); handled {

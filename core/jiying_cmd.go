@@ -9,7 +9,9 @@ import (
 )
 
 type choiceWait struct {
-	TaskID string
+	TaskID         string
+	UserID         string
+	ConversationID string
 }
 
 var choiceWaits sync.Map
@@ -380,7 +382,7 @@ func dispatchMiddleware(sender Sender, msg string) (handled bool, ok bool) {
 			sender.Reply("确认卡片发送失败")
 			return true, true
 		}
-		bindChoice(choiceID, t.ID)
+		bindChoice(choiceID, t)
 		sender.Reply("已挂起，等待确认")
 		return true, true
 	}
@@ -389,12 +391,10 @@ func dispatchMiddleware(sender Sender, msg string) (handled bool, ok bool) {
 }
 
 func resumeChoice(ctx context.Context, choiceMessageID, userID, conversationID string, optionIDs []string) error {
-	if resumeAgentChoice(choiceMessageID, conversationID, optionIDs) {
+	if resumeAgentChoice(choiceMessageID, conversationID, userID, optionIDs) {
 		return nil
 	}
 	_ = ctx
-	_ = userID
-	_ = conversationID
 	yes := false
 	for _, id := range optionIDs {
 		if id == "yes" {
@@ -405,7 +405,13 @@ func resumeChoice(ctx context.Context, choiceMessageID, userID, conversationID s
 	if !ok {
 		return nil
 	}
-	choiceWaits.Delete(choiceMessageID)
 	w := v.(choiceWait)
+	if w.UserID != "" && userID != "" && w.UserID != userID {
+		return fmt.Errorf("只有发起人才能确认该操作")
+	}
+	if w.ConversationID != "" && conversationID != "" && w.ConversationID != conversationID {
+		return fmt.Errorf("确认来源与会话不匹配")
+	}
+	choiceWaits.Delete(choiceMessageID)
 	return ConfirmTask(w.TaskID, yes)
 }

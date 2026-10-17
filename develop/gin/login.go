@@ -29,6 +29,8 @@ func IssueUserSession(c *gin.Context, u *users.User) {
 		return
 	}
 	s.Values["user"] = u.ID
+	s.Values["epoch"] = core.SessionEpoch(u.ID)
+	s.Options.Secure = requestIsHTTPS(c)
 	if remember, _ := strconv.ParseBool(c.PostForm("rememberme")); remember {
 		s.Options.MaxAge = 24 * 3600 * 30
 	} else {
@@ -46,7 +48,14 @@ func CurrentUser(c *gin.Context) *users.User {
 	if !ok || id == "" {
 		return nil
 	}
-	return users.GetUser(id)
+	if sessionEpochValue(s.Values["epoch"]) != core.SessionEpoch(id) {
+		return nil
+	}
+	u := users.GetUser(id)
+	if u == nil || u.Disable {
+		return nil
+	}
+	return u
 }
 
 func jsonOK(c *gin.Context, data interface{}) {
@@ -67,7 +76,7 @@ func PostLogin(c *gin.Context) {
 	// 以“来源 + 用户名”为键，避免共享出口 IP 下不同账号相互牵连，
 	// 同时仍能限制针对同一账号的密码猜测。
 	guardKey := utils.GetClientIP(c) + "|" + strings.ToLower(username)
-	if core.LoginBlocked(guardKey) {
+	if !core.ReserveLoginAttempt(guardKey) {
 		core.GetMyLog().Warn("登录已被临时锁定 %s", guardKey)
 		core.RecordAudit(username, "login.blocked", username, "来源 "+utils.GetClientIP(c), "失败: 账号临时锁定")
 		jsonErr(c, "失败次数过多，账号已临时锁定，请约 5 分钟后重试")
@@ -75,7 +84,6 @@ func PostLogin(c *gin.Context) {
 	}
 	u := users.VerifyPassword(username, password)
 	if u == nil {
-		core.NoteLoginFailure(guardKey)
 		core.GetMyLog().Warn("登录失败 %s，%s", username, utils.GetClientIP(c))
 		core.RecordAudit(username, "login.fail", username, "来源 "+utils.GetClientIP(c), "失败: 用户名或密码错误")
 		jsonErr(c, "用户名或密码错误")
@@ -121,31 +129,35 @@ func GetICPP(c *gin.Context) {
 	})
 }
 
+// SendCode2 生成找回验证码。验证码只保存在服务端票据中，
+// 浏览器仅持有不可猜测的票据 ID，客户端与 Cookie 均无法读取验证码明文。
 func SendCode2(c *gin.Context) {
 	username := strings.TrimSpace(c.PostForm("username"))
 	if username == "" {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": "请输入用户名"})
 		return
 	}
+	// 统一提示，避免通过响应差异枚举账号是否存在。
+	const generic = "如果账号存在且已绑定邮箱，验证码已发送"
+	sendKey := "reset-send|" + utils.GetClientIP(c)
+	if !core.ReserveLoginAttempt(sendKey) {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "请求过于频繁，请稍后重试"})
+		return
+	}
 	u := users.GetUser(username)
-	if u == nil {
-		c.JSON(http.StatusOK, gin.H{"success": false, "message": "用户不存在"})
+	if u == nil || u.Email == "" {
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": generic})
 		return
 	}
-	if u.Email == "" {
-		c.JSON(http.StatusOK, gin.H{"success": false, "message": "该用户未绑定邮箱"})
+	token, _ := issueResetTicket(u.ID)
+	if token == "" {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "验证码生成失败，请稍后重试"})
 		return
 	}
-	code := genVerifyCode()
-	s, err := core.SessionStore.Get(c.Request, cookieName)
-	if err == nil {
-		s.Values["verify_code"] = code
-		s.Values["recover_user"] = u.ID
-		_ = s.Save(c.Request, c.Writer)
-	}
+	setResetCookie(c, token)
 	// 不回写验证码明文：日志可见即等于任意账号可被重置。
 	core.GetMyLog().Info("已向 %s 发送找回验证码", u.Email)
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "验证码已发送"})
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": generic})
 }
 
 func ForgetPassword(c *gin.Context) {
@@ -157,28 +169,18 @@ func ForgetPassword(c *gin.Context) {
 	}
 	// 验证码只有 6 位，必须限速，避免在线暴力枚举。
 	guardKey := "reset|" + utils.GetClientIP(c)
-	if core.LoginBlocked(guardKey) {
+	if !core.ReserveLoginAttempt(guardKey) {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": "尝试次数过多，请约 5 分钟后重试"})
 		return
 	}
-	s, err := core.SessionStore.Get(c.Request, cookieName)
-	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"success": false, "message": "会话异常"})
+	token, _ := c.Cookie(resetCookieName)
+	targetID, ok := verifyResetTicket(token, code)
+	if !ok {
+		clearResetCookie(c)
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "验证码错误或已过期"})
 		return
 	}
-	got, _ := s.Values["verify_code"].(string)
-	if got == "" || got != code {
-		core.NoteLoginFailure(guardKey)
-		c.JSON(http.StatusOK, gin.H{"success": false, "message": "验证码错误"})
-		return
-	}
-	targetID, _ := s.Values["recover_user"].(string)
-	for k := range s.Values {
-		if k == "verify_code" || k == "recover_user" {
-			delete(s.Values, k)
-		}
-	}
-	_ = s.Save(c.Request, c.Writer)
+	clearResetCookie(c)
 
 	target := users.GetUser(targetID)
 	if target == nil {
@@ -194,6 +196,7 @@ func ForgetPassword(c *gin.Context) {
 		return
 	}
 	core.ResetLoginFailures(guardKey)
+	core.BumpSessionEpoch(target.ID)
 	core.GetMyLog().Info("用户 %s 通过验证码重置密码", target.ID)
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "密码已重置"})
 }
@@ -213,7 +216,51 @@ func clearSessionCookie(c *gin.Context) {
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
+		Secure:   requestIsHTTPS(c),
 		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func requestIsHTTPS(c *gin.Context) bool {
+	if c.Request.TLS != nil {
+		return true
+	}
+	return strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https")
+}
+
+func sessionEpochValue(v interface{}) int64 {
+	switch n := v.(type) {
+	case int64:
+		return n
+	case int:
+		return int64(n)
+	case float64:
+		return int64(n)
+	}
+	return 0
+}
+
+func setResetCookie(c *gin.Context, token string) {
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     resetCookieName,
+		Value:    token,
+		Path:     "/",
+		MaxAge:   int(resetTicketTTL / time.Second),
+		HttpOnly: true,
+		Secure:   requestIsHTTPS(c),
+		SameSite: http.SameSiteStrictMode,
+	})
+}
+
+func clearResetCookie(c *gin.Context) {
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     resetCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   requestIsHTTPS(c),
+		SameSite: http.SameSiteStrictMode,
 	})
 }
 

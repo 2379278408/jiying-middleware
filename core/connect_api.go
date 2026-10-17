@@ -148,9 +148,20 @@ func resolveAccountBaseURL(submitted string) string {
 	return strings.TrimRight(loadRelayConn().effectiveAccount().BaseURL, "/")
 }
 
+// findAppConn 按应用 ID 查询已保存的连接配置。
+func findAppConn(appID string) (AppConn, bool) {
+	for _, a := range loadAppConns() {
+		if a.AppID == appID {
+			return a, true
+		}
+	}
+	return AppConn{}, false
+}
+
 func connectApp(c *gin.Context) {
 	appID := strings.TrimSpace(c.PostForm("app_id"))
-	wsURL := resolveAppWSURL(c.PostForm("ws_url"), appID)
+	submittedWS := strings.TrimSpace(c.PostForm("ws_url"))
+	wsURL := resolveAppWSURL(submittedWS, appID)
 	secret := c.PostForm("app_secret")
 	if wsURL == "" || appID == "" || secret == "" {
 		RecordAudit(consoleUser(c), "connect.app", appID, "", "失败: 缺少参数")
@@ -163,12 +174,24 @@ func connectApp(c *gin.Context) {
 		return
 	}
 	if secret == "****" || secret == "" {
-		for _, a := range loadAppConns() {
-			if a.AppID == appID {
-				secret = a.AppSecret
-				break
-			}
+		stored, ok := findAppConn(appID)
+		if !ok || strings.TrimSpace(stored.AppSecret) == "" {
+			RecordAudit(consoleUser(c), "connect.app", appID, "", "失败: 已保存密钥不存在")
+			jiyingErr(c, "应用尚未保存密钥，请填写完整密钥")
+			return
 		}
+		if !maskedSentinel(submittedWS) && !endpointsEqual(submittedWS, stored.WSURL) {
+			RecordAudit(consoleUser(c), "connect.app", appID, "", "失败: 密钥占位时更换地址")
+			jiyingErr(c, "使用已保存密钥时不能更换应用地址")
+			return
+		}
+		secret = stored.AppSecret
+		wsURL = stored.WSURL
+	}
+	if err := validateOutboundURL(wsURL, true); err != nil {
+		RecordAudit(consoleUser(c), "connect.app", appID, "", "失败: "+err.Error())
+		jiyingErr(c, "应用地址不可用: "+err.Error())
+		return
 	}
 	if err := SyncAppConn(AppConn{WSURL: wsURL, AppID: appID, AppSecret: secret}); err != nil {
 		RecordAudit(consoleUser(c), "connect.app", appID, "", "失败: "+err.Error())
@@ -188,15 +211,26 @@ func connectApp(c *gin.Context) {
 }
 
 func connectTestApp(c *gin.Context) {
-	cfg := AppConn{AppID: strings.TrimSpace(c.PostForm("app_id")), AppSecret: c.PostForm("app_secret")}
-	cfg.WSURL = resolveAppWSURL(c.PostForm("ws_url"), cfg.AppID)
+	appID := strings.TrimSpace(c.PostForm("app_id"))
+	submittedWS := strings.TrimSpace(c.PostForm("ws_url"))
+	cfg := AppConn{AppID: appID, AppSecret: c.PostForm("app_secret")}
+	cfg.WSURL = resolveAppWSURL(submittedWS, appID)
 	if cfg.AppSecret == "****" || cfg.AppSecret == "" {
-		for _, a := range loadAppConns() {
-			if a.AppID == cfg.AppID {
-				cfg.AppSecret = a.AppSecret
-				break
-			}
+		stored, ok := findAppConn(appID)
+		if !ok || strings.TrimSpace(stored.AppSecret) == "" {
+			jiyingErr(c, "应用尚未保存密钥，请填写完整密钥")
+			return
 		}
+		if !maskedSentinel(submittedWS) && !endpointsEqual(submittedWS, stored.WSURL) {
+			jiyingErr(c, "使用已保存密钥时不能更换应用地址")
+			return
+		}
+		cfg.AppSecret = stored.AppSecret
+		cfg.WSURL = stored.WSURL
+	}
+	if err := validateOutboundURL(cfg.WSURL, true); err != nil {
+		jiyingErr(c, "应用地址不可用: "+err.Error())
+		return
 	}
 	if err := testAppConnection(c.Request.Context(), cfg); err != nil {
 		jiyingErr(c, "应用连接测试失败: "+err.Error())
@@ -208,7 +242,8 @@ func connectTestApp(c *gin.Context) {
 func connectAccount(c *gin.Context) {
 	email := strings.TrimSpace(c.PostForm("email"))
 	secret := c.PostForm("password")
-	base := resolveAccountBaseURL(c.PostForm("base_url"))
+	submittedBase := c.PostForm("base_url")
+	base := resolveAccountBaseURL(submittedBase)
 	if base == "" || email == "" || secret == "" {
 		RecordAudit(consoleUser(c), "connect.account", email, "", "失败: 缺少参数")
 		jiyingErr(c, "缺少服务地址 / 邮箱 / 密码")
@@ -217,7 +252,23 @@ func connectAccount(c *gin.Context) {
 	conn := loadRelayConn()
 	cur := conn.effectiveAccount()
 	if secret == "****" {
+		if strings.TrimSpace(cur.Password) == "" {
+			RecordAudit(consoleUser(c), "connect.account", email, "", "失败: 已保存密码不存在")
+			jiyingErr(c, "账号尚未保存密码，请填写完整密码")
+			return
+		}
+		if !maskedSentinel(submittedBase) && !endpointsEqual(submittedBase, cur.BaseURL) {
+			RecordAudit(consoleUser(c), "connect.account", email, "", "失败: 密码占位时更换地址")
+			jiyingErr(c, "使用已保存密码时不能更换服务地址")
+			return
+		}
+		base = cur.BaseURL
 		secret = cur.Password
+	}
+	if err := validateOutboundURL(base, false); err != nil {
+		RecordAudit(consoleUser(c), "connect.account", email, "", "失败: "+err.Error())
+		jiyingErr(c, "服务地址不可用: "+err.Error())
+		return
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
 	defer cancel()
@@ -242,6 +293,10 @@ func connectTestAccount(c *gin.Context) {
 	}
 	if email := strings.TrimSpace(c.PostForm("email")); email != "" {
 		cfg.Email = email
+	}
+	if err := validateOutboundURL(cfg.BaseURL, false); err != nil {
+		jiyingErr(c, "服务地址不可用: "+err.Error())
+		return
 	}
 	check := accountReadiness(cfg)
 	if check.Status != "configured" {
@@ -286,11 +341,16 @@ func connectRequestCode(c *gin.Context) {
 		jiyingErr(c, "缺少服务地址 / 邮箱")
 		return
 	}
+	if err := validateOutboundURL(base, false); err != nil {
+		jiyingErr(c, "服务地址不可用: "+err.Error())
+		return
+	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
 	defer cancel()
 	expires, retry, err := RequestLoginCode(ctx, base, email)
 	if err != nil {
-		jiyingErr(c, "验证码发送失败: "+err.Error())
+		GetMyLog().Warn("验证码请求失败 %s: %v", base, err)
+		jiyingErr(c, "验证码发送失败，请检查服务地址与邮箱")
 		return
 	}
 	jiyingJSON(c, gin.H{"expires_in_seconds": expires, "retry_after_seconds": retry})
@@ -302,6 +362,10 @@ func connectLoginCode(c *gin.Context) {
 	base := resolveAccountBaseURL(c.PostForm("base_url"))
 	if base == "" || email == "" || code == "" {
 		jiyingErr(c, "缺少服务地址 / 邮箱 / 验证码")
+		return
+	}
+	if err := validateOutboundURL(base, false); err != nil {
+		jiyingErr(c, "服务地址不可用: "+err.Error())
 		return
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)

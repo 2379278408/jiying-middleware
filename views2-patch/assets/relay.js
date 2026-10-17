@@ -2353,7 +2353,7 @@
     var enc = encodeURIComponent(f.name);
     return '<div class="form-check form-switch rl-switch" title="' + (f.enabled ? "点击停用" : "点击启用") + '">'
       + '<input class="form-check-input" type="checkbox" role="switch" aria-label="启用 ' + esc(f.name) + '" ' + (f.enabled ? "checked" : "")
-      + ' onchange="Relay.setFeature(decodeURIComponent(\'' + enc + '\'), this.checked)"></div>';
+      + ' onchange="Relay.setFeature(decodeURIComponent(' + jsArg(enc) + '), this.checked)"></div>';
   }
   function featureRow(f) {
     var on = Boolean(f.enabled);
@@ -2368,9 +2368,9 @@
       + (f.confirm ? " " + metaBadge("需确认", "badge-warn") : "") + "</div>"
       + '<div class="desc mono clip" title="' + esc(f.target) + '">' + esc(f.target || "-") + "</div></div>"
       + '<div class="actions">' + featureSwitch(f)
-      + (f.kind === "script" ? '<button class="btn btn-ghost btn-sm" onclick="Relay.editPluginOf(\'' + encodeURIComponent(f.target || "") + '\')">编辑插件</button>' : "")
-      + '<button class="btn btn-ghost btn-sm" onclick="Relay.runFeature(decodeURIComponent(\'' + enc + '\'))">运行</button>'
-      + '<button class="btn btn-outline-danger btn-sm" onclick="Relay.delFeature(decodeURIComponent(\'' + enc + '\'), \'' + (f.kind || "") + '\')">删除</button></div></div>';
+      + (f.kind === "script" ? '<button class="btn btn-ghost btn-sm" onclick="Relay.editPluginOf(' + jsArg(encodeURIComponent(f.target || "")) + ')">编辑插件</button>' : "")
+      + '<button class="btn btn-ghost btn-sm" onclick="Relay.runFeature(decodeURIComponent(' + jsArg(enc) + '))">运行</button>'
+      + '<button class="btn btn-outline-danger btn-sm" onclick="Relay.delFeature(decodeURIComponent(' + jsArg(enc) + '), ' + jsArg(f.kind || "") + ')">删除</button></div></div>';
   }
   function loadFeatures() {
     api("/jiying/api/features").then(function (r) {

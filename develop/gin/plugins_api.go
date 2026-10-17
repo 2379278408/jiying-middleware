@@ -16,10 +16,9 @@ func initPluginsAPI() {
 	g.Use(AuthRequired())
 
 	g.GET("/menu", getJsMenuReal)
-	g.GET("/content", getJsContentReal)
+	g.GET("/content", requireConsoleRole(core.RoleOps), getJsContentReal)
 	g.POST("/content", requireConsoleRole(core.RoleOps), saveJsContent)
-	g.GET("/toggle", requireConsoleRole(core.RoleOps), toggleJsPlugin)
-	g.GET("/debug", requireConsoleRole(core.RoleOps), debugJsPlugin)
+	g.POST("/toggle", requireConsoleRole(core.RoleOps), toggleJsPlugin)
 	g.POST("/debug", requireConsoleRole(core.RoleOps), debugJsPluginPost)
 }
 

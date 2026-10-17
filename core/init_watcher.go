@@ -19,13 +19,16 @@ func initWatcher() {
 		filepath.Join(utils.GetResHome(), "data"),
 	}
 	for _, dir := range dirs {
-		if _, err := os.ReadDir(dir); err != nil {
-			if !os.IsNotExist(err) {
-				GetMyLog().Error("读取监控目录失败 %s: %v", dir, err)
-			}
-			if mkErr := os.MkdirAll(dir, 0o777); mkErr != nil {
-				GetMyLog().Error("创建监控目录失败 %s: %v", dir, mkErr)
-			}
+		mode := os.FileMode(0o750)
+		if filepath.Base(dir) == "data" {
+			mode = 0o700
+		}
+		if mkErr := os.MkdirAll(dir, mode); mkErr != nil {
+			GetMyLog().Error("创建监控目录失败 %s: %v", dir, mkErr)
+			continue
+		}
+		if chErr := os.Chmod(dir, mode); chErr != nil {
+			GetMyLog().Error("收紧监控目录权限失败 %s: %v", dir, chErr)
 		}
 		GetMyLog().Warn("监控目录就绪 %s", dir)
 	}
