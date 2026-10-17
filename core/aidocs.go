@@ -23,19 +23,19 @@ var aiEndpoints = []apiDoc{
 	{"GET", "/jiying/api/features", "功能列表（名称、类型、目标、权限、启用状态）", "readonly", nil, ""},
 	{"POST", "/jiying/api/feature/toggle", "启用或停用功能", "ops", []string{"name", "enabled"}, `enabled 取 "true"/"false"`},
 	{"POST", "/jiying/api/feature/install", "安装 HTTP 功能（转发到外部地址）", "ops", []string{"name", "url"}, ""},
-	{"POST", "/jiying/api/feature/delete", "删除功能；脚本型功能会同步删除插件文件", "master", []string{"name"}, ""},
+	{"POST", "/jiying/api/feature/delete", "删除功能；脚本型功能会同步删除插件文件", "ops", []string{"name"}, "破坏性操作，执行前确认"},
 	{"POST", "/jiying/api/feature/run", "执行功能并返回输出", "ops", []string{"name", "args"}, "args 为字符串，按功能自行解析"},
 	{"GET", "/jiying/api/scripts", "插件列表与清单（title/description/rules/config_schema）", "readonly", nil, ""},
 	{"POST", "/jiying/api/script/get", "读取插件源码与语言", "ops", []string{"name"}, ""},
 	{"POST", "/jiying/api/script/install", "安装或覆盖插件源码", "ops", []string{"name", "code"}, "name 扩展名 .js/.py 决定运行方式"},
-	{"POST", "/jiying/api/script/delete", "删除插件文件与配置", "master", []string{"name"}, ""},
+	{"POST", "/jiying/api/script/delete", "删除插件文件与配置", "ops", []string{"name"}, "破坏性操作，执行前确认"},
 	{"POST", "/jiying/api/script/run", "直接运行插件", "ops", []string{"name", "args"}, ""},
 	{"POST", "/jiying/api/script/config", "读取插件配置 schema 与当前值", "ops", []string{"name"}, "secret 字段只返回是否已设置"},
 	{"POST", "/jiying/api/script/config/save", "保存插件配置", "ops", []string{"name", "values"}, "values 为 JSON 对象字符串"},
 	{"GET", "/jiying/api/crons", "定时任务列表（含下次运行时间与最近结果）", "readonly", nil, ""},
 	{"POST", "/jiying/api/cron/add", "新建定时任务", "ops", []string{"name", "cron", "command", "chat_id"}, "command 支持功能 JSON 或系统命令"},
 	{"POST", "/jiying/api/cron/toggle", "启用或停用定时任务", "ops", []string{"id", "enabled"}, ""},
-	{"POST", "/jiying/api/cron/delete", "删除定时任务", "master", []string{"id"}, ""},
+	{"POST", "/jiying/api/cron/delete", "删除定时任务", "ops", []string{"id"}, "破坏性操作，执行前确认"},
 	{"POST", "/jiying/api/cron/run", "立即执行一次定时任务", "ops", []string{"id"}, ""},
 	{"GET", "/jiying/api/executions", "执行账本", "readonly", []string{"kind", "name", "status", "limit"}, "kind: cron/feature/task/message"},
 	{"GET", "/jiying/api/tasks", "任务队列", "readonly", []string{"status", "feature", "user_id", "limit"}, ""},
@@ -52,7 +52,7 @@ var aiEndpoints = []apiDoc{
 	{"POST", "/jiying/api/send/markdown", "发送 Markdown", "ops", []string{"conversation_id", "text", "reply_to"}, ""},
 	{"POST", "/jiying/api/send/link", "发送链接卡片", "ops", []string{"conversation_id", "url", "title", "description", "reply_to"}, ""},
 	{"POST", "/jiying/api/send/chart", "发送图表", "ops", []string{"conversation_id", "chart_type", "title", "description", "data", "reply_to"}, "data 为 JSON 字符串"},
-	{"GET", "/jiying/api/logs", "读取运行日志", "master", []string{"tail", "day"}, "tail 最大 2000；day 形如 20261017"},
+	{"GET", "/jiying/api/logs", "读取运行日志", "readonly", []string{"tail", "day"}, "tail 最大 2000；day 形如 20261017"},
 	{"GET", "/jiying/api/connect/status", "接入状态：应用、账号、运行时就绪度", "readonly", nil, ""},
 	{"GET", "/jiying/api/connect/readiness", "接入就绪度检查", "readonly", nil, ""},
 	{"POST", "/jiying/api/connect/app", "配置即应应用（WebSocket 地址等）", "ops", []string{"ws_url", "app_id", "secret"}, "敏感字段用 **** 占位表示不修改"},
@@ -65,7 +65,13 @@ var aiEndpoints = []apiDoc{
 	{"POST", "/jiying/api/connect/request-code", "请求邮箱验证码", "ops", []string{"email"}, ""},
 	{"POST", "/jiying/api/connect/login-code", "使用验证码登录", "ops", []string{"email", "code"}, ""},
 	{"GET", "/jiying/api/connections", "连接池快照（应用与账号）", "readonly", nil, ""},
-	{"GET", "/jiying/api/apps/profile", "刷新应用资料（名称/头像/描述）", "readonly", []string{"app_id"}, "省略 app_id 时取默认应用"},
+	{"POST", "/jiying/api/connections/app", "新增或更新连接池应用", "ops", []string{"app_id", "ws_url", "app_secret"}, "app_secret 传 **** 表示沿用已存密钥"},
+	{"POST", "/jiying/api/connections/app/delete", "从连接池删除应用", "ops", []string{"app_id"}, "破坏性操作，执行前确认"},
+	{"POST", "/jiying/api/connections/app/default", "设置默认应用", "ops", []string{"app_id"}, ""},
+	{"POST", "/jiying/api/connections/account/select", "切换当前账号（必要时自动登录）", "ops", []string{"email"}, ""},
+	{"POST", "/jiying/api/connections/account/delete", "从连接池删除账号", "ops", []string{"email"}, "破坏性操作，执行前确认"},
+	{"POST", "/jiying/api/connections/account/profile", "刷新当前账号资料（昵称/头像）", "readonly", nil, ""},
+	{"GET", "/jiying/api/apps/profile", "刷新应用资料（名称/头像/描述）", "readonly", []string{"app_id"}, "省略 app_id 时取默认应用；会发起上游调用"},
 	{"GET", "/jiying/api/roles", "角色列表", "readonly", nil, ""},
 	{"POST", "/jiying/api/roles", "设置用户角色", "master", []string{"user", "role"}, "role: readonly/ops/master"},
 	{"POST", "/jiying/api/roles/delete", "移除角色覆盖", "master", []string{"user"}, ""},
@@ -73,6 +79,7 @@ var aiEndpoints = []apiDoc{
 	{"POST", "/jiying/api/masters/delete", "移除 owner 用户", "master", []string{"user"}, ""},
 	{"GET", "/jiying/api/audit", "审计日志", "readonly", []string{"limit"}, ""},
 	{"GET", "/jiying/api/market", "插件市场列表", "readonly", nil, ""},
+	{"GET", "/jiying/api/market/export", "导出插件包内容", "ops", []string{"name"}, ""},
 	{"POST", "/jiying/api/market/install", "从市场安装插件", "ops", []string{"name"}, ""},
 	{"POST", "/jiying/api/market/publish", "发布插件到市场", "ops", []string{"name"}, ""},
 	{"POST", "/jiying/api/market/delete", "从市场移除插件", "ops", []string{"name"}, ""},
@@ -81,7 +88,10 @@ var aiEndpoints = []apiDoc{
 	{"POST", "/jiying/api/skill/install", "安装技能", "ops", []string{"name", "code"}, ""},
 	{"POST", "/jiying/api/skill/delete", "删除技能", "ops", []string{"name"}, ""},
 	{"GET", "/jiying/api/agent/tools", "AI 工具能力列表", "ops", nil, ""},
-	{"POST", "/jiying/api/agent/run", "调用内置 AI 代理", "ops", []string{"prompt"}, "需要先在控制台配置模型"},
+	{"GET", "/jiying/api/agent/config", "读取 Agent 模型配置（密钥仅返回是否已设置）", "master", nil, ""},
+	{"POST", "/jiying/api/agent/config", "保存 Agent 模型配置", "master", []string{"enabled", "base_url", "model", "fallback_models", "system", "api_key", "max_turns", "max_history"}, "api_key 传 **** 表示不修改"},
+	{"POST", "/jiying/api/agent/run", "调用内置 AI 代理", "ops", []string{"prompt", "conversation_id", "reset"}, "需要先在控制台配置模型；reset=true 清空上下文"},
+	{"GET", "/jiying/api/icon", "生成并缓存图标（需 msg 关键词）", "readonly", []string{"msg", "n"}, "n 非空时返回 PNG"},
 	{"GET", "/jiying/api/keys", "列出 API Key（仅浏览器会话）", "master", nil, "密钥不能管理自身"},
 	{"POST", "/jiying/api/keys", "创建 API Key（仅浏览器会话）", "master", []string{"label", "scope", "expires_days"}, "创建后明文只返回一次"},
 	{"POST", "/jiying/api/keys/delete", "撤销 API Key（仅浏览器会话）", "master", []string{"id"}, ""},
@@ -175,14 +185,23 @@ func aiManifest(c *gin.Context) {
 	})
 }
 
+var aiSessionOnly = map[string]bool{
+	"/jiying/api/keys":        true,
+	"/jiying/api/keys/delete": true,
+}
+
 func buildOpenAPI(base string) gin.H {
 	paths := gin.H{}
 	for _, ep := range aiEndpoints {
 		path := ep.Path
+		security := []gin.H{{"bearerAuth": []string{}}}
+		if aiSessionOnly[path] {
+			security = []gin.H{{"cookieAuth": []string{}}}
+		}
 		op := gin.H{
 			"summary":  ep.Summary,
 			"tags":     []string{strings.Split(strings.TrimPrefix(path, "/jiying/api/"), "/")[0]},
-			"security": []gin.H{{"bearerAuth": []string{}}},
+			"security": security,
 			"responses": gin.H{
 				"200": gin.H{"description": "统一响应 {code:200,data}"},
 				"401": gin.H{"description": "未认证"},
@@ -193,6 +212,9 @@ func buildOpenAPI(base string) gin.H {
 			op["description"] = ep.Notes + "。所需角色：" + ep.Scope
 		} else {
 			op["description"] = "所需角色：" + ep.Scope
+		}
+		if aiSessionOnly[path] {
+			op["description"] = op["description"].(string) + "。仅限浏览器会话，不支持 API Key。"
 		}
 		if ep.Method == "GET" {
 			if len(ep.Fields) > 0 {
@@ -227,6 +249,7 @@ func buildOpenAPI(base string) gin.H {
 		"components": gin.H{
 			"securitySchemes": gin.H{
 				"bearerAuth": gin.H{"type": "http", "scheme": "bearer", "bearerFormat": "jy_xxx"},
+				"cookieAuth": gin.H{"type": "apiKey", "in": "cookie", "name": "jiying_session"},
 			},
 		},
 		"paths": paths,
@@ -241,8 +264,8 @@ func buildAIGuide(base string) string {
 	b.WriteString(`一、认证
 在控制台「AI 接入」页创建 API Key，然后每个请求带上：
   Authorization: Bearer jy_xxxxxxxx
-密钥权限分为 readonly / ops / master，分别对应只读、日常操作、破坏性操作。
-密钥只在创建时显示一次；管理密钥、修改接入配置等敏感操作仍要求浏览器登录。
+密钥权限分为 readonly / ops / master，分别对应只读、日常操作与角色管理。
+密钥只在创建时显示一次；管理密钥本身仍要求浏览器登录。
 
 二、响应约定
 - 成功：{"code":200,"data":...}

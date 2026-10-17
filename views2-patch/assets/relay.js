@@ -84,6 +84,7 @@
     "创建密钥": "Create a key",
     "为不同用途分别建钥匙，权限最小化。": "Issue separate keys per use case with least privilege.",
     "复制说明": "Copy brief",
+    "下载说明": "Download brief",
     "说明包含地址、认证与常用流程，直接粘贴给 AI。": "The brief covers base URL, auth and common flows. Paste it into your AI.",
     "直接调用": "Call the API",
     "密钥放请求头，先读清单再执行操作。": "Send the key in the Authorization header. Read the manifest before acting.",
@@ -2622,16 +2623,24 @@
     spec = String(spec || "").trim();
     var known = {
       "*/1 * * * * *": "每秒", "* * * * * *": "每秒",
-      "0 * * * * *": "每分钟", "*/5 * * * * *": "每 5 分钟", "*/10 * * * * *": "每 10 分钟",
-      "*/15 * * * * *": "每 15 分钟", "*/30 * * * * *": "每 30 分钟",
+      "0 * * * * *": "每分钟", "*/5 * * * * *": "每 5 秒", "*/10 * * * * *": "每 10 秒",
+      "*/15 * * * * *": "每 15 秒", "*/30 * * * * *": "每 30 秒",
+      "0 */5 * * * *": "每 5 分钟", "0 */10 * * * *": "每 10 分钟",
+      "0 */15 * * * *": "每 15 分钟", "0 */30 * * * *": "每 30 分钟",
       "0 0 * * * *": "每小时整点", "0 0 9 * * *": "每天 09:00", "0 0 18 * * *": "每天 18:00",
       "0 0 9 * * 1-5": "工作日 09:00", "0 0 9 * * 1": "每周一 09:00",
       "@hourly": "每小时整点", "@daily": "每天 00:00", "@weekly": "每周一 00:00"
     };
     if (known[spec]) return known[spec];
     var p = spec.split(/\s+/);
-    if (p.length !== 6) return spec;
-    var sec = p[0], min = p[1], hour = p[2], dom = p[3], mon = p[4], dow = p[5];
+    var sec, min, hour, dom, mon, dow;
+    if (p.length === 5) {
+      sec = "0"; min = p[0]; hour = p[1]; dom = p[2]; mon = p[3]; dow = p[4];
+    } else if (p.length === 6) {
+      sec = p[0]; min = p[1]; hour = p[2]; dom = p[3]; mon = p[4]; dow = p[5];
+    } else {
+      return spec;
+    }
     if (dom !== "*" || mon !== "*") return spec;
     if (sec === "0" && /^\*\/\d+$/.test(min) && hour === "*" && dow === "*") return "每 " + min.slice(2) + " 分钟";
     if (sec === "0" && min === "0" && /^\*\/\d+$/.test(hour) && dow === "*") return "每 " + hour.slice(2) + " 小时";
@@ -2645,8 +2654,8 @@
     return spec;
   }
   var CRON_PRESETS = [
-    ["*/5 * * * * *", "每 5 分钟"],
-    ["*/30 * * * * *", "每 30 分钟"],
+    ["0 */5 * * * *", "每 5 分钟"],
+    ["0 */30 * * * *", "每 30 分钟"],
     ["0 0 * * * *", "每小时整点"],
     ["0 0 9 * * *", "每天 09:00"],
     ["0 0 18 * * *", "每天 18:00"],
@@ -2682,7 +2691,6 @@
         var err = c.last_error ? '<div class="muted clamp1" style="font-size:11px;color:var(--err)" title="' + esc(c.last_error) + '">' + esc(c.last_error) + "</div>" : "";
         var fail = Number(c.fail_count || 0);
         var count = Number(c.run_count || 0);
-        var owner = c.owner_role === "readonly" ? "" : "";
         return '<tr><td class="nowrap"><div>' + esc(c.name) + '</div><div class="muted mono" style="font-size:11px" title="' + esc(cronCommandLabel(c.command)) + '">' + esc(cronCommandLabel(c.command)) + "</div></td>"
           + '<td class="nowrap"><code>' + esc(c.cron) + '</code><div class="muted" style="font-size:11px">' + esc(cronHuman(c.cron)) + "</div></td>"
           + '<td class="nowrap mono">' + esc(c.next_run_at || "-") + "</td>"
@@ -3651,7 +3659,7 @@
       + '<select class="select" id="keyDays" aria-label="有效期" title="有效期" style="max-width:120px"><option value="30">30 天</option><option value="7">7 天</option><option value="90">90 天</option><option value="0">永久</option></select>'
       + '<button class="btn btn-primary" id="newKey">创建密钥</button></div>'
       + '<div id="keyList" class="mt-16">' + loadingState() + "</div></div></div>"
-      + '<div class="panel mt-16"><div class="panel-head"><h3>给 AI 的说明书</h3><div class="spacer"></div><button class="btn btn-ghost btn-sm" id="copyPrompt">复制说明</button><button class="btn btn-ghost btn-sm" id="downloadGuide">下载 ai.txt</button></div><div class="panel-body"><pre class="ai-prompt mono" id="aiPrompt"></pre></div></div>';
+      + '<div class="panel mt-16"><div class="panel-head"><h3>给 AI 的说明书</h3><div class="spacer"></div><button class="btn btn-ghost btn-sm" id="copyPrompt">复制说明</button><button class="btn btn-ghost btn-sm" id="downloadGuide">下载说明</button></div><div class="panel-body"><pre class="ai-prompt mono" id="aiPrompt"></pre></div></div>';
     $("#aiPrompt").textContent = aiPromptText("");
     if (state.role && !master) $("#keyCreateRow").hidden = true;
     $("#newKey").addEventListener("click", createAPIKey);

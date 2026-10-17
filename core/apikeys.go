@@ -90,14 +90,6 @@ func hashAPIKey(token string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func randomHex(n int) string {
-	buf := make([]byte, n)
-	if _, err := rand.Read(buf); err != nil {
-		return fmt.Sprintf("%d", time.Now().UnixNano())
-	}
-	return hex.EncodeToString(buf)
-}
-
 // CreateAPIKey 生成新密钥并返回一次明文。expiresDays <= 0 表示长期有效。
 func CreateAPIKey(label, scope string, expiresDays int) (string, APIKey, error) {
 	label = strings.TrimSpace(label)
@@ -115,7 +107,11 @@ func CreateAPIKey(label, scope string, expiresDays int) (string, APIKey, error) 
 		return "", APIKey{}, fmt.Errorf("生成密钥失败")
 	}
 	token := apiKeyPrefix + base64.RawURLEncoding.EncodeToString(buf)
-	id := randomHex(8)
+	idBuf := make([]byte, 8)
+	if _, err := rand.Read(idBuf); err != nil {
+		return "", APIKey{}, fmt.Errorf("生成密钥失败")
+	}
+	id := hex.EncodeToString(idBuf)
 	now := time.Now()
 	item := savedAPIKey{
 		APIKey: APIKey{
@@ -297,11 +293,18 @@ func registerAPIKeysAPI() {
 	})
 	g.POST("/keys/delete", requireRole(RoleMaster), requireConsoleSession, func(c *gin.Context) {
 		id := strings.TrimSpace(c.PostForm("id"))
+		target := id
+		for _, item := range ListAPIKeys() {
+			if item.ID == id {
+				target = item.Label + "(" + item.Prefix + ")"
+				break
+			}
+		}
 		if err := DeleteAPIKey(id); err != nil {
 			jiyingErr(c, err.Error())
 			return
 		}
-		RecordAudit(consoleUser(c), "key.delete", id, "", "成功")
+		RecordAudit(consoleUser(c), "key.delete", target, "", "成功")
 		jiyingJSON(c, "ok")
 	})
 	g.GET("/ai/manifest", aiManifest)
