@@ -3,10 +3,12 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -66,6 +68,102 @@ func jiyingCountRateLimited() { jiyingRateLimitedTotal.Add(1) }
 
 // JiyingRateLimitedTotal 返回累计被限流次数，供指标与排障读取。
 func JiyingRateLimitedTotal() int64 { return jiyingRateLimitedTotal.Load() }
+
+// jiyingCallStat 按 RPC 方法聚合调用结果，用于 /metrics 输出与运行观测。
+type jiyingCallStat struct {
+	OK          int64
+	Failed      int64
+	TotalMicros int64
+	LastCode    string
+	LastAt      time.Time
+	Codes       map[string]int64
+}
+
+var jiyingCallStats = struct {
+	sync.Mutex
+	m map[string]*jiyingCallStat
+}{m: map[string]*jiyingCallStat{}}
+
+// JiyingCallSnapshot 是某个 RPC 方法的只读统计快照。
+type JiyingCallSnapshot struct {
+	Method   string
+	OK       int64
+	Failed   int64
+	AvgMs    float64
+	LastCode string
+	LastAt   time.Time
+	Codes    map[string]int64
+}
+
+// jiyingCallErrorCode 把调用错误归一成稳定标签，避免指标因错误文本变化而发散。
+func jiyingCallErrorCode(err error) string {
+	if err == nil {
+		return ""
+	}
+	var ce *jiyingCallError
+	if errors.As(err, &ce) && ce.Code != "" {
+		return ce.Code
+	}
+	if errors.Is(err, errJiyingNotConnected) {
+		return "not_connected"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "canceled"
+	}
+	return "transport_error"
+}
+
+// jiyingObserveCall 记录一次 RPC 调用的耗时与结果。
+func jiyingObserveCall(method string, d time.Duration, err error) {
+	if method == "" {
+		return
+	}
+	jiyingCallStats.Lock()
+	defer jiyingCallStats.Unlock()
+	st := jiyingCallStats.m[method]
+	if st == nil {
+		st = &jiyingCallStat{Codes: map[string]int64{}}
+		jiyingCallStats.m[method] = st
+	}
+	st.TotalMicros += d.Microseconds()
+	st.LastAt = time.Now()
+	if err == nil {
+		st.OK++
+		return
+	}
+	code := jiyingCallErrorCode(err)
+	st.Failed++
+	st.LastCode = code
+	st.Codes[code]++
+}
+
+// JiyingCallStats 返回按方法名排序的调用统计快照。
+func JiyingCallStats() []JiyingCallSnapshot {
+	jiyingCallStats.Lock()
+	defer jiyingCallStats.Unlock()
+	out := make([]JiyingCallSnapshot, 0, len(jiyingCallStats.m))
+	for method, st := range jiyingCallStats.m {
+		total := st.OK + st.Failed
+		avg := float64(0)
+		if total > 0 {
+			avg = float64(st.TotalMicros) / float64(total) / 1000
+		}
+		codes := make(map[string]int64, len(st.Codes))
+		for code, n := range st.Codes {
+			codes[code] = n
+		}
+		out = append(out, JiyingCallSnapshot{
+			Method: method, OK: st.OK, Failed: st.Failed,
+			AvgMs: avg, LastCode: st.LastCode, LastAt: st.LastAt,
+			Codes: codes,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Method < out[j].Method })
+	return out
+}
 
 func jiyingJSON(c *gin.Context, data any) {
 	c.JSON(http.StatusOK, gin.H{

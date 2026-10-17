@@ -150,7 +150,39 @@ func buildAgentTools(userID string) ([]map[string]any, map[string]string, []agen
 			},
 		})
 	}
+	defs = append(defs, askChoiceToolDef())
 	return defs, index, names
+}
+
+// askChoiceTool 是内置工具名，用于向用户发送单选集卡片并挂起后续回答。
+const askChoiceTool = "ask_choice"
+
+func askChoiceToolDef() map[string]any {
+	return map[string]any{
+		"type": "function",
+		"function": map[string]any{
+			"name":        askChoiceTool,
+			"description": "向当前会话发送单选集卡片，请用户从 2~20 个选项中选一个。调用后直接结束本轮回复，用户的选择会作为新消息继续对话。",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"question": map[string]any{"type": "string", "description": "卡片正文，1~5000 字符"},
+					"options": map[string]any{
+						"type": "array",
+						"items": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"id":    map[string]any{"type": "string", "description": "选项 ID，1~64 位字母/数字/-/_"},
+								"label": map[string]any{"type": "string", "description": "展示文本，1~200 字符且不含换行"},
+							},
+							"required": []string{"id", "label"},
+						},
+					},
+				},
+				"required": []string{"question", "options"},
+			},
+		},
+	}
 }
 
 type chatMessage struct {
@@ -397,12 +429,100 @@ func RunAgent(ctx context.Context, convID, userID, prompt string, seq int64) (st
 		}
 		msgs = append(msgs, msg)
 		for _, tc := range msg.ToolCalls {
+			if tc.Function.Name == askChoiceTool {
+				out := runAgentAskChoice(ctx, convID, userID, tc.Function.Arguments)
+				msgs = append(msgs, chatMessage{Role: "tool", ToolCallID: tc.ID, Content: out})
+				continue
+			}
 			feature := index[tc.Function.Name]
 			out := runAgentTool(ctx, feature, tc.Function.Arguments, userID, convID)
 			msgs = append(msgs, chatMessage{Role: "tool", ToolCallID: tc.ID, Content: out})
 		}
 	}
 	return "", fmt.Errorf("Agent 超过最大轮次")
+}
+
+// agentChoiceWait 记录一次 ask_choice 挂起，用户选择后据此恢复 Agent 对话。
+type agentChoiceWait struct {
+	ConversationID string
+	UserID         string
+	Labels         map[string]string
+}
+
+var agentChoiceWaits sync.Map
+
+// runAgentAskChoice 发送单选集卡片并挂起，用户选择后由 resumeAgentChoice 恢复。
+func runAgentAskChoice(ctx context.Context, convID, userID, rawArgs string) string {
+	var req struct {
+		Question string `json:"question"`
+		Options  []struct {
+			ID    string `json:"id"`
+			Label string `json:"label"`
+		} `json:"options"`
+	}
+	if err := json.Unmarshal([]byte(rawArgs), &req); err != nil {
+		return "参数解析失败：" + err.Error()
+	}
+	options := make([]map[string]string, 0, len(req.Options))
+	labels := make(map[string]string, len(req.Options))
+	for _, opt := range req.Options {
+		options = append(options, map[string]string{"id": opt.ID, "label": opt.Label})
+		labels[opt.ID] = opt.Label
+	}
+	if err := validateChoice(req.Question, options); err != nil {
+		return "选择卡片参数不合法：" + err.Error()
+	}
+	client := clientForConv(convID)
+	if client == nil {
+		return "即应未连接，无法发送选择卡片"
+	}
+	id, err := client.SendChoice(ctx, convID, req.Question, options)
+	if err != nil {
+		return "发送选择卡片失败：" + err.Error()
+	}
+	agentChoiceWaits.Store(id, agentChoiceWait{ConversationID: convID, UserID: userID, Labels: labels})
+	return "已发送选择卡片 message_id=" + id + "，请等待用户选择，本轮不要再重复提问。"
+}
+
+// resumeAgentChoice 在用户选择后异步恢复 Agent，并把最终答复发回会话。
+func resumeAgentChoice(choiceMessageID, conversationID string, optionIDs []string) bool {
+	v, ok := agentChoiceWaits.LoadAndDelete(choiceMessageID)
+	if !ok {
+		return false
+	}
+	w := v.(agentChoiceWait)
+	if w.ConversationID != "" {
+		conversationID = w.ConversationID
+	}
+	chosen := make([]string, 0, len(optionIDs))
+	for _, id := range optionIDs {
+		if label, ok := w.Labels[id]; ok && label != "" {
+			chosen = append(chosen, label)
+		} else {
+			chosen = append(chosen, id)
+		}
+	}
+	prompt := "用户已完成选择"
+	if len(chosen) > 0 {
+		prompt = "用户选择了：" + strings.Join(chosen, "、")
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		out, err := RunAgent(ctx, conversationID, w.UserID, prompt, 0)
+		if err != nil {
+			GetMyLog().Warn("Agent 处理选择结果失败 conv=%s: %v", conversationID, err)
+			return
+		}
+		client := clientForConv(conversationID)
+		if client == nil {
+			return
+		}
+		if err := client.SendText(ctx, conversationID, "", out); err != nil {
+			GetMyLog().Warn("Agent 回复选择结果失败 conv=%s: %v", conversationID, err)
+		}
+	}()
+	return true
 }
 
 // buildArgsForTool 把模型的工具调用参数转换成功能输入字符串。

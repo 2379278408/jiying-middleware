@@ -3,6 +3,7 @@ package core
 import (
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -92,6 +93,32 @@ func metrics(c *gin.Context) {
 	fmt.Fprintf(&b, "# HELP jiying_app_ratelimited_total 应用通道被服务端限流(rate_limited)的调用次数\n")
 	fmt.Fprintf(&b, "# TYPE jiying_app_ratelimited_total counter\n")
 	fmt.Fprintf(&b, "jiying_app_ratelimited_total %d\n", JiyingRateLimitedTotal())
+	calls := JiyingCallStats()
+	if len(calls) > 0 {
+		fmt.Fprintf(&b, "# HELP jiying_app_calls_total 应用通道 RPC 调用次数\n")
+		fmt.Fprintf(&b, "# TYPE jiying_app_calls_total counter\n")
+		for _, st := range calls {
+			fmt.Fprintf(&b, "jiying_app_calls_total{method=%q,outcome=\"ok\"} %d\n", st.Method, st.OK)
+			fmt.Fprintf(&b, "jiying_app_calls_total{method=%q,outcome=\"error\"} %d\n", st.Method, st.Failed)
+		}
+		fmt.Fprintf(&b, "# HELP jiying_app_call_errors_total 应用通道 RPC 失败次数，按错误码拆分\n")
+		fmt.Fprintf(&b, "# TYPE jiying_app_call_errors_total counter\n")
+		for _, st := range calls {
+			codes := make([]string, 0, len(st.Codes))
+			for code := range st.Codes {
+				codes = append(codes, code)
+			}
+			sort.Strings(codes)
+			for _, code := range codes {
+				fmt.Fprintf(&b, "jiying_app_call_errors_total{method=%q,code=%q} %d\n", st.Method, code, st.Codes[code])
+			}
+		}
+		fmt.Fprintf(&b, "# HELP jiying_app_call_duration_milliseconds_avg 应用通道 RPC 平均耗时（毫秒）\n")
+		fmt.Fprintf(&b, "# TYPE jiying_app_call_duration_milliseconds_avg gauge\n")
+		for _, st := range calls {
+			fmt.Fprintf(&b, "jiying_app_call_duration_milliseconds_avg{method=%q} %.3f\n", st.Method, st.AvgMs)
+		}
+	}
 	c.Data(http.StatusOK, "text/plain; version=0.0.4; charset=utf-8", []byte(b.String()))
 }
 

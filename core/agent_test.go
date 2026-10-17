@@ -33,8 +33,8 @@ func TestBuildAgentToolsMapsEnabledFeatures(t *testing.T) {
 	setupAgentBucket(t, "agent-tools")
 	defs, index, _ := buildAgentTools("system")
 	items := ListFeatureItems()
-	if len(defs) != len(items) {
-		t.Fatalf("want %d tool defs, got %d", len(items), len(defs))
+	if len(defs) != len(items)+1 {
+		t.Fatalf("want %d tool defs (features + ask_choice), got %d", len(items)+1, len(defs))
 	}
 	if len(index) == 0 {
 		t.Fatal("index must map tool names back to features")
@@ -212,5 +212,25 @@ func TestAgentToolCallKeepsContentField(t *testing.T) {
 	}
 	if strings.Contains(string(user), "tool_calls") || strings.Contains(string(user), "tool_call_id") {
 		t.Fatalf("普通消息不应携带工具字段，got %s", user)
+	}
+}
+
+func TestBuildAgentToolsIncludesAskChoice(t *testing.T) {
+	defs, _, _ := buildAgentTools("nobody")
+	found := false
+	for _, d := range defs {
+		fn, _ := d["function"].(map[string]any)
+		if fn != nil && fn["name"] == askChoiceTool {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("ask_choice tool missing from agent tool definitions")
+	}
+}
+
+func TestResumeAgentChoiceUnknownReturnsFalse(t *testing.T) {
+	if resumeAgentChoice("missing", "conv", []string{"yes"}) {
+		t.Fatal("unknown choice must not resume")
 	}
 }

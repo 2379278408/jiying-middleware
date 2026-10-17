@@ -389,6 +389,9 @@ func dispatchMiddleware(sender Sender, msg string) (handled bool, ok bool) {
 }
 
 func resumeChoice(ctx context.Context, choiceMessageID, userID, conversationID string, optionIDs []string) error {
+	if resumeAgentChoice(choiceMessageID, conversationID, optionIDs) {
+		return nil
+	}
 	_ = ctx
 	_ = userID
 	_ = conversationID

@@ -33,7 +33,7 @@
 
 `choice.response_created` 用来放行挂起的任务。`topic.closed` 之后不再往该话题发消息。`conversation.status` 是瞬时状态，不确认、不补发。
 
-可靠事件按 cursor 串行处理。业务和后续调用都成功后才 `events.ack`。失败不确认，重连后由服务端重放。同一应用可能多连接收到同一事件，用应用 ID 加 cursor 去重，结果落到本地存储。断线后指数退避重连。
+可靠事件按 cursor 串行处理。业务和后续调用都成功后才 `events.ack`。失败不确认，重连后由服务端重放。同一应用可能多连接收到同一事件，用应用 ID 加 cursor 去重，结果落到本地存储。断线后指数退避重连，并在退避窗口内加入抖动，避免多实例同时重连形成尖峰。
 
 ## 任务
 
@@ -157,7 +157,8 @@
 
 - 接收回执：命中处理（命令匹配或 Agent 唤醒）后立即异步回发 `message.reaction.set`，文本为 `🔥`、`reacted=true`。回执在业务执行前发出，不阻塞队列、不等待模型，失败只记 Debug 日志，不影响 `events.ack`。常量 `receiptReaction` 定义于 `core/jiying_app.go`。
 - 限流退避：`message.send` 的滚动 60 秒限额（单应用 300 条 / 30 个不同用户）超限时服务端返回 `rate_limited`。`Call` 解析错误体中的 `retry_after_seconds`，按该值退避（上限 10 秒）后复用原请求 ID 重试一次；限流次数计入指标 `jiying_app_ratelimited_total`。
-- 错误分类：`internal_error` 与传输层失败复用原请求 ID 重试；`rate_limited` 按退避重试；`unsupported_version`、`request_id_conflict`、`forbidden`、`not_found`、`conflict` 属确定性失败，不重试并对前两者打告警日志。
+- 错误分类：`internal_error` 与传输层失败复用原请求 ID 重试；`rate_limited` 按退避重试；`unsupported_version`、`request_id_conflict`、`response_too_large`、`request_too_large`、`invalid_conversation`、`not_found`、`invalid_request`、`invalid_target`、`permission_denied` 属确定性失败，不重试并写一条带排查提示的告警日志（提示表 `jiyingFailureHints`）。
+- 调用观测：`Call` 按方法聚合成功/失败次数、平均耗时与错误码，输出到 `/metrics` 的 `jiying_app_calls_total{method,outcome}`、`jiying_app_call_errors_total{method,code}` 与 `jiying_app_call_duration_milliseconds_avg{method}`；快照经 `JiyingCallStats()` 读取，方法名与错误码都做了归一，避免高基数标签。
 - 话题上下文：`message.created` 解析 `conversation.parent`、`conversation.source_message` 与 `conversation.created_by_app_id`，落在 `JiyingSender` 的 `ParentConvID` / `ParentConvType` / `ParentConvName` / `SourceMessageID` / `CreatedByAppID`；`IsTopic()` 判断话题会话，父会话同时登记进会话归属映射以保证出站路由。
 - 握手诊断：应用通道握手失败按 HTTP 状态给出可读原因（400 应用 ID 格式错误、401 密钥错误、403 应用已停用），最近一次失败原因经 `AppChannelLastError()` 在 `/jiying/api/connect/readiness` 的应用项中作为 `app_connect_failed` 问题展示，便于就地排障。
 - 出站保护：单条文本经 `clampOutboundText` 截断到 256 KiB 以内（按 UTF-8 边界），避免 Envelope 触顶 1 MiB；`SendChoice` 在发送前校验正文长度（≤5000）、选项数量（2~20）、选项 ID（1~64，限 `[A-Za-z0-9_-]` 且不重复）与展示文本（1~200、无换行），非法参数直接返回错误而不发请求。
@@ -172,6 +173,7 @@
 - 话题类：`TopicCreate` / `TopicGet` / `TopicClose`（`conversation.topic.create|get|close`），`JiyingTopic` 暴露话题会话 ID、父会话、来源消息与 `last_message_seq`。
 - 群聊类：`GroupCreate` / `GroupGet` / `GroupUpdate` / `GroupDissolve` 与 `GroupMembers` / `GroupAddMembers` / `GroupRemoveMember` / `GroupSetRole`，并在发送前校验群名称（1~120 字符）、公告长度（≤200）、名称与公告只能改其一、`member_type`（user/app）与 `role`（admin/member）。
 - 脚本能力：`registerSendApis` 末尾调用 `registerAppApis`，向 goja 注入完整应用通道能力。查询与回执：`appUser` / `appSelf` / `appConversations` / `appHistory` / `appReaction`；话题与状态：`appTopic`（查询）/ `appTopicCreate` / `appTopicClose` / `appStatus`；群管理：`groupCreate` / `groupGet` / `groupRename` / `groupAnnounce` / `groupDissolve` / `groupMembers` / `groupAddMembers` / `groupRemoveMember` / `groupSetRole`。查询类失败返回 `null`、写操作返回布尔，便于脚本判空。数组参数（成员/应用 ID）统一经 `gojaArgStrings` 清洗，空数组视为未提供。
+- 选择与媒体便捷函数：脚本 `sendChoice(content, [{id, label}, ...])` 发送单选集卡片并返回消息 ID（失败返回空串），参数先经 `validateChoice` 校验；`lastMediaUrl()` 直接返回当前会话最近一条入站媒体的临时访问地址，等价于 `readFileUrl(lastMediaFileId())` 且省去脚本侧拼接。
 - 覆盖范围：上述脚本接口覆盖指南对普通应用开放的全部 20 个方法，不含 `runas`、代用户发送与 `entity_card`。
 - 单测覆盖：`core/jiying_rpc_test.go` 覆盖目标校验、用户/会话发送、查询解析、话题解析、群参数校验、脚本 API 行为（含群/话题/状态注入）与数组参数清洗。
 
@@ -181,7 +183,8 @@
 - 上下文来源：`RunAgent` 新增 `seq` 参数，经 `agentContext` 优先通过 `conversation.messages.list`（`before_or_equal_seq=seq`）拉取服务端可见历史；`seq` 缺失、未连接或读取失败时回退本地短历史（`getAgentHistory`），读取失败仅记 Debug，不阻断回复。
 - 角色映射：`messagesToChatHistory` 把发送方 `type=app`（或 ID 等于本应用）映射为 assistant，其余为 user；`seq` 不小于锚点的消息（即当前 prompt）从历史中剔除以免重复；消息体经 `plainText` 取文本，缺失时回退 `summary`。
 - 调用点：`handle_msg.go` 传入 `sender.Seq`；即应命令 `问` 经 `senderSeq` 传入；控制台 Agent 无锚点传入 0。
-- 单测覆盖：`TestMessageCreatedEnrichesSender` 断言 seq 捕获；`TestMessagesToChatHistory` / `TestJiyingMessagePlainTextFallsBackToSummary` 覆盖角色映射、剔除当前消息与文本回退。
+- 选择卡片：内置工具 `ask_choice(question, options)` 恒随功能工具一起下发。模型调用后发送单选集卡片并返回消息 ID，挂起项记录会话、用户与选项标签；`choice.response_created` 到达时由 `resumeAgentChoice` 异步恢复 Agent，把所选标签作为新提示继续对话并回发最终答复。未命中挂起项时仍走原有任务确认逻辑。
+- 单测覆盖：`TestMessageCreatedEnrichesSender` 断言 seq 捕获；`TestMessagesToChatHistory` / `TestJiyingMessagePlainTextFallsBackToSummary` 覆盖角色映射、剔除当前消息与文本回退；`TestBuildAgentToolsIncludesAskChoice` 断言内置工具始终可用。
 
 ### 媒体消息 URL 化（`core/media.go`）
 

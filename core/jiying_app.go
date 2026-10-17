@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"regexp"
@@ -152,8 +153,10 @@ func (c *JiyingClient) nextID() string {
 	return fmt.Sprintf("req-%d-%d", time.Now().UnixNano(), c.seq)
 }
 
-func (c *JiyingClient) Call(ctx context.Context, method string, payload any) (json.RawMessage, error) {
-	raw, err := json.Marshal(payload)
+func (c *JiyingClient) Call(ctx context.Context, method string, payload any) (raw json.RawMessage, err error) {
+	started := time.Now()
+	defer func() { jiyingObserveCall(method, time.Since(started), err) }()
+	raw, err = json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
@@ -243,7 +246,7 @@ func rateLimitWait(seconds int) time.Duration {
 
 // callRetryDelay 判断错误是否适合复用原请求 ID 重试，并给出建议等待时长。
 // 传输层失败与 Server internal_error 可重试；rate_limited 按 retry_after_seconds 退避；
-// unsupported_version / request_id_conflict 属确定性失败，不重试。
+// 其余确定性失败（版本、请求 ID 冲突、体积/目标/会话不合法等）不重试。
 func callRetryDelay(err error) (time.Duration, bool) {
 	if err == nil {
 		return 0, false
@@ -266,11 +269,27 @@ func callRetryDelay(err error) (time.Duration, bool) {
 	return jiyingRetryWait, true
 }
 
+// jiyingFailureHints 为确定性失败给出排查方向；命中后不重试，只记录一次告警。
+var jiyingFailureHints = map[string]string{
+	"unsupported_version":  "协议版本不受服务端支持，需升级中间件",
+	"request_id_conflict":  "请求 ID 与既有请求冲突，检查是否复用了固定 ID",
+	"response_too_large":   "响应体超过 1 MiB，改用分页、缩短查询范围或减少返回字段",
+	"request_too_large":    "请求体或媒体超过服务端限额，压缩或拆分后重发",
+	"invalid_conversation": "会话不存在或类型不支持，仅可向应用参与的一对一会话发送",
+	"not_found":            "目标资源不存在，确认会话、消息或文件 ID 仍然有效",
+	"invalid_request":      "请求参数不符合协议要求，检查字段名、类型与长度限制",
+	"invalid_target":       "消息目标不合法，确认 target.type 与 conversation_id",
+	"permission_denied":    "应用无权执行该操作，检查应用授权与可见范围",
+}
+
 // logCallFailure 对需要人工关注的确定性失败打一条告警，便于从运行日志定位。
 func logCallFailure(method string, err error) {
 	var ce *jiyingCallError
-	if errors.As(err, &ce) && (ce.Code == "unsupported_version" || ce.Code == "request_id_conflict") {
-		GetMyLog().Warn("即应调用 %s 失败 code=%s: %s", method, ce.Code, ce.Message)
+	if !errors.As(err, &ce) {
+		return
+	}
+	if hint, ok := jiyingFailureHints[ce.Code]; ok {
+		GetMyLog().Warn("即应调用 %s 失败 code=%s: %s（%s）", method, ce.Code, ce.Message, hint)
 	}
 }
 
@@ -832,7 +851,7 @@ func (c *JiyingClient) Run(ctx context.Context) error {
 		if err != nil {
 			c.setLastError(err.Error())
 			GetMyLog().Warn("即应连接失败: %v", err)
-			if !sleepCtx(ctx, backoff) {
+			if !sleepCtx(ctx, reconnectBackoff(backoff)) {
 				return ctx.Err()
 			}
 			if backoff < 30*time.Second {
@@ -857,6 +876,12 @@ func (c *JiyingClient) Run(ctx context.Context) error {
 			return ctx.Err()
 		}
 		GetMyLog().Warn("即应连接断开: %v", err)
+		if !sleepCtx(ctx, reconnectBackoff(backoff)) {
+			return ctx.Err()
+		}
+		if backoff < 30*time.Second {
+			backoff *= 2
+		}
 	}
 }
 
@@ -886,6 +911,18 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 	case <-t.C:
 		return true
 	}
+}
+
+// reconnectBackoff 在指数退避基础上加入 50%~100% 抖动，避免多实例同时重连形成尖峰。
+func reconnectBackoff(base time.Duration) time.Duration {
+	if base <= 0 {
+		return 0
+	}
+	half := base / 2
+	if half <= 0 {
+		return base
+	}
+	return half + time.Duration(rand.Int64N(int64(half)+1))
 }
 
 type JiyingSender struct {

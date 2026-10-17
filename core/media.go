@@ -204,6 +204,31 @@ func gojaArgStrings(call goja.FunctionCall, i int) []string {
 	return nil
 }
 
+// choiceOptionsFromJS 把脚本传入的选项数组转成协议要求的 [{id,label}]。
+func choiceOptionsFromJS(v any) []map[string]string {
+	arr, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]map[string]string, 0, len(arr))
+	for _, item := range arr {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		id := strings.TrimSpace(fmt.Sprint(m["id"]))
+		label := strings.TrimSpace(fmt.Sprint(m["label"]))
+		if id == "" || id == "<nil>" {
+			continue
+		}
+		if label == "" || label == "<nil>" {
+			label = id
+		}
+		out = append(out, map[string]string{"id": id, "label": label})
+	}
+	return out
+}
+
 // registerSendApis 向脚本运行时注入会话级发送与媒体能力；无会话上下文时发送返回 false。
 func registerSendApis(rt *goja.Runtime, convID, replyTo string) {
 	send := func(message map[string]any) bool {
@@ -268,6 +293,26 @@ func registerSendApis(rt *goja.Runtime, convID, replyTo string) {
 		}
 		return rt.ToValue(send(ChartMessage(call.Argument(0).String(), call.Argument(1).String(), call.Argument(2).String(), data)))
 	})
+	// sendChoice(content, [{id, label}, ...]) -> 选择消息 ID；失败返回空串。
+	_ = rt.Set("sendChoice", func(call goja.FunctionCall) goja.Value {
+		if convID == "" {
+			return rt.ToValue("")
+		}
+		options := choiceOptionsFromJS(call.Argument(1).Export())
+		client := clientForConv(convID)
+		if client == nil {
+			GetMyLog().Warn("脚本发送选择消息失败：即应未连接")
+			return rt.ToValue("")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		id, err := client.SendChoice(ctx, convID, call.Argument(0).String(), options)
+		if err != nil {
+			GetMyLog().Warn("脚本发送选择消息失败：%v", err)
+			return rt.ToValue("")
+		}
+		return rt.ToValue(id)
+	})
 	// uploadFile(name, content[, contentType]) -> file_id；失败返回空串。
 	_ = rt.Set("uploadFile", func(call goja.FunctionCall) goja.Value {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -301,6 +346,21 @@ func registerSendApis(rt *goja.Runtime, convID, replyTo string) {
 			return rt.ToValue(ref.FileIDs[0])
 		}
 		return rt.ToValue("")
+	})
+	// lastMediaUrl() -> 该会话最近一条入站媒体的临时访问地址；无则空串。
+	_ = rt.Set("lastMediaUrl", func(call goja.FunctionCall) goja.Value {
+		ref, ok := mediaRefFor(convID)
+		if !ok || len(ref.FileIDs) == 0 {
+			return rt.ToValue("")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		url, err := appReadTemporaryURL(ctx, convID, ref.MessageID, ref.FileIDs[0])
+		if err != nil {
+			GetMyLog().Warn("脚本读取最近媒体地址失败 file=%s: %v", ref.FileIDs[0], err)
+			return rt.ToValue("")
+		}
+		return rt.ToValue(url)
 	})
 	// readFileUrl(fileId) -> 临时文件访问地址；失败返回空串。
 	_ = rt.Set("readFileUrl", func(call goja.FunctionCall) goja.Value {

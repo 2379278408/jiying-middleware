@@ -108,3 +108,21 @@ type testBoom struct{}
 func (testBoom) Error() string { return "boom" }
 
 var errTestBoom = testBoom{}
+
+func TestChoiceOptionsFromJS(t *testing.T) {
+	opts := choiceOptionsFromJS([]any{
+		map[string]any{"id": "yes", "label": "确认"},
+		map[string]any{"id": "no"},
+		map[string]any{"label": "缺少 ID"},
+		"not-an-object",
+	})
+	if len(opts) != 2 {
+		t.Fatalf("unexpected option count: %#v", opts)
+	}
+	if opts[0]["id"] != "yes" || opts[0]["label"] != "确认" {
+		t.Fatalf("first option mismatch: %#v", opts[0])
+	}
+	if opts[1]["id"] != "no" || opts[1]["label"] != "no" {
+		t.Fatalf("label should fall back to id: %#v", opts[1])
+	}
+}
