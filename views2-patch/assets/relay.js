@@ -118,7 +118,7 @@
       if (c) c.textContent = n ? "Relay · " + t(n.name) : "Relay";
     }
     loadConnectStatus();
-    if (state.view && renderers[state.view]) renderers[state.view]();
+    if (state.view && renderers[state.view]) { renderers[state.view](); decoratePage(state.view); }
   }
 
   var NAV = [
@@ -207,7 +207,7 @@
   var THEME_KEY = "relay-theme";
   function preferredTheme() {
     try { var t = localStorage.getItem(THEME_KEY); if (t === "dark" || t === "light") return t; } catch (e) {}
-    return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    return "dark";
   }
   function applyTheme(t, persist) {
     var dark = t === "dark";
@@ -543,8 +543,29 @@
     if (toggle && isMobile()) toggle.setAttribute("aria-expanded", "false");
   }
 
+  var PAGE_CODE = {
+    home: "OVERVIEW / 01", connect: "ACCESS / 02", chat: "MESSAGES / 03", pool: "POOL / 04",
+    roles: "ROLES / 05", scripts: "PLUGINS / 06", market: "MARKET / 07", features: "FEATURES / 08",
+    agent: "AGENT / 09", cron: "SCHEDULE / 10", tasks: "TASKS / 11", audit: "AUDIT / 12",
+    observe: "METRICS / 13", logs: "LOGS / 14"
+  };
+  // 为没有显式眉标的页面补一条等宽编号，保证 14 个页面版式一致。
+  function decoratePage(id) {
+    var view = document.getElementById("view-" + id);
+    if (!view) return;
+    var head = view.querySelector(".page-head");
+    if (!head || head.querySelector(".eyebrow")) return;
+    var box = head.querySelector("div");
+    if (!box) return;
+    var span = document.createElement("span");
+    span.className = "eyebrow";
+    span.textContent = PAGE_CODE[id] || "RELAY";
+    box.insertBefore(span, box.firstChild);
+  }
+
   function switchView(id) {
     if (renderers[id]) renderers[id]();
+    decoratePage(id);
      $$("#nav [data-view]").forEach(function (a) { a.classList.toggle("active", a.getAttribute("data-view") === id); });
     $$(".page").forEach(function (p) { p.hidden = p.id !== "view-" + id; });
     state.view = id;
@@ -595,8 +616,8 @@
   /* ---------- 工作台 ---------- */
   function renderHome() {
     var cont = $("#view-home");
-    cont.innerHTML = '<div class="page-head"><div><h2>工作台</h2><p>即应接入与任务调度实时总览</p></div><div class="spacer"></div><button class="btn btn-ghost btn-sm" onclick="Relay.refreshHome()">刷新</button></div>'
-      + '<div class="grid grid-4">'
+    cont.innerHTML = '<div class="page-head"><div><span class="eyebrow">OVERVIEW / 01</span><h2>工作台</h2><p>即应接入与任务调度实时总览</p></div><div class="spacer"></div><button class="btn btn-ghost btn-sm" onclick="Relay.refreshHome()">刷新</button></div>'
+      + '<div class="stat-strip">'
       + statCard("今日收", "-", "g-1", "inbox")
       + statCard("今日发", "-", "g-2", "send")
       + statCard("会话", "-", "g-3", "users")
@@ -607,23 +628,23 @@
       + statCard("插件", "-", "g-5", "layers")
       + "</div>"
       + '<div class="grid grid-2 mt-16">'
-      + '<div class="panel"><div class="panel-head"><h3>接入状态</h3><span class="hint"><a href="javascript:Relay.go(\'connect\')">进入接入系统 →</a></span></div><div class="panel-body" id="hcState"></div></div>'
-      + '<div class="panel"><div class="panel-head"><h3>快捷入口</h3></div><div class="panel-body"><div class="grid grid-2">'
-      + quick("chat", "消息收发", "会话列表与发送", "message")
-      + quick("scripts", "插件", "安装与调试插件", "puzzle")
-      + quick("cron", "定时任务", "创建定时调度", "clock")
-      + quick("tasks", "任务队列", "执行记录与重试", "list")
-        + "</div></div></div>"
+      + '<div class="panel"><div class="panel-head"><h3>接入状态</h3><span class="hint"><a href="javascript:Relay.go(\'connect\')">connect →</a></span></div><div class="panel-body" id="hcState"></div></div>'
+      + '<div class="panel"><div class="panel-head"><h3>快捷入口</h3><span class="hint">4 个常用动作</span></div><div class="panel-body">'
+      + quick("chat", "消息收发", "会话列表与发送", "message", "01")
+      + quick("scripts", "插件", "安装与调试插件", "puzzle", "02")
+      + quick("cron", "定时任务", "创建定时调度", "clock", "03")
+      + quick("tasks", "任务队列", "执行记录与重试", "list", "04")
+        + "</div></div>"
         + "</div>"
-      + '<div class="panel mt-16"><div class="panel-head"><h3>接入检查</h3><span class="hint">首次使用按此顺序逐项自检</span></div><div class="panel-body" id="hcReady"><div class="empty">加载中…</div></div></div>';
+      + '<div class="panel mt-16"><div class="panel-head"><h3>接入检查</h3><span class="hint">首次使用按此顺序逐项自检</span></div><div class="panel-body" id="hcReady"><div class="empty">LOADING…</div></div></div>';
     Relay.refreshHome();
   }
 
   function statCard(label, val, cls, ik) {
-    return '<div class="panel stat"><div class="ico ' + cls + '" data-ico="' + ik + '">' + ico(ik) + '</div><div><b id="' + label + '">' + val + "</b><small>" + label + "</small></div></div>";
+    return '<div class="stat-cell"><small>' + label + '<span class="ico ' + cls + '" data-ico="' + ik + '">' + ico(ik) + '</span></small><b id="' + label + '">' + val + "</b></div>";
   }
-  function quick(id, name, desc, ik) {
-    return '<div class="list-item" style="cursor:pointer" onclick="Relay.go(\'' + id + '\')"><div class="ico ' + id + '" data-ico="' + ik + '" style="width:38px;height:38px;border-radius:10px;background:var(--sidebar-accent);display:flex;align-items:center;justify-content:center;font-size:18px;flex:0 0 38px">' + ico(ik) + '</div><div><div class="name">' + name + '</div><div class="desc">' + desc + "</div></div><div class=\"actions\">→</div></div>";
+  function quick(id, name, desc, ik, no) {
+    return '<div class="list-item cmd-row" onclick="Relay.go(\'' + id + '\')"><span class="cmd-no">' + (no || "·") + '</span><div class="cmd-ico" data-ico="' + ik + '">' + ico(ik) + '</div><div class="grow"><div class="name">' + name + '</div><div class="desc">' + desc + '</div></div><div class="actions">→</div></div>';
   }
 
   // 接入检查清单：把就绪检查前置到首页，并给出可点击的修复入口。
@@ -712,8 +733,8 @@
   var CONN_TAB = "app";
   function renderConnect() {
     var cont = $("#view-connect");
-    cont.innerHTML = '<div class="page-head"><div><h2>接入系统</h2><p>推荐顺序：先配「应用密钥」建立应用通道，再用「账号密码 / 邮箱验证码」授权账号；完成后在 <a href="javascript:Relay.go(\'home\')">工作台 · 接入检查</a> 逐项确认。</p></div></div>'
-      + '<div class="grid grid-2">'
+    cont.innerHTML = '<div class="page-head"><div><span class="eyebrow">ACCESS / 02</span><h2>接入系统</h2><p>推荐顺序：先配「应用密钥」建立应用通道，再用「账号密码 / 邮箱验证码」授权账号；完成后在 <a href="javascript:Relay.go(\'home\')">工作台 · 接入检查</a> 逐项确认。</p></div></div>'
+      + '<div class="grid-aside">'
       + '<div class="panel"><div class="panel-head"><h3>接入状态</h3><span class="hint">1 应用密钥 → 2 账号授权 → 3 模型 Agent</span></div><div class="panel-body" id="connStatus"></div></div>'
       + '<div class="panel"><div class="panel-body">'
       + '<div class="card-tabs" id="connTabs">'
@@ -854,7 +875,7 @@
     state.chatRequest += 1;
     state.convs = []; state.conv = null; state.msgs = [];
     var cont = $("#view-chat");
-    cont.innerHTML = '<div class="page-head"><div><h2>消息收发</h2><p>选择会话查看消息并发送内容</p></div></div>'
+    cont.innerHTML = '<div class="page-head"><div><span class="eyebrow">MESSAGES / 03</span><h2>消息收发</h2><p>选择会话查看消息并发送内容</p></div></div>'
       + '<div class="chat-grid">'
       + '<div class="panel"><div class="panel-head"><h3>会话</h3></div><div class="panel-body" id="convList"><div class="empty">加载中…</div></div></div>'
       + '<div class="panel" style="display:flex;flex-direction:column"><div class="panel-head"><h3>消息</h3><span class="hint" id="chatTitle"></span><select class="select" id="chatAccountSelect" style="max-width:220px;margin-left:auto"><option>加载账号中…</option></select></div>'
@@ -906,7 +927,7 @@
       box.innerHTML = list.map(function (c, i) {
         var name = c.name || c.title || c.id;
         var active = state.conv && state.conv.id === c.id;
-        return '<button type="button" class="conv-item' + (active ? " active" : "") + '" data-conv-index="' + i + '"><span class="ico" data-ico="message" style="width:30px;height:30px;border-radius:8px;background:var(--primary-soft);display:flex;align-items:center;justify-content:center;flex:0 0 30px">' + ico("message") + '</span><span class="cname">' + esc(name) + "</span></button>";
+        return '<button type="button" class="conv-item' + (active ? " active" : "") + '" data-conv-index="' + i + '"><span class="conv-ico" data-ico="message">' + ico("message") + '</span><span class="cname">' + esc(name) + "</span></button>";
       }).join("");
       $$("[data-conv-index]", box).forEach(function (item) {
         item.addEventListener("click", function () { pickConv(Number(item.getAttribute("data-conv-index"))); });
@@ -1012,7 +1033,7 @@
         detail.push((s.size || 0) + " B");
         if (s.rules && s.rules.length) detail.push("规则 " + esc(s.rules.join(" / ")));
         if (s.platform && s.platform.length) detail.push("平台 " + esc(s.platform.join(" ")));
-        return '<div class="list-item"><div class="ico" style="width:34px;height:34px;border-radius:9px;background:var(--primary-soft);display:flex;align-items:center;justify-content:center;flex:0 0 34px">' + pluginIcon(s.icon) + '</div>'
+        return '<div class="list-item"><div class="ico li-ico">' + pluginIcon(s.icon) + '</div>'
           + '<div class="grow"><div class="name">' + esc(s.title || s.name) + ' <span class="badge badge-off">' + esc(s.name) + '</span> ' + meta + '</div><div class="desc">' + detail.join(" · ") + '</div></div>'
           + '<div class="actions">'
           + (s.config_schema && s.config_schema.length ? '<button class="btn btn-ghost btn-sm" onclick="Relay.scriptConfig(' + jsArg(encodeURIComponent(s.name)) + ')">配置</button>' : "")
@@ -1195,7 +1216,7 @@
       }
       box.innerHTML = '<div class="list">' + list.map(function (s) {
         var isJS = s.kind === "script";
-        return '<div class="list-item"><div class="ico" style="width:34px;height:34px;border-radius:9px;background:var(--primary-soft);display:flex;align-items:center;justify-content:center;flex:0 0 34px">' + ico("code") + "</div>"
+        return '<div class="list-item"><div class="ico li-ico">' + ico("code") + "</div>"
           + '<div class="grow"><div class="name">' + esc(s.name) + " " + metaBadge(isJS ? "JS 模块" : "Markdown", isJS ? "badge-info" : "badge-off") + "</div>"
           + '<div class="desc">' + (s.size || 0) + " B</div></div>"
           + '<div class="actions">' + (isJS ? '<button class="btn btn-ghost btn-sm" onclick="Relay.runSkill(' + jsArg(encodeURIComponent(s.name)) + ')">运行</button>' : "")
@@ -1285,7 +1306,7 @@
     var kind = FEATURE_KIND[f.kind] || f.kind || "-";
     var ik = f.kind === "script" ? "code" : "zap";
     return '<div class="list-item' + (on ? "" : " rl-dim") + '">'
-      + '<div class="ico" style="width:34px;height:34px;border-radius:9px;background:var(--primary-soft);display:flex;align-items:center;justify-content:center;flex:0 0 34px">' + ico(ik) + "</div>"
+      + '<div class="ico li-ico">' + ico(ik) + "</div>"
       + '<div class="grow"><div class="name">' + esc(f.name) + " " + metaBadge(kind) + " "
       + metaBadge(FEATURE_SCOPE[f.scope] || f.scope, f.scope === "public" ? "badge-info" : "badge-off") + " "
       + metaBadge(FEATURE_IDENTITY[f.identity] || f.identity, "badge-off")
@@ -1613,7 +1634,7 @@
       + '<label class="log-auto muted"><input type="checkbox" id="logWrap"> 自动换行</label>'
       + '<button class="btn btn-sm" id="logExport">导出</button>'
       + '<button class="btn btn-primary btn-sm" id="logReload">刷新</button></div>'
-      + '<div class="panel"><div class="panel-body"><pre class="mono rl-logbox" id="logBox" style="margin:0;max-height:calc(100vh - 220px);overflow:auto;background:oklch(0.153 0.006 107.1);color:oklch(0.9 0.02 106.5);padding:14px;border-radius:10px;font-size:12px;line-height:1.6">加载中…</pre></div></div>'
+      + '<div class="panel"><div class="panel-body"><pre class="mono rl-logbox rl-pre" id="logBox" style="max-height:calc(100vh - 220px)">加载中…</pre></div></div>'
       + '<div class="muted" id="logMeta" style="margin-top:8px;font-size:12px"></div>';
     $("#logReload").addEventListener("click", loadLogs);
     $("#logDay").value = today();
@@ -1744,9 +1765,10 @@
     var avatar = a.avatar_url ? '<img class="avatar pool-avatar" src="' + esc(a.avatar_url) + '" alt="">' : '<div class="avatar pool-avatar">' + esc((a.email || "U").charAt(0).toUpperCase()) + "</div>";
     var st = String(a.status || "未登录");
     var badge = st.indexOf("已登录") >= 0 ? '<span class="badge badge-ok">已登录</span>' : '<span class="badge badge-off">未登录</span>';
-    box.innerHTML = '<div class="rl-row"><div class="grow"><div class="kv"><span class="k">账号</span><span class="v">' + esc(a.email || "未配置") + "</span></div>"
+    box.innerHTML = '<div class="rl-row">' + avatar
+      + '<div class="grow"><div class="kv"><span class="k">账号</span><span class="v">' + esc(a.email || "未配置") + "</span></div>"
       + '<div class="kv"><span class="k">昵称</span><span class="v">' + (a.nickname ? esc(a.nickname) : '<span class="muted">未设置</span>') + "</span></div>"
-      + '<div class="kv"><span class="k">状态</span><span class="v">' + badge + "</span></div></div>" + avatar + "</div>";
+      + '<div class="kv"><span class="k">状态</span><span class="v">' + badge + "</span></div></div></div>";
   }
   function renderPoolAccounts(accounts) {
     var box = $("#poolAccountList");
@@ -1815,7 +1837,7 @@
       var list = r.code === 200 && r.data ? r.data : [];
       if (!list.length) { box.innerHTML = emptyState("inbox", "市场暂无插件", "上架插件后会在这里展示，供按应用或个人账号范围安装分发。", '<button class="btn btn-primary btn-sm" id="marketEmptyAdd">上架插件</button>'); bindMarketEmptyAdd(); return; }
       box.innerHTML = '<div class="list">' + list.map(function (p) {
-        return '<div class="list-item"><div class="ico" data-ico="inbox" style="width:34px;height:34px;border-radius:9px;background:var(--primary-soft);display:flex;align-items:center;justify-content:center;flex:0 0 34px">' + ico("inbox") + '</div>'
+        return '<div class="list-item"><div class="ico li-ico" data-ico="inbox">' + ico("inbox") + '</div>'
           + '<div class="grow"><div class="name">' + esc(p.name) + ' <span class="muted">@' + esc(p.version) + '</span> '
           + metaBadge(p.installed ? "已安装" : "未安装", p.installed ? "badge-ok" : "badge-off") + " "
           + metaBadge(FEATURE_KIND[p.kind] || p.kind || "-") + " "
@@ -1962,12 +1984,12 @@
   function renderObserve() {
     var cont = $("#view-observe");
     cont.innerHTML = '<div class="page-head"><div><h2>运行观测</h2><p>匿名探针与指标，不暴露任何凭据</p></div><div class="spacer"></div><button class="btn btn-ghost btn-sm" onclick="Relay.loadObserve()">刷新</button></div>'
-      + '<div class="grid grid-3" id="observeTiles">'
+      + '<div class="stat-strip cols-3" id="observeTiles">'
       + tile("健康探针", "…", "GET /healthz") + tile("运转时长", "…", "进程已运行")
       + tile("已收消息", "…", "累计接收") + tile("任务队列", "…", "执行中")
       + tile("通道状态", "…", "应用 · 账号") + tile("限流拒绝", "…", "被拒绝任务")
       + "</div>"
-      + '<div class="panel mt-16"><div class="panel-head"><h3>原始指标</h3><span class="hint">Prometheus 文本格式</span></div><div class="panel-body"><pre class="mono" id="observeRaw" style="margin:0;white-space:pre-wrap;background:var(--sidebar-accent);padding:14px;border-radius:10px;font-size:12px;max-height:420px;overflow:auto">加载中…</pre></div></div>';
+      + '<div class="panel mt-16"><div class="panel-head"><h3>原始指标</h3><span class="hint">Prometheus 文本格式</span></div><div class="panel-body"><pre class="mono rl-codeblock" id="observeRaw">加载中…</pre></div></div>';
     Relay.loadObserve();
   }
 
@@ -2046,7 +2068,7 @@
     });
   }
   function tile(label, val, sub) {
-    return '<div class="panel tile"><span class="t-lab">' + esc(label) + '</span><span class="t-val">' + esc(val) + "</span>" + (sub ? '<span class="t-sub">' + esc(sub) + "</span>" : "") + "</div>";
+    return '<div class="stat-cell tile"><span class="t-lab">' + esc(label) + '</span><span class="t-val">' + esc(val) + "</span>" + (sub ? '<span class="t-sub">' + esc(sub) + "</span>" : "") + "</div>";
   }
   function setTile(i, val, sub, tone) {
     var t = $$("#observeTiles .tile")[i];
@@ -2148,9 +2170,12 @@
     var nb = $("#navBackdrop");
     if (nb) nb.addEventListener("click", closeNav);
     window.addEventListener("resize", function () { if (!isMobile()) closeNav(); hintScroll(); });
-    // 快捷键：按 “/” 聚焦菜单筛选框（输入框内不拦截）。
+    // 快捷键：“/” 或 Ctrl/Cmd+K 聚焦菜单筛选框（输入框内不拦截）。
     document.addEventListener("keydown", function (e) {
-      if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
+      var slash = e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey;
+      var cmdK = e.key.toLowerCase() === "k" && (e.ctrlKey || e.metaKey);
+      if (!slash && !cmdK) return;
+      if (cmdK) e.preventDefault();
       var t = e.target;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
       var f = $("#navFilter");

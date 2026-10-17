@@ -6,8 +6,11 @@
 <meta name="keywords" content="Relay,即应,中间件,控制台">
 <meta name="description" content="Relay · 即应接入与任务调度控制台">
 <title data-i18n="login.title">登录 · Relay 控制台</title>
-<script>(function(){try{var t=localStorage.getItem("relay-theme");if(t!=="dark"&&t!=="light")t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";document.documentElement.setAttribute("data-bs-theme",t);}catch(e){}})();</script>
+<script>(function(){try{var t=localStorage.getItem("relay-theme");if(t!=="dark"&&t!=="light")t="dark";document.documentElement.setAttribute("data-bs-theme",t);}catch(e){}})();</script>
 <link rel="icon" type="image/svg+xml" href="relay-logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap">
 <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
 <link rel="stylesheet" href="vendor/bootstrap/bootstrap-icons.min.css">
 <link rel="stylesheet" href="relay.css">
@@ -22,6 +25,7 @@
         <div class="brand-mark"><svg viewBox="0 0 512 512" fill="none"><defs><linearGradient id="tileside" x1="0" y1="0" x2="0" y2="512" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#FBFAF7"/><stop offset="1" stop-color="#F1EEE7"/></linearGradient></defs><rect x="1" y="1" width="510" height="510" rx="116" fill="url(#tileside)" stroke="#E5E0D6" stroke-width="2"/><g stroke="#191B1E" stroke-width="34" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M208 184 L208 330"/><path d="M208 184 A48 48 0 0 1 208 280"/><path d="M208 280 L300 332"/></g></svg></div>
         <div class="brand-text"><strong style="font-size:20px">Relay</strong><span data-i18n="login.brand.sub">即应接入与任务调度控制台</span></div>
       </div>
+      <span class="eyebrow">RELAY / CONTROL PLANE</span>
       <h1 data-i18n="login.tagline">接入即应，编排一切</h1>
       <p data-i18n="login.desc">Relay 面向即应应用的消息接入与任务调度中间件。通过应用密钥或账号授权一键接入，在聊天中完成功能调用、脚本执行与定时编排。</p>
       <div class="login-features">

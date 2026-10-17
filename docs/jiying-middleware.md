@@ -139,7 +139,7 @@
 - 侧栏菜单提供筛选框，按名称即时过滤并按分组隐藏空组，快捷键 `/` 聚焦筛选框、回车打开首个匹配项。
 - 侧栏支持自定义：每项可置顶 / 上移 / 下移 / 隐藏，偏好存于 `localStorage`（`relay-nav-prefs`），置顶项集中显示在「置顶」分组，新增菜单自动补齐，弹窗内可一键恢复默认。
 - 插件列表按头部 `icon` 渲染图标，支持 `bi-*` 图标名、`http(s)` / `data:image` / 相对图片路径，其他值按文本转义显示，避免注入；插件若声明了配置 schema，列表项出现「配置」按钮，打开动态表单填写并保存。
-- 顶栏提供深浅色主题切换：默认跟随系统 `prefers-color-scheme`，切换后写入 `localStorage`，登录页与主控制台共用同一偏好；`<head>` 内联脚本在样式加载前写入 `data-bs-theme`，避免首帧闪白。深色基于 Bootstrap 5.3 的 `data-bs-theme`，自定义调色板与徽标、状态块等硬编码浅色一并做了暗色收敛。
+- 顶栏提供深浅色主题切换：默认深色，切换后写入 `localStorage`，登录页与主控制台共用同一偏好；`<head>` 内联脚本在样式加载前写入 `data-bs-theme`，避免首帧闪白。两套主题共用同一组设计令牌，基于 Bootstrap 5.3 的 `data-bs-theme` 生效。
 - 提交类弹窗（运行功能、安装功能、新建定时、接入应用、上架插件）只在后端返回成功时关闭；失败时保持打开并保留已填内容，便于修正后重试，无需重新输入。
 - 列表类面板把「加载失败」与「空数据」分开呈现：接口报错时显示错误态与「重试」按钮（原地重跑该加载函数），不再与空态混用，网络恢复后可一键恢复列表，无需刷新整页。覆盖插件、功能、市场、连接池、权限、审计以及任务队列 / 定时任务 / Agent 工具列表；表格内的错误态包在 `tr`/`td` 中，避免块级元素被浏览器移出 `tbody` 破坏表格布局。
 - 顶栏在登录后显示当前角色等级（主人 / 运营 / 只读），取自 `GET /jiying/api/roles` 的 `me` 字段，便于用户判断可执行的操作范围。
@@ -193,3 +193,14 @@
 - 调用面：控制台 `/send/image`、`/send/file` 同时接受 `url` 或 `file_id`（无 `url` 时回退 `file_id`），新增 `/send/markdown`；脚本 `sendImage` / `sendFile` 接受 URL 或 `file_id` 并支持 `caption_type`，新增 `sendMarkdown`；便捷函数 `SendImageToConv` / `SendFileToConv` 语义同步为「URL 或 `file_id`」，新增 `SendMarkdownToConv`。
 - 单测覆盖：`TestMediaMessageBuilders` 断言图片 `content`/`caption_type` 与文件 `url`（并断言文件体不出现 `content`）；`TestResolveMediaContentPassthroughURL` 覆盖 URL 直通与空白报错。
 
+
+### 控制台视觉系统（Ops Console，2026-10-17）
+
+- 方向：工控台 / Ops Console。近黑石墨底、单一信号色（琥珀）、细线分隔；圆角统一 3px，阴影只用于浮层（弹窗、下拉、Toast）。
+- 令牌：`relay.css` 顶部定义 `--bg` / `--panel` / `--panel-2` / `--line` / `--line-strong` / `--text` / `--muted` / `--primary` / `--ok` / `--warn` / `--err` / `--info` / `--sidebar*`，深浅色各自覆盖；语义色只用于状态，不用于装饰。
+- 字体：界面用 IBM Plex Sans + Noto Sans SC，ID、指标、时间、键值、日志用 IBM Plex Mono（`Tabular numbers`），通过 Google Fonts 加载并带系统字体回退。
+- 结构：左轨固定 236px（收起 60px），顶栏 54px；页面标题带等宽编号眉标（`OVERVIEW / 01` … `LOGS / 14`），由 `decoratePage` 统一补齐。工作台指标改为单一 `stat-strip`（8 格），观测页复用同一组件（6 格）。
+- 列表：面板内列表改成发丝线分隔的行（`.panel-body > .list > .list-item`），不再使用独立卡片；表格表头为等宽大写小字。
+- 状态：chip / badge 统一为直角 + 前置状态点，颜色由语义色按 `color-mix` 生成浅底与描边。
+- 交互：保留 `/` 聚焦菜单筛选，新增 `Ctrl/Cmd+K`；窄栏可收起，860px 以下切换为抽屉并带遮罩。
+- 无障碍：保留 `prefers-reduced-motion` 关闭入场动画，所有可聚焦控件使用 `:focus-visible` 描边。
