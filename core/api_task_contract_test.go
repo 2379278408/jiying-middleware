@@ -87,8 +87,23 @@ func TestTaskLifecycleStatusesAndFiltering(t *testing.T) {
 	if err := RetryTask(failed.ID); err != nil {
 		t.Fatal(err)
 	}
-	items := listTaskItems(TaskFilter{Status: taskPending, UserID: "user-2", Limit: 10})
+	// 任务队列有并发 worker，重试后的任务可能已被消费；计数在入队时已递增，
+	// 这里直接校验记录，再用一条不会被执行（待确认）的 pending 任务验证筛选。
+	tasks.mu.Lock()
+	retried := tasks.items[failed.ID]
+	var retryCount int
+	if retried != nil {
+		retryCount = retried.RetryCount
+	}
+	tasks.items["pending-filter"] = &Task{ID: "pending-filter", Status: taskPending, Confirm: true, UserID: "user-filter", RetryCount: 1}
+	tasks.order = append(tasks.order, "pending-filter")
+	tasks.saveLocked()
+	tasks.mu.Unlock()
+	if retryCount != 1 {
+		t.Fatalf("retry count should be 1, got %d", retryCount)
+	}
+	items := listTaskItems(TaskFilter{Status: taskPending, UserID: "user-filter", Limit: 10})
 	if len(items) != 1 || items[0].RetryCount != 1 {
-		t.Fatalf("unexpected retried task: %+v", items)
+		t.Fatalf("unexpected pending filter result: %+v", items)
 	}
 }

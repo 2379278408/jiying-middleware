@@ -1134,7 +1134,7 @@
     if (b && retry) b.addEventListener("click", retry);
   }
 
-  var state = { view: "home", cerr: null, convs: [], conv: null, msgs: [], interval: null, baseUptime: null, uptimeAt: 0, uptimeTimer: null, chatEpoch: 0, chatRequest: 0, chatConvID: "", logLines: [], logShown: [], logPending: "", logTimer: null, logLevel: "all", logPinned: true, logFromBottom: 0, logLoadedAt: "", logDay: "", tasks: [], tasksErr: "", silentTasks: [], role: "", auditRows: [], auditErr: "", executions: [], executionsErr: "", execFilter: { kind: "", status: "", name: "" }, chatCaps: null, account: null, app: null, appProfiles: {}, appNames: {}, scriptView: "tree", scriptFolders: {} };
+  var state = { view: "home", cerr: null, convs: [], conv: null, msgs: [], interval: null, baseUptime: null, uptimeAt: 0, uptimeTimer: null, chatEpoch: 0, chatRequest: 0, chatConvID: "", logLines: [], logShown: [], logPending: "", logTimer: null, logLevel: "all", logPinned: true, logFromBottom: 0, logLoadedAt: "", logDay: "", tasks: [], tasksErr: "", silentTasks: [], role: "", auditRows: [], auditErr: "", executions: [], executionsErr: "", execFilter: { kind: "", status: "", name: "" }, chatCaps: null, account: null, app: null, apps: [], appProfiles: {}, appNames: {}, scriptView: "tree", scriptFolders: {} };
   var VIEW_KEY = "relay-view";
   var PROFILE_KEY = "relay-profile";
   var ROLE_LABEL = { master: "主人", ops: "运营", readonly: "只读" };
@@ -1145,6 +1145,15 @@
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
     });
+  }
+  // 受控 Markdown：先转义全部 HTML，再只放开行内代码、加粗与换行，
+  // 不解析原始 HTML 或链接，避免消息内容成为 XSS 入口。
+  function renderMarkdownSafe(text) {
+    var html = esc(text)
+      .replace(/`([^`\n]+)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/\r?\n/g, "<br>");
+    return html;
   }
   // Inline handlers are retained for generated legacy markup; encode every argument as a JS string literal.
   function jsArg(s) {
@@ -1168,7 +1177,7 @@
     var label = String(name || "U").trim() || "U";
     var ch = esc(label.charAt(0).toUpperCase());
     return '<span class="av-fb" style="--av-h:' + avatarHue(label) + '">' + ch + "</span>"
-      + (url ? '<img src="' + esc(url) + '" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">' : "");
+      + (url ? '<img src="' + esc(url) + '" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.onerror=null;this.style.display=\'none\';this.parentNode.classList.add(\'av-fallback\');console.warn(\'头像加载失败\',this.src)">' : "");
   }
   function avatarHTML(url, name, cls) {
     var klass = "avatar" + (cls ? " " + cls : "");
@@ -1195,6 +1204,25 @@
       }
     }
     return "";
+  }
+  // 会话成员按 id 建索引，消息 sender 只带 id/type，昵称与头像需要从成员表补齐。
+  function memberIndex(conv) {
+    var out = {};
+    var list = conv && conv.members;
+    if (Object.prototype.toString.call(list) !== "[object Array]") return out;
+    for (var i = 0; i < list.length; i++) {
+      var m = list[i];
+      if (m && m.id != null) out[String(m.id)] = m;
+    }
+    return out;
+  }
+  function appLookup(id) {
+    if (!id) return null;
+    var list = state.apps || [];
+    for (var i = 0; i < list.length; i++) {
+      if (String(list[i].app_id) === String(id)) return list[i];
+    }
+    return null;
   }
   function pickDisplayName(obj, fallback) {
     if (!obj || typeof obj !== "object") return fallback || "";
@@ -1608,6 +1636,7 @@
     if (!st) return;
     state.account = st.account || null;
     state.app = st.app || null;
+    state.apps = st.apps || [];
     cacheProfile(st);
     var wsOk = st.app && st.app.connected;
     var acctOk = st.account && st.account.logged_in;
@@ -2200,9 +2229,11 @@
     if (!state.msgs.length) { box.innerHTML = emptyState("message", "暂无消息", "在下方输入框发送内容，中间件会按功能或 Agent 自动回复。"); return; }
     var app = state.app || {};
     var acct = state.account || {};
+    var members = memberIndex(state.conv);
     var convAv = pickAvatarURL(state.conv);
     box.innerHTML = state.msgs.map(function (m) {
       var body = m.body || {};
+      var isMarkdown = body.type === "markdown";
       var content = "";
       if (typeof body === "string") content = body;
       else if (body.type === "text") content = body.content || body.text || "";
@@ -2210,13 +2241,22 @@
       else if (body.type === "file") content = "[文件] " + (body.name || body.filename || "");
       else content = m.summary || body.content || body.text || (body.type ? "[" + body.type + "]" : "");
       var sender = (m.sender && typeof m.sender === "object") ? m.sender : {};
-      var out = sender.type === "app" || sender.type === "assistant" || m.direction === "out" || m.is_out === true;
+      var member = members[String(sender.id)] || null;
+      var appSender = sender.type === "app" ? appLookup(sender.id) : null;
+      // 账号本人以服务端返回的用户 id 判定；sender.type=app 表示中间件/应用发出。
+      var mine = !!(acct.id && sender.id && String(sender.id) === String(acct.id));
+      var out = mine || sender.type === "app" || sender.type === "assistant" || m.direction === "out" || m.is_out === true;
       var t = fmtTime(m.created_at || m.createdAt || m.time);
-      var who = pickDisplayName(sender, "") || m.sender_name || (out ? (app.name || acct.nickname || acct.email || "Relay") : (SENDER_LABEL[sender.type || ""] || sender.type || pickDisplayName(state.conv, "") || "对方"));
-      // 入站优先用发送者头像，其次用会话头像；出站回退到应用/当前账号头像。
-      var av = pickAvatarURL(sender) || (out ? (app.avatar_url || acct.avatar_url || "") : convAv);
+      var who = pickDisplayName(member, "") || pickDisplayName(appSender, "") || pickDisplayName(sender, "") || m.sender_name;
+      if (!who && sender.type === "assistant") who = LANG === "en" ? "Jiying Assistant" : "即应助手";
+      if (!who && out) who = app.name || acct.nickname || acct.email || "Relay";
+      if (!who) who = SENDER_LABEL[sender.type || ""] || sender.type || "对方";
+      // 入站优先用成员/发送者头像，其次用会话头像；出站回退到应用/当前账号头像。
+      var av = pickAvatarURL(member) || pickAvatarURL(appSender) || pickAvatarURL(sender) || (out ? (app.avatar_url || acct.avatar_url || "") : convAv);
+      if (!av && sender.type === "assistant") av = "/assets/apps/assistant.webp";
+      var rendered = isMarkdown ? renderMarkdownSafe(content) : esc(content);
       return '<div class="msg-item ' + (out ? "msg-item-out" : "msg-item-in") + '">' + avatarHTML(av, who, "msg-avatar")
-        + '<div class="msg-main"><span class="msg-meta" title="' + esc(who) + '">' + esc(who) + " · " + esc(t) + '</span><div class="msg-bubble ' + (out ? "msg-out" : "msg-in") + '">' + esc(content) + "</div></div></div>";
+        + '<div class="msg-main"><span class="msg-meta" title="' + esc(who) + '">' + esc(who) + " · " + esc(t) + '</span><div class="msg-bubble ' + (out ? "msg-out" : "msg-in") + '">' + rendered + "</div></div></div>";
     }).join("");
     box.scrollTop = box.scrollHeight;
   }

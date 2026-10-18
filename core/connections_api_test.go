@@ -3,9 +3,9 @@ package core
 import "testing"
 
 func TestParseAccountProfileNestedUser(t *testing.T) {
-	raw := []byte(`{"data":{"user":{"email":"a@b.c","name":"Alice","nickname":"","avatar":"https://cdn.example.com/a.png"}}}`)
+	raw := []byte(`{"data":{"user":{"id":"u-1","email":"a@b.c","name":"Alice","nickname":"","avatar":"https://cdn.example.com/a.png"}}}`)
 	got := parseAccountProfile(raw)
-	if got.Email != "a@b.c" || got.Nickname != "Alice" || got.AvatarURL != "https://cdn.example.com/a.png" {
+	if got.ID != "u-1" || got.Email != "a@b.c" || got.Nickname != "Alice" || got.AvatarURL != "https://cdn.example.com/a.png" {
 		t.Fatalf("unexpected profile: %+v", got)
 	}
 }

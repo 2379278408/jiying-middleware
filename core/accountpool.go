@@ -136,7 +136,7 @@ func SaveAccountProfile(profile AccountProfile) {
 	accountProfileStore.Lock()
 	defer accountProfileStore.Unlock()
 	loadAccountProfilesLocked()
-	if old, ok := accountProfileStore.items[email]; ok && old.Nickname == profile.Nickname && old.AvatarURL == profile.AvatarURL {
+	if old, ok := accountProfileStore.items[email]; ok && old.ID == profile.ID && old.Nickname == profile.Nickname && old.AvatarURL == profile.AvatarURL {
 		return
 	}
 	accountProfileStore.items[email] = profile

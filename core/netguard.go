@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -121,4 +122,56 @@ func endpointsEqual(a, b string) bool {
 		return false
 	}
 	return strings.TrimRight(ua.Path, "/") == strings.TrimRight(ub.Path, "/") && ua.RawQuery == ub.RawQuery
+}
+
+// safeOutboundHTTPClient 构造用于下载外部内容的客户端：连接前重新校验解析结果，
+// 防止 DNS 重绑定绕过一次性 URL 校验；每次重定向也重新校验目标地址。
+func safeOutboundHTTPClient(timeout time.Duration) *http.Client {
+	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, fmt.Errorf("地址格式无效")
+			}
+			ips, err := resolveHostIPs(host)
+			if err != nil {
+				return nil, err
+			}
+			var lastErr error
+			for _, ip := range ips {
+				if isMetadataIP(ip) {
+					lastErr = fmt.Errorf("不允许访问元数据地址")
+					continue
+				}
+				if isPrivateIP(ip) && !allowPrivateOutbound() {
+					lastErr = fmt.Errorf("不允许访问内网地址")
+					continue
+				}
+				conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+				if err == nil {
+					return conn, nil
+				}
+				lastErr = err
+			}
+			if lastErr == nil {
+				lastErr = fmt.Errorf("目标地址不可用")
+			}
+			return nil, lastErr
+		},
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 15 * time.Second,
+		MaxIdleConns:          16,
+		IdleConnTimeout:       30 * time.Second,
+	}
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: transport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return fmt.Errorf("跳转次数过多")
+			}
+			return validateOutboundURL(req.URL.String(), false)
+		},
+	}
 }

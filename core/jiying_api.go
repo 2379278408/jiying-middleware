@@ -68,23 +68,46 @@ func saveJiyingMsgStatsLocked() {
 	BucketApp.Set(jiyingMsgStatsKey, string(raw))
 }
 
-func jiyingCountInbound() {
-	jiyingMsgStats.Lock()
-	defer jiyingMsgStats.Unlock()
-	loadJiyingMsgStatsLocked()
-	day := time.Now().Format("2006-01-02")
-	if jiyingMsgStats.day != day {
-		jiyingMsgStats.day = day
-		jiyingMsgStats.inbound = 0
-		jiyingMsgStats.out = 0
+// msgStatsFlushDelay 是消息计数批量落盘间隔；高频收发时避免每条消息都写一次桶。
+const msgStatsFlushDelay = 2 * time.Second
+
+var msgStatsFlush = struct {
+	sync.Mutex
+	timer *time.Timer
+}{}
+
+var msgStatsDirty atomic.Bool
+
+func scheduleMsgStatsFlush() {
+	msgStatsDirty.Store(true)
+	msgStatsFlush.Lock()
+	defer msgStatsFlush.Unlock()
+	if msgStatsFlush.timer == nil {
+		msgStatsFlush.timer = time.AfterFunc(msgStatsFlushDelay, flushMsgStats)
 	}
-	jiyingMsgStats.inbound++
-	saveJiyingMsgStatsLocked()
 }
 
-func jiyingCountOutbound() {
+// flushMsgStats 把脏计数写入桶；写盘失败不阻塞消息处理，下次计数会再次触发。
+func flushMsgStats() {
+	msgStatsFlush.Lock()
+	msgStatsFlush.timer = nil
+	msgStatsFlush.Unlock()
+	if !msgStatsDirty.Swap(false) {
+		return
+	}
 	jiyingMsgStats.Lock()
-	defer jiyingMsgStats.Unlock()
+	loadJiyingMsgStatsLocked()
+	if jiyingMsgStats.day != "" {
+		saveJiyingMsgStatsLocked()
+	}
+	jiyingMsgStats.Unlock()
+	if msgStatsDirty.Load() {
+		scheduleMsgStatsFlush()
+	}
+}
+
+func countJiyingMsg(inbound bool) {
+	jiyingMsgStats.Lock()
 	loadJiyingMsgStatsLocked()
 	day := time.Now().Format("2006-01-02")
 	if jiyingMsgStats.day != day {
@@ -92,9 +115,20 @@ func jiyingCountOutbound() {
 		jiyingMsgStats.inbound = 0
 		jiyingMsgStats.out = 0
 	}
-	jiyingMsgStats.out++
-	saveJiyingMsgStatsLocked()
+	if inbound {
+		jiyingMsgStats.inbound++
+	} else {
+		jiyingMsgStats.out++
+	}
+	jiyingMsgStats.Unlock()
+	scheduleMsgStatsFlush()
 }
+
+func jiyingCountInbound()  { countJiyingMsg(true) }
+func jiyingCountOutbound() { countJiyingMsg(false) }
+
+// FlushMsgStats 在进程退出前把内存中的消息计数补写到桶。
+func FlushMsgStats() { flushMsgStats() }
 
 func jiyingMsgCounts() (int, int) {
 	jiyingMsgStats.Lock()
@@ -326,11 +360,16 @@ func registerJiyingAPI() {
 // overviewConvTTL 是总览会话数的缓存时长；会话数变化不频繁，避免每次刷新都打远端接口。
 const overviewConvTTL = 30 * time.Second
 
+// overviewConvErrTTL 是失败后的短暂负缓存，避免远端故障时每次刷新都打满超时。
+const overviewConvErrTTL = 8 * time.Second
+
 var overviewConvCache = struct {
 	sync.Mutex
-	key   string
-	count int
-	at    time.Time
+	key    string
+	count  int
+	at     time.Time
+	errKey string
+	errAt  time.Time
 }{}
 
 // overviewConversationCount 返回当前账号的会话数：30 秒内复用缓存，
@@ -347,12 +386,24 @@ func overviewConversationCount(parent context.Context) int {
 	}
 	stale := overviewConvCache.count
 	staleKey := overviewConvCache.key
+	errKey := overviewConvCache.errKey
+	errAt := overviewConvCache.errAt
 	overviewConvCache.Unlock()
+	if errKey == key && now.Sub(errAt) < overviewConvErrTTL {
+		if staleKey == key {
+			return stale
+		}
+		return 0
+	}
 
 	ctx, cancel := context.WithTimeout(parent, 8*time.Second)
 	defer cancel()
 	raw, err := UserCall(ctx, http.MethodGet, "/api/client/conversations", nil)
 	if err != nil {
+		overviewConvCache.Lock()
+		overviewConvCache.errKey = key
+		overviewConvCache.errAt = now
+		overviewConvCache.Unlock()
 		if staleKey == key {
 			return stale
 		}
@@ -364,6 +415,10 @@ func overviewConversationCount(parent context.Context) int {
 		} `json:"data"`
 	}
 	if json.Unmarshal(raw, &parsed) != nil {
+		overviewConvCache.Lock()
+		overviewConvCache.errKey = key
+		overviewConvCache.errAt = now
+		overviewConvCache.Unlock()
 		if staleKey == key {
 			return stale
 		}
@@ -374,6 +429,8 @@ func overviewConversationCount(parent context.Context) int {
 	overviewConvCache.key = key
 	overviewConvCache.count = n
 	overviewConvCache.at = now
+	overviewConvCache.errKey = ""
+	overviewConvCache.errAt = time.Time{}
 	overviewConvCache.Unlock()
 	return n
 }
@@ -787,8 +844,14 @@ func jiyingAPITasks(c *gin.Context) {
 		}
 	}
 	// silent=1 返回 Agent 工具调用等静默任务的最近记录，便于排查未展示的调用。
+	// 静默任务可能包含工具入参与结果，只对运维及以上开放，非主控仅能看到自己的记录。
 	if v := strings.TrimSpace(c.Query("silent")); v == "1" || strings.EqualFold(v, "true") {
-		jiyingJSON(c, RecentSilentTasks(limit))
+		if !requestHasRole(c, RoleOps) {
+			jiyingErr(c, "权限不足")
+			return
+		}
+		master := requestHasRole(c, RoleMaster)
+		jiyingJSON(c, RecentSilentTasks(consoleUser(c), master, limit))
 		return
 	}
 	jiyingJSON(c, listTaskItems(TaskFilter{

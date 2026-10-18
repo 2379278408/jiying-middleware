@@ -311,7 +311,7 @@
 
 ### 消息计数与就绪判定
 
-- 收发计数落盘：`jiyingMsgStats` 以桶键 `jiying_msg_stats` 保存当日 `inbound` / `outbound` 与日期，首次读取时懒加载；跨日自动清零并立即落盘，进程重启不再归零。计数仍在内存聚合，落盘失败只记日志，不影响消息处理。
+- 收发计数落盘：`jiyingMsgStats` 以桶键 `jiying_msg_stats` 保存当日 `inbound` / `outbound` 与日期，首次读取时懒加载；跨日自动清零。计数在内存聚合，最多每 2 秒批量落盘一次，避免每条消息都写桶；落盘失败只记日志，不影响消息处理，进程退出前可调用 `flushMsgStats` 补写。
 - 验证码账号就绪：`accountReadiness` 接受「已保存密码」或 `code_login=true` 两种凭据；已登录时直接判定 `connected`，未登录才按配置完整性返回 `configured` / `invalid`。`UserLogin` 与 `connect/status` 同步暴露 `CodeLogin`，避免验证码账号被误报为缺少密钥。
 
 ### Agent 回复与工具调用
@@ -319,21 +319,35 @@
 - 回复格式：Agent 最终答复优先走 `ReplyMarkdown`（即应 `markdown` 富文本），标题、列表、表格与代码块可正常渲染；发送失败自动回退纯文本。`SendMarkdownToConv` 与纯文本共用 `clampOutboundText`，超长内容按上限截断。
 - 身份注入：`agentSystemPrompt` 在系统提示末尾追加「当前用户ID（主控权限/普通用户）」与可信度约束（实时数据先调工具、失败如实说明、不编造数据或图片）；用户自定义 system 不再覆盖这两项，身份为空时仍保留可信度约束。
 - 实时意图强制工具：`agentToolChoice` 在首轮命中天气、新闻、股价、快递、实时等关键词且存在匹配工具时，向模型传 `tool_choice=required`；未命中或没有对应工具仍为 `auto`，避免为普通对话强行调用工具。
-- 失败可感知：工具执行被拒绝、超时或失败时，回灌内容以 `FAILED:` 开头并附带「不要编造结果」提示，模型据此如实回复；成功结果保持原样。
+- 失败可感知：工具执行被拒绝、超时或失败时，回灌内容以 `FAILED:` 开头并附带「不要编造结果」提示，模型据此如实回复；成功结果保持原样。等待任务时使用调用方上下文并覆盖 `taskRunTimeout`，只有 `done` 状态才算成功，`failed` / `timeout` / `canceled` 及取消时仍为 `running` 的快照都按失败处理。
 - 图片降级：模型最终文本中的 Markdown 图片语法 `![alt](url)` 统一改写为 `[图片：alt](url)`。Agent 需要发图必须调用图片工具，防止未真正发送却让客户端渲染出图片。
-- 静默任务可追溯：`taskq` 为静默任务保留最近 50 条内存副本（`RecentSilentTasks`），`GET /jiying/api/tasks?silent=1` 返回；控制台任务队列新增「含 Agent 调用」开关，Agent 行带标记并只提供详情，不参与重试/删除。静默任务仍不进入持久层，重启即清空。
+- 静默任务可追溯：`taskq` 为静默任务保留最近 50 条内存副本（`RecentSilentTasks`），`GET /jiying/api/tasks?silent=1` 返回；控制台任务队列新增「含 Agent 调用」开关，Agent 行带标记并只提供详情，不参与重试/删除。该接口要求运维及以上角色，主控可看全量，其他角色只返回自己发起的静默任务。静默任务仍不进入持久层，重启即清空。
+- 参数边界：`max_turns` 限制在 1~12，`max_history` 限制在 1~50，保存与加载都会归一化；回灌给模型的单次工具结果截断到 12 KiB，避免超长输出挤占上下文。
 
 ### 插件运行环境与失败详情
 
-- 控制台环境注入：Python 插件子进程新增 `JIYING_PORT`、`JIYING_BASE_URL`（本机 `127.0.0.1` 控制台地址）、`JIYING_CONSOLE_USER`、`JIYING_CONSOLE_PASS`（当前账号，密码存在时）。插件可直接调用 `/jiying/api/send/*`、`/upload` 等接口，无需再猜测端口或手工配置账号。仅管理员安装的插件可执行；插件自身配置的同名变量仍可覆盖。
+- 控制台环境注入：Python 插件子进程新增 `JIYING_PORT`、`JIYING_BASE_URL`（本机 `127.0.0.1` 控制台地址）、`JIYING_CONSOLE_USER`、`JIYING_CONSOLE_PASS`。控制台账号固定为 `script`，口令是首次使用时随机生成并以 AES-GCM 加密保存的专用令牌，登录后映射到控制台管理员身份；即应账号密码不再注入脚本。需要账号身份时使用 `JIYING_ACCOUNT_BASE_URL` / `JIYING_ACCOUNT_EMAIL`，密码始终留在服务端。仅管理员安装的插件可执行；插件自身配置的同名变量仍可覆盖。
+- 输出脱敏：脚本成功/失败输出、任务结果、审计与 Agent 工具回灌统一经过 `redactSecretText`，账号密码与脚本控制台令牌替换为 `***`；任务详情不再展示原始凭据。
 - 失败详情：脚本非零退出时合并 `stderr` 与 `stdout`（各带标签，总计截断 2000 字符）返回。插件把错误 JSON 打印到 stdout 时不再只剩 `exit status 1`，Agent 与任务列表都能看到真实原因。
 - 账号通道边界：账号通道只有 HTTP 会话与 token，不存在应用通道那样的实时事件流；「账号侧收到入站消息」依赖应用通道，文档与就绪检查均按此语义描述。
 
 ### 总览会话数缓存
 
-- `overviewConversationCount` 以「账号 BaseURL + 邮箱」为键缓存会话数 30 秒，切号后键变化自然失效；上游调用失败时回退该账号上次结果，没有历史结果则返回 0。避免控制台每次刷新都拉取远端会话列表，同时保证切号不串数据。
+- `overviewConversationCount` 以「账号 BaseURL + 邮箱」为键缓存会话数 30 秒，切号后键变化自然失效；上游调用失败时回退该账号上次结果，没有历史结果则返回 0，并对失败结果做 8 秒负缓存，避免远端故障时每次刷新都等待超时。
 
 ### 媒体发送的部署限制
 
 - 即应服务端拉取媒体时执行 SSRF 防护，`localhost`、回环、私网与链路本地地址一律拒绝。中间件部署在私网时，图片/文件必须先上传到公网可访问的地址（对象存储、带公网域名的静态服务等），不能直接使用本机临时文件路径。
 - 发送失败会返回明确错误（`URL 不允许访问` 或下载超限），控制台、脚本与 Agent 工具调用都应把失败原样告知用户，并降级为文字说明或链接，不要假定图片已送达。
+
+### 消息身份与头像（2026-10-18 补充）
+
+- 账号资料补 `id`：`parseAccountProfile` 解析 `/api/client/me` 的 `data.user.id`，`AccountProfile` 与 `GET /jiying/api/connections` 的 `account.id` 一并返回；切换账号后由资料缓存刷新。
+- 消息方向：前端优先用 `sender.id === account.id` 判定本人消息，`sender.type=app/assistant`、`direction` 与 `is_out` 作为兼容兜底，避免把 `type=app` 一律当成自己。
+- 昵称与头像：根据会话 `members` 建立 id 索引，`sender` 只带 id 时也能显示成员昵称与头像；应用发送者按 `app_id` 匹配应用快照，助手消息回退 `/assets/apps/assistant.webp`（随包提供）。头像加载失败时保留首字母占位并记录控制台警告，不再静默移除。
+
+### 出站下载与脚本进程（2026-10-18 补充）
+
+- 媒体下载：`ReadFileContent` 在请求前校验临时文件 URL，并通过 `safeOutboundHTTPClient` 在建立连接时重新解析、校验 IP（防 DNS 重绑定），重定向逐跳校验，最多 5 次；`JIYING_ALLOW_PRIVATE_HOSTS=1` 仍可放行私网自建部署，云元数据地址始终拒绝。
+- 脚本进程组：Python 脚本及其子进程使用独立进程组，超时或取消时整组终止；工作目录切换到脚本所在目录，便于读取同目录数据文件。
+- 任务队列：默认 2 个 worker 并发消费，单个慢插件不再阻塞后续任务；执行完成一个任务后若仍有待执行任务，会唤醒其他 worker。

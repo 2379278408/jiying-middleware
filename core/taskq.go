@@ -63,13 +63,18 @@ var tasks = &taskQueue{items: map[string]*Task{}, wake: make(chan struct{}, 1), 
 
 var taskLoopStarted atomic.Bool
 
+// taskWorkers 是任务消费并发数；单个慢插件不再阻塞后续任务。
+const taskWorkers = 2
+
 func initTaskQueue() {
 	if BucketApp != nil {
 		tasks.bucket.Store(BucketApp)
 	}
 	tasks.load()
 	if !taskLoopStarted.Swap(true) {
-		go tasks.loop()
+		for i := 0; i < taskWorkers; i++ {
+			go tasks.loop()
+		}
 	}
 }
 
@@ -163,15 +168,36 @@ func EnqueueTask(t Task) (*Task, error) {
 }
 
 func (q *taskQueue) loop() {
-	for range q.wake {
-		for {
-			t := q.next()
-			if t == nil {
-				break
+	for {
+		t := q.next()
+		if t == nil {
+			select {
+			case <-q.wake:
+			case <-time.After(30 * time.Second):
 			}
-			q.run(t)
+			continue
+		}
+		// 还有待执行任务时唤醒其他 worker，避免一个 worker 串行吞掉整批任务。
+		if q.hasRunnable() {
+			select {
+			case q.wake <- struct{}{}:
+			default:
+			}
+		}
+		q.run(t)
+	}
+}
+
+// hasRunnable 报告是否存在待执行任务；调用方不得持有 tasks.mu。
+func (q *taskQueue) hasRunnable() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, id := range q.order {
+		if t := q.items[id]; t != nil && t.Status == taskPending && !t.Confirm {
+			return true
 		}
 	}
+	return false
 }
 
 func (q *taskQueue) next() *Task {
@@ -199,6 +225,8 @@ func (q *taskQueue) run(t *Task) {
 		return executeFeature(ctx, t.Feature, t.Args, t.UserID, t.ConversationID)
 	})
 	cancel()
+	// 功能输出可能包含脚本回显的凭据；任务详情与审计统一使用脱敏后的文本。
+	result = redactSecretText(result)
 	q.mu.Lock()
 	cur := q.items[t.ID]
 	text := result
@@ -209,7 +237,7 @@ func (q *taskQueue) run(t *Task) {
 		cur.DurationMS = time.Since(started).Milliseconds()
 		if err != nil {
 			cur.Status = taskFailed
-			cur.Result = err.Error()
+			cur.Result = redactSecretText(err.Error())
 			cur.ErrorCode = "EXECUTION_FAILED"
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				cur.Status = taskTimeout
@@ -265,34 +293,61 @@ func safeExecute(run func() (string, error)) (result string, err error) {
 	return run()
 }
 
+// waitableTaskStatus 判断任务是否已进入终态。调用方必须持有 tasks.mu。
+func waitableTaskStatus(status string) bool {
+	switch status {
+	case taskDone, taskFailed, taskTimeout, taskCanceled:
+		return true
+	}
+	return false
+}
+
 // WaitForTaskDone 等待任务进入终态并返回最终副本；仅用于静默（Agent 工具）任务。
-// 任务已完成则立即返回，否则注册完成通知，超时后返回当前状态快照。
+// 任务已完成则立即返回，否则注册完成通知；超时或调用方上下文取消后返回当前快照。
 func WaitForTaskDone(id string, timeout time.Duration) *Task {
+	return WaitForTaskDoneContext(context.Background(), id, timeout)
+}
+
+// WaitForTaskDoneContext 与 WaitForTaskDone 相同，但会响应调用方上下文取消，
+// 避免 Agent 请求已经结束时仍在后台阻塞等待任务。
+func WaitForTaskDoneContext(ctx context.Context, id string, timeout time.Duration) *Task {
 	ch := make(chan *Task, 1)
 	tasks.mu.Lock()
 	t := tasks.items[id]
-	if t != nil && (t.Status == taskDone || t.Status == taskFailed) {
+	if t != nil && waitableTaskStatus(t.Status) {
 		cp := *t
 		tasks.mu.Unlock()
 		return &cp
 	}
+	if ctx.Err() != nil {
+		if t != nil {
+			cp := *t
+			tasks.mu.Unlock()
+			return &cp
+		}
+		tasks.mu.Unlock()
+		return nil
+	}
 	tasks.waits[id] = ch
 	tasks.mu.Unlock()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
 	case cp := <-ch:
 		return cp
-	case <-time.After(timeout):
-		tasks.mu.Lock()
-		delete(tasks.waits, id)
-		t = tasks.items[id]
-		var cp *Task
-		if t != nil {
-			c := *t
-			cp = &c
-		}
-		tasks.mu.Unlock()
-		return cp
+	case <-ctx.Done():
+	case <-timer.C:
 	}
+	tasks.mu.Lock()
+	delete(tasks.waits, id)
+	t = tasks.items[id]
+	var cp *Task
+	if t != nil {
+		c := *t
+		cp = &c
+	}
+	tasks.mu.Unlock()
+	return cp
 }
 
 func ConfirmTask(id string, ok bool) error {
@@ -452,7 +507,8 @@ func (q *taskQueue) appendSilentLocked(t *Task) {
 
 // RecentSilentTasks 返回最近的静默任务（Agent 工具调用），按时间正序。
 // 静默任务结束后会从任务队列删除，这里返回的是内存中的副本。
-func RecentSilentTasks(limit int) []*Task {
+// userID 非空时只返回该用户发起的任务；all 为真时忽略用户过滤（主控查看全量）。
+func RecentSilentTasks(userID string, all bool, limit int) []*Task {
 	tasks.mu.Lock()
 	defer tasks.mu.Unlock()
 	n := len(tasks.silentRecent)
@@ -465,6 +521,9 @@ func RecentSilentTasks(limit int) []*Task {
 	}
 	out := make([]*Task, 0, limit)
 	for _, t := range tasks.silentRecent[start:] {
+		if !all && userID != "" && t.UserID != userID {
+			continue
+		}
 		cp := *t
 		out = append(out, &cp)
 	}

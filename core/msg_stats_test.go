@@ -39,7 +39,8 @@ func TestMsgStatsPersistAcrossReload(t *testing.T) {
 		t.Fatalf("unexpected live counts: in=%d out=%d", in, out)
 	}
 
-	// 模拟进程重启：内存清零，再从桶中懒加载。
+	// 批量落盘由定时器触发；测试显式 flush 后再模拟进程重启。
+	flushMsgStats()
 	resetMsgStatsForTest()
 	if in, out := jiyingMsgCounts(); in != 1 || out != 2 {
 		t.Fatalf("counts not restored after reload: in=%d out=%d", in, out)

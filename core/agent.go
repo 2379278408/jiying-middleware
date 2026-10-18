@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 )
@@ -30,6 +31,29 @@ type AgentConfig struct {
 }
 
 const agentConfigKey = "agent_config"
+
+const (
+	agentMinTurns      = 1
+	agentMaxTurns      = 12
+	agentMinHistory    = 1
+	agentMaxHistory    = 50
+	agentToolResultCap = 12 * 1024
+)
+
+func clampInt(v, min, max int) int {
+	if v < min {
+		return min
+	}
+	if v > max {
+		return max
+	}
+	return v
+}
+
+func normalizeAgentLimits(cfg *AgentConfig) {
+	cfg.MaxTurns = clampInt(cfg.MaxTurns, agentMinTurns, agentMaxTurns)
+	cfg.MaxHistory = clampInt(cfg.MaxHistory, agentMinHistory, agentMaxHistory)
+}
 
 func LoadAgentConfig() AgentConfig {
 	cfg := AgentConfig{Model: "gpt-4o-mini", MaxTurns: 6, MaxHistory: 12}
@@ -67,10 +91,12 @@ func LoadAgentConfig() AgentConfig {
 			}
 		}
 	}
+	normalizeAgentLimits(&cfg)
 	return cfg
 }
 
 func SaveAgentConfig(cfg AgentConfig) {
+	normalizeAgentLimits(&cfg)
 	if BucketApp == nil {
 		return
 	}
@@ -516,7 +542,7 @@ func RunAgent(ctx context.Context, convID, userID, prompt string, seq int64) (st
 			}
 			feature := index[tc.Function.Name]
 			out := runAgentTool(ctx, feature, tc.Function.Arguments, userID, convID)
-			msgs = append(msgs, chatMessage{Role: "tool", ToolCallID: tc.ID, Content: out})
+			msgs = append(msgs, chatMessage{Role: "tool", ToolCallID: tc.ID, Content: truncateAgentToolResult(out)})
 		}
 	}
 	return "", fmt.Errorf("Agent 超过最大轮次")
@@ -671,17 +697,23 @@ func runAgentTool(ctx context.Context, feature, rawArgs, userID, convID string) 
 		RecordAudit(userID, "agent.tool", feature, args, "拒绝: "+err.Error())
 		return "FAILED: 执行被拒绝: " + err.Error()
 	}
-	done := WaitForTaskDone(t.ID, 60*time.Second)
+	// 等待窗口覆盖任务执行上限，并随 Agent 上下文取消，避免任务超时后
+	// 把仍在 running 的快照误判为成功结果。
+	done := WaitForTaskDoneContext(ctx, t.ID, taskRunTimeout+10*time.Second)
 	if done == nil {
 		RecordAudit(userID, "agent.tool", feature, args, "执行超时")
-		return "FAILED: 执行超时"
+		return "FAILED: 执行超时\n工具执行超时，请如实告知用户，不要编造结果。"
 	}
-	if done.Status == taskFailed {
-		RecordAudit(userID, "agent.tool", feature, args, "失败: "+done.Result)
-		return "FAILED: " + done.Result + "\n工具执行失败，请如实告知用户，不要编造结果。"
+	if done.Status != taskDone {
+		reason := done.Result
+		if reason == "" {
+			reason = done.Status
+		}
+		RecordAudit(userID, "agent.tool", feature, args, "失败: "+redactSecretText(reason))
+		return "FAILED: " + redactSecretText(reason) + "\n工具执行失败，请如实告知用户，不要编造结果。"
 	}
 	RecordAudit(userID, "agent.tool", feature, args, "成功")
-	return done.Result
+	return redactSecretText(done.Result)
 }
 
 func callChat(ctx context.Context, cfg AgentConfig, model string, msgs []chatMessage, tools []map[string]any, toolChoice string) (*chatResponse, error) {
@@ -764,6 +796,7 @@ func registerAgentAPI() {
 		if v := c.PostForm("max_history"); v != "" {
 			fmt.Sscan(v, &cfg.MaxHistory)
 		}
+		normalizeAgentLimits(&cfg)
 		SaveAgentConfig(cfg)
 		RecordAudit(consoleUser(c), "agent.config", cfg.Model, fmt.Sprintf("enabled=%v", cfg.Enabled), "成功")
 		jiyingJSON(c, "ok")
@@ -792,4 +825,16 @@ func registerAgentAPI() {
 		RecordAudit(consoleUser(c), "agent.run", convID, prompt, "成功")
 		jiyingJSON(c, out)
 	})
+}
+
+// truncateAgentToolResult 限制回灌给模型的工具结果大小，避免超长输出挤占上下文。
+func truncateAgentToolResult(s string) string {
+	if len(s) <= agentToolResultCap {
+		return s
+	}
+	cut := agentToolResultCap
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "\n...[结果已截断]"
 }

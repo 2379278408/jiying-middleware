@@ -101,6 +101,8 @@ func TestAccountReadTemporaryURL(t *testing.T) {
 
 func TestReadFileContent(t *testing.T) {
 	setupMediaBucket(t, "media-content")
+	// httptest 使用回环地址；显式打开内网例外，验证下载主流程。
+	t.Setenv("JIYING_ALLOW_PRIVATE_HOSTS", "1")
 	var contentSrv *httptest.Server
 	readSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/client/temporary-files/read-urls" {
@@ -224,5 +226,19 @@ func TestRegisterSendApisUploadBinds(t *testing.T) {
 	}
 	if out != "fid-js" {
 		t.Fatalf("uploadFileBase64 should return file id, got %q", out)
+	}
+}
+
+func TestReadFileContentRejectsPrivateTarget(t *testing.T) {
+	setupMediaBucket(t, "media-content-ssrf")
+	readSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"urls":[{"file_id":"f1","url":"http://127.0.0.1:9/secret","expires_at":"2026-09-25T00:00:00Z"}]}}`))
+	}))
+	defer readSrv.Close()
+	saveRelayConn(RelayConn{Account: AccountConn{BaseURL: readSrv.URL, Email: "e", Secret: "pw"}})
+	SetUserSession("e", "tok-ssrf")
+	if _, err := ReadFileContent(context.Background(), "", "", "f1"); err == nil || !strings.Contains(err.Error(), "读取地址不可用") {
+		t.Fatalf("private target must be rejected, got %v", err)
 	}
 }

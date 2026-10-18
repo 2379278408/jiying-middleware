@@ -203,3 +203,23 @@ func registerRolesAPI() {
 		jiyingJSON(c, "ok")
 	})
 }
+
+// requestRole 返回当前请求的有效角色：API Key 请求以 Key 作用域为准，会话请求按用户角色。
+func requestRole(c *gin.Context) string {
+	if v, ok := c.Get(ctxAPIKeyScope); ok {
+		if scope, _ := v.(string); scope != "" {
+			return scope
+		}
+	}
+	return UserRole(consoleUser(c))
+}
+
+// requestHasRole 判断当前请求是否达到指定角色；用于同一接口内的可选高风险分支。
+func requestHasRole(c *gin.Context, min string) bool {
+	need, ok := roleRank[min]
+	if !ok {
+		return false
+	}
+	got, ok := roleRank[requestRole(c)]
+	return ok && got >= need
+}

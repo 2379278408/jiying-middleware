@@ -196,11 +196,15 @@ func ReadFileContent(ctx context.Context, convID, msgID, fileID string) ([]byte,
 	if err != nil {
 		return nil, err
 	}
+	// 临时文件地址来自上游，下载前必须按出站规则校验，避免被诱导访问内网或元数据服务。
+	if err := validateOutboundURL(url, false); err != nil {
+		return nil, fmt.Errorf("读取地址不可用: %w", err)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := safeOutboundHTTPClient(30 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

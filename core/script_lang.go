@@ -95,6 +95,7 @@ func validatePythonScript(path string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), pythonScriptTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, pythonBin(), "-I", "-c", check, path)
+	configureProcessGroup(cmd)
 	cmd.Env = scriptEnv(nil)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -111,9 +112,10 @@ func validatePythonScript(path string) error {
 	return nil
 }
 
-// scriptConsoleEnv 为脚本注入本机控制台地址与控制台账号，插件可直接调用
+// scriptConsoleEnv 为脚本注入本机控制台地址与专用脚本账号，插件可直接调用
 // /jiying/api/* 发送消息或上传文件，无需自行猜测端口。
-// 仅管理员安装的脚本会拿到这些变量；普通用户脚本由功能权限控制。
+// 控制台口令是随机生成的 script 账号令牌，不向脚本暴露即应账号密码；
+// 需要以即应账号身份调用接口时使用 JIYING_ACCOUNT_*，密码始终留在服务端。
 func scriptConsoleEnv() map[string]string {
 	port := 8080
 	if BucketApp != nil {
@@ -125,12 +127,16 @@ func scriptConsoleEnv() map[string]string {
 		"JIYING_PORT":     strconv.Itoa(port),
 		"JIYING_BASE_URL": fmt.Sprintf("http://127.0.0.1:%d", port),
 	}
-	cfg := CurrentAccountConfig()
-	if cfg.Email != "" {
-		env["JIYING_CONSOLE_USER"] = cfg.Email
+	if token := scriptConsoleToken(); token != "" {
+		env["JIYING_CONSOLE_USER"] = ScriptConsoleUser
+		env["JIYING_CONSOLE_PASS"] = token
 	}
-	if cfg.Password != "" {
-		env["JIYING_CONSOLE_PASS"] = cfg.Password
+	cfg := CurrentAccountConfig()
+	if cfg.BaseURL != "" {
+		env["JIYING_ACCOUNT_BASE_URL"] = cfg.BaseURL
+	}
+	if cfg.Email != "" {
+		env["JIYING_ACCOUNT_EMAIL"] = cfg.Email
 	}
 	return env
 }
@@ -161,6 +167,11 @@ func runPythonScript(path, args, convID, replyTo string, cfgEnv map[string]strin
 		argv = append(argv, fields...)
 	}
 	cmd := exec.CommandContext(ctx, pythonBin(), argv...)
+	configureProcessGroup(cmd)
+	// 插件读取相对路径的数据文件时，以插件所在目录为工作目录。
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		cmd.Dir = dir
+	}
 	extra := map[string]string{
 		"JIYING_ARGS":     args,
 		"JIYING_CONV_ID":  convID,
@@ -186,9 +197,9 @@ func runPythonScript(path, args, convID, replyTo string, cfgEnv map[string]strin
 	if convID != "" {
 		emit = func(text string) { sendScriptText(convID, replyTo, text) }
 	}
-	result := deliverScriptOutput(out.String(), emit)
+	result := deliverScriptOutput(redactSecretText(out.String()), emit)
 	if runErr != nil {
-		return "", fmt.Errorf("%s", scriptFailureDetail(out.String(), errBuf.String(), runErr))
+		return "", fmt.Errorf("%s", redactSecretText(scriptFailureDetail(out.String(), errBuf.String(), runErr)))
 	}
 	return result, nil
 }

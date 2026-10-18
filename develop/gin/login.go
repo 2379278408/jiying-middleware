@@ -82,6 +82,27 @@ func PostLogin(c *gin.Context) {
 		jsonErr(c, "失败次数过多，账号已临时锁定，请约 5 分钟后重试")
 		return
 	}
+	// 插件脚本使用专用账号与随机令牌登录，不接触控制台管理员密码，也不会清理引导口令文件。
+	if username == core.ScriptConsoleUser {
+		if !core.ValidateScriptConsolePassword(password) {
+			core.GetMyLog().Warn("插件脚本登录失败 %s", utils.GetClientIP(c))
+			core.RecordAudit(username, "login.fail", username, "来源 "+utils.GetClientIP(c), "失败: 脚本令牌错误")
+			jsonErr(c, "用户名或密码错误")
+			return
+		}
+		u := users.GetUser(core.ConsoleAdminUserID())
+		if u == nil || u.Disable {
+			core.RecordAudit(username, "login.fail", username, "来源 "+utils.GetClientIP(c), "失败: 控制台管理员不可用")
+			jsonErr(c, "控制台管理员不可用")
+			return
+		}
+		core.ResetLoginFailures(guardKey)
+		IssueUserSession(c, u)
+		core.GetMyLog().Info("插件脚本登录成功 %s", utils.GetClientIP(c))
+		core.RecordAudit(username, "login.script", username, "来源 "+utils.GetClientIP(c), "成功")
+		jsonOK(c, nil)
+		return
+	}
 	u := users.VerifyPassword(username, password)
 	if u == nil {
 		core.GetMyLog().Warn("登录失败 %s，%s", username, utils.GetClientIP(c))

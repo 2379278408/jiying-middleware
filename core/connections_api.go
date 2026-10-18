@@ -13,6 +13,7 @@ import (
 
 // AccountProfile 是个人账号对外展示的必要信息，不含任何凭据。
 type AccountProfile struct {
+	ID        string `json:"id,omitempty"`
 	Email     string `json:"email"`
 	Nickname  string `json:"nickname,omitempty"`
 	AvatarURL string `json:"avatar_url,omitempty"`
@@ -42,6 +43,7 @@ func connectionsSnapshot(c *gin.Context) {
 		"account": gin.H{
 			"configured": acctConn.configured(),
 			"code_login": acctConn.CodeLogin,
+			"id":         profile.ID,
 			"email":      firstNonEmpty(profile.Email, acct.Email),
 			"nickname":   profile.Nickname,
 			"avatar_url": profile.AvatarURL,
@@ -270,6 +272,7 @@ func parseAccountProfile(raw []byte) AccountProfile {
 	var parsed struct {
 		Data struct {
 			User struct {
+				ID        string `json:"id"`
 				Email     string `json:"email"`
 				Name      string `json:"name"`
 				Nickname  string `json:"nickname"`
@@ -283,6 +286,7 @@ func parseAccountProfile(raw []byte) AccountProfile {
 	}
 	user := parsed.Data.User
 	return AccountProfile{
+		ID:        user.ID,
 		Email:     user.Email,
 		Nickname:  firstNonEmpty(user.Nickname, user.Name),
 		AvatarURL: firstNonEmpty(user.Avatar, user.AvatarURL),

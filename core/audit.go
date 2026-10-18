@@ -24,7 +24,70 @@ type AuditEntry struct {
 
 const auditKeep = 500
 
+// auditFlushDelay 合并短时间内的多条审计写入，避免高频操作反复序列化 500 条记录。
+const auditFlushDelay = time.Second
+
 var auditMu sync.Mutex
+
+var auditCache = struct {
+	key    string
+	loaded bool
+	list   []AuditEntry
+	dirty  bool
+	timer  *time.Timer
+}{}
+
+// loadAuditLocked 按当前存储桶加载审计到内存；桶切换时自动重载，测试之间不串数据。
+func loadAuditLocked() []AuditEntry {
+	if BucketApp == nil {
+		auditCache.key = ""
+		auditCache.loaded = true
+		auditCache.list = nil
+		return nil
+	}
+	key := BucketApp.String()
+	if auditCache.loaded && auditCache.key == key {
+		return auditCache.list
+	}
+	auditCache.key = key
+	auditCache.loaded = true
+	auditCache.list = nil
+	raw := BucketApp.GetString("jiying_audit")
+	if raw == "" {
+		return nil
+	}
+	var list []AuditEntry
+	if json.Unmarshal([]byte(raw), &list) == nil {
+		auditCache.list = list
+	}
+	return auditCache.list
+}
+
+// flushAudit 把内存中的审计列表写入桶；失败只记警告，下次写入会再次触发。
+func flushAudit() {
+	auditMu.Lock()
+	defer auditMu.Unlock()
+	auditCache.timer = nil
+	if !auditCache.dirty || BucketApp == nil {
+		return
+	}
+	// 存储桶已切换（测试或热切换）时丢弃旧桶的待写数据，避免写到新桶。
+	if !auditCache.loaded || auditCache.key != BucketApp.String() {
+		auditCache.dirty = false
+		return
+	}
+	raw, err := json.Marshal(auditCache.list)
+	if err != nil {
+		GetMyLog().Warn("审计日志序列化失败: %v", err)
+		return
+	}
+	if BucketApp.Set("jiying_audit", string(raw)) {
+		auditCache.dirty = false
+	}
+}
+
+// FlushAudit 在进程退出前补写尚未落盘的审计记录。
+func FlushAudit() { flushAudit() }
 
 // auditURL 只保留协议、主机与路径，剥离 userinfo、查询串与片段，
 // 避免把 URL 中可能携带的 token、密钥写入审计留痕。
@@ -55,35 +118,22 @@ func RecordAudit(actor, action, target, detail, result string) {
 	}
 	auditMu.Lock()
 	defer auditMu.Unlock()
-	list := ListAudit(auditKeep)
-	list = append(list, entry)
+	list := append(loadAuditLocked(), entry)
 	if len(list) > auditKeep {
 		list = list[len(list)-auditKeep:]
 	}
-	if BucketApp == nil {
-		return
+	auditCache.list = list
+	auditCache.dirty = true
+	if auditCache.timer == nil {
+		auditCache.timer = time.AfterFunc(auditFlushDelay, flushAudit)
 	}
-	raw, err := json.Marshal(list)
-	if err != nil {
-		GetMyLog().Warn("审计日志序列化失败: %v", err)
-		return
-	}
-	BucketApp.Set("jiying_audit", string(raw))
 }
 
 // ListAudit 按时间顺序返回最近 limit 条审计记录。
 func ListAudit(limit int) []AuditEntry {
-	if BucketApp == nil {
-		return nil
-	}
-	raw := BucketApp.GetString("jiying_audit")
-	if raw == "" {
-		return nil
-	}
-	var list []AuditEntry
-	if err := json.Unmarshal([]byte(raw), &list); err != nil {
-		return nil
-	}
+	auditMu.Lock()
+	defer auditMu.Unlock()
+	list := append([]AuditEntry(nil), loadAuditLocked()...)
 	if limit > 0 && len(list) > limit {
 		list = list[len(list)-limit:]
 	}

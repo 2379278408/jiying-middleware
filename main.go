@@ -2,10 +2,15 @@ package main
 
 import (
 	"bufio"
+	"context"
+	"errors"
 	"flag"
+	"net/http"
 	"os"
+	"os/signal"
 	"runtime"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/DeanThompson/ginpprof"
@@ -57,14 +62,38 @@ func main() {
 	if bucketPort := core.BucketApp.GetInt("port"); bucketPort != 0 {
 		port = bucketPort
 	}
+	addr := "0.0.0.0:" + strconv.Itoa(port)
 	if port == 443 {
-		certFile := core.BucketApp.GetString("certFile")
-		keyFile := core.BucketApp.GetString("keyFile")
-		go core.Server.RunTLS(":443", certFile, keyFile)
-	} else {
-		core.GetMyLog().Info("Http服务已运行(%d)。", port)
-		go core.Server.Run("0.0.0.0:" + strconv.Itoa(port))
+		addr = ":443"
 	}
+	srv := &http.Server{Addr: addr, Handler: core.Server, ReadHeaderTimeout: 10 * time.Second}
+	go func() {
+		var err error
+		if port == 443 {
+			certFile := core.BucketApp.GetString("certFile")
+			keyFile := core.BucketApp.GetString("keyFile")
+			err = srv.ListenAndServeTLS(certFile, keyFile)
+		} else {
+			core.GetMyLog().Info("Http服务已运行(%d)。", port)
+			err = srv.ListenAndServe()
+		}
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			core.GetMyLog().Error("Http服务退出: %v", err)
+		}
+	}()
+	// 收到退出信号后停止接收新请求，补写计数并给在途请求留出收尾时间。
+	go func() {
+		sig := make(chan os.Signal, 1)
+		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+		<-sig
+		core.GetMyLog().Info("收到退出信号，正在停止服务")
+		core.FlushMsgStats()
+		core.FlushAudit()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+		os.Exit(0)
+	}()
 
 	core.LocalIPv4 = utils.GetInternalIP()
 	if len(core.LocalIPv4) >= 7 && core.LocalIPv4[:7] == "172.17." {
