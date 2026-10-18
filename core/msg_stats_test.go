@@ -8,6 +8,7 @@ import (
 func setupMsgStatsBucket(t *testing.T, name string) {
 	t.Helper()
 	t.Setenv("JIYING_DATA", t.TempDir())
+	stopMsgStatsFlush()
 	b, err := MakeBucket(name, 6)
 	if err != nil {
 		t.Fatal(err)
@@ -16,6 +17,7 @@ func setupMsgStatsBucket(t *testing.T, name string) {
 	BucketApp.Delete(jiyingMsgStatsKey)
 	resetMsgStatsForTest()
 	t.Cleanup(func() {
+		stopMsgStatsFlush()
 		BucketApp.Delete(jiyingMsgStatsKey)
 		resetMsgStatsForTest()
 	})

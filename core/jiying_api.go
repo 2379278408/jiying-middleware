@@ -78,20 +78,34 @@ var msgStatsFlush = struct {
 
 var msgStatsDirty atomic.Bool
 
+// msgStatsFlushWG 跟踪在途定时器回调，测试替换 BucketApp 前可等待其结束。
+var msgStatsFlushWG sync.WaitGroup
+
 func scheduleMsgStatsFlush() {
 	msgStatsDirty.Store(true)
 	msgStatsFlush.Lock()
 	defer msgStatsFlush.Unlock()
 	if msgStatsFlush.timer == nil {
-		msgStatsFlush.timer = time.AfterFunc(msgStatsFlushDelay, flushMsgStats)
+		msgStatsFlushWG.Add(1)
+		msgStatsFlush.timer = time.AfterFunc(msgStatsFlushDelay, func() {
+			defer msgStatsFlushWG.Done()
+			flushMsgStats()
+		})
 	}
 }
 
 // flushMsgStats 把脏计数写入桶；写盘失败不阻塞消息处理，下次计数会再次触发。
 func flushMsgStats() {
 	msgStatsFlush.Lock()
-	msgStatsFlush.timer = nil
+	stopped := false
+	if msgStatsFlush.timer != nil {
+		stopped = msgStatsFlush.timer.Stop()
+		msgStatsFlush.timer = nil
+	}
 	msgStatsFlush.Unlock()
+	if stopped {
+		msgStatsFlushWG.Done()
+	}
 	if !msgStatsDirty.Swap(false) {
 		return
 	}
@@ -129,6 +143,20 @@ func jiyingCountOutbound() { countJiyingMsg(false) }
 
 // FlushMsgStats 在进程退出前把内存中的消息计数补写到桶。
 func FlushMsgStats() { flushMsgStats() }
+
+// stopMsgStatsFlush 取消待触发的定时器并等待在途回调结束，供测试替换 BucketApp 前调用。
+func stopMsgStatsFlush() {
+	msgStatsDirty.Store(false)
+	msgStatsFlush.Lock()
+	if msgStatsFlush.timer != nil {
+		if msgStatsFlush.timer.Stop() {
+			msgStatsFlushWG.Done()
+		}
+		msgStatsFlush.timer = nil
+	}
+	msgStatsFlush.Unlock()
+	msgStatsFlushWG.Wait()
+}
 
 func jiyingMsgCounts() (int, int) {
 	jiyingMsgStats.Lock()
