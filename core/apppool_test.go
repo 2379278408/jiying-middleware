@@ -3,10 +3,23 @@ package core
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"testing"
 )
+
+func resetAppPoolState() {
+	appConnPool.mu.Lock()
+	appConnPool.items = map[string]*appRuntime{}
+	appConnPool.convApp = map[string]string{}
+	appConnPool.convOrder = nil
+	appConnPool.convBucket = ""
+	appConnPool.convLoaded = false
+	appConnPool.defaultID = ""
+	activeJiying = nil
+	appConnPool.mu.Unlock()
+}
 
 func setupAppPoolBucket(t *testing.T, name string) {
 	t.Helper()
@@ -18,10 +31,14 @@ func setupAppPoolBucket(t *testing.T, name string) {
 	}
 	BucketApp = b
 	BucketApp.Delete(apppoolKey)
+	BucketApp.Delete(convAppsKey)
 	BucketApp.Delete("relay_conn")
+	resetAppPoolState()
 	t.Cleanup(func() {
 		BucketApp.Delete(apppoolKey)
+		BucketApp.Delete(convAppsKey)
 		BucketApp.Delete("relay_conn")
+		resetAppPoolState()
 	})
 }
 
@@ -49,19 +66,7 @@ func TestLoadAppConnsFallsBackToLegacy(t *testing.T) {
 }
 
 func TestClientForConvRoutesByRememberedApp(t *testing.T) {
-	appConnPool.mu.Lock()
-	appConnPool.items = map[string]*appRuntime{}
-	appConnPool.convApp = map[string]string{}
-	appConnPool.defaultID = ""
-	appConnPool.mu.Unlock()
-	t.Cleanup(func() {
-		appConnPool.mu.Lock()
-		appConnPool.items = map[string]*appRuntime{}
-		appConnPool.convApp = map[string]string{}
-		appConnPool.defaultID = ""
-		appConnPool.mu.Unlock()
-		activeJiying = nil
-	})
+	setupAppPoolBucket(t, "apppool-routing")
 
 	a := NewJiyingClient(JiyingConfig{AppID: "app-a"}, nil)
 	b := NewJiyingClient(JiyingConfig{AppID: "app-b"}, nil)
@@ -151,5 +156,118 @@ func TestUpsertAppConnConcurrentNoLostUpdate(t *testing.T) {
 		if !seen[fmt.Sprintf("app-%d", i)] {
 			t.Fatalf("app-%d missing after concurrent upserts: %+v", i, list)
 		}
+	}
+}
+
+func TestConvAppOwnershipPersistsAndFailsClosed(t *testing.T) {
+	setupAppPoolBucket(t, "apppool-owner")
+	a := NewJiyingClient(JiyingConfig{AppID: "app-a"}, nil)
+	b := NewJiyingClient(JiyingConfig{AppID: "app-b"}, nil)
+	appConnPool.mu.Lock()
+	appConnPool.items["app-a"] = &appRuntime{cfg: AppConn{AppID: "app-a"}, client: a}
+	appConnPool.items["app-b"] = &appRuntime{cfg: AppConn{AppID: "app-b"}, client: b}
+	appConnPool.defaultID = "app-a"
+	appConnPool.syncDefaultLocked()
+	appConnPool.mu.Unlock()
+
+	rememberConvApp("conv-b", "app-b")
+	if got := clientForConv("conv-b"); got != b {
+		t.Fatal("conversation must route to owning app")
+	}
+	if appID, _, _, known := ConvAppOwner("conv-b"); !known || appID != "app-b" {
+		t.Fatalf("owner mismatch: %s %v", appID, known)
+	}
+
+	// 模拟进程重启：内存清空后应从存储恢复归属，而不是落回默认应用。
+	appConnPool.mu.Lock()
+	appConnPool.convApp = map[string]string{}
+	appConnPool.convOrder = nil
+	appConnPool.convBucket = ""
+	appConnPool.convLoaded = false
+	appConnPool.items["app-a"] = &appRuntime{cfg: AppConn{AppID: "app-a"}, client: a}
+	appConnPool.items["app-b"] = &appRuntime{cfg: AppConn{AppID: "app-b"}, client: b}
+	appConnPool.mu.Unlock()
+	if got := clientForConv("conv-b"); got != b {
+		t.Fatal("ownership must survive reload")
+	}
+
+	// 归属应用被移除时失败关闭，不能把消息误发到默认应用。
+	appConnPool.mu.Lock()
+	delete(appConnPool.items, "app-b")
+	appConnPool.mu.Unlock()
+	if got := clientForConv("conv-b"); got != nil {
+		t.Fatal("known conversation without app must fail closed")
+	}
+	if got := clientForConv("conv-unknown"); got != a {
+		t.Fatal("unknown conversation may fall back to default")
+	}
+}
+
+func TestRemovedAppClearsConversationOwnership(t *testing.T) {
+	setupAppPoolBucket(t, "apppool-cleanup")
+	t.Cleanup(stopAppPool)
+	saveAppConns([]AppConn{
+		{WSURL: "ws://a", AppID: "app-a", AppSecret: "secret-a"},
+		{WSURL: "ws://b", AppID: "app-b", AppSecret: "secret-b"},
+	})
+	applyAppConns(loadAppConns())
+	rememberConvApp("conv-b", "app-b")
+	if err := RemoveAppConn("app-b"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, known := ConvAppOwner("conv-b"); known {
+		t.Fatal("removed app ownership must be cleared")
+	}
+}
+
+func TestAnnotateConversationsAddsAppOwnership(t *testing.T) {
+	setupAppPoolBucket(t, "apppool-annotate")
+	c := NewJiyingClient(JiyingConfig{AppID: "app-a"}, nil)
+	appConnPool.mu.Lock()
+	appConnPool.items["app-a"] = &appRuntime{cfg: AppConn{AppID: "app-a"}, client: c}
+	appConnPool.defaultID = "app-a"
+	appConnPool.syncDefaultLocked()
+	appConnPool.mu.Unlock()
+	rememberConvApp("conv-a", "app-a")
+
+	in := []byte(`{"conversations":[{"id":"conv-a","name":"A"},{"id":"conv-x","name":"X"}],"total":2}`)
+	out := annotateConversations(in)
+	var root struct {
+		Conversations []map[string]any `json:"conversations"`
+		Total         int              `json:"total"`
+	}
+	if err := json.Unmarshal(out, &root); err != nil {
+		t.Fatal(err)
+	}
+	if root.Total != 2 || len(root.Conversations) != 2 {
+		t.Fatalf("upstream fields lost: %s", out)
+	}
+	a := root.Conversations[0]
+	if a["relay_app_id"] != "app-a" || a["relay_app_known"] != true || a["name"] != "A" {
+		t.Fatalf("owned conversation mismatch: %+v", a)
+	}
+	x := root.Conversations[1]
+	if x["relay_app_known"] != false || x["relay_app_id"] != nil {
+		t.Fatalf("unknown conversation must stay unassigned: %+v", x)
+	}
+}
+
+func TestEnqueueTaskCapturesConversationApp(t *testing.T) {
+	setupAppPoolBucket(t, "apppool-task")
+	c := NewJiyingClient(JiyingConfig{AppID: "app-a"}, nil)
+	appConnPool.mu.Lock()
+	appConnPool.items["app-a"] = &appRuntime{cfg: AppConn{AppID: "app-a"}, client: c}
+	appConnPool.defaultID = "app-a"
+	appConnPool.syncDefaultLocked()
+	appConnPool.mu.Unlock()
+	rememberConvApp("conv-task", "app-a")
+
+	task, err := EnqueueTask(Task{Feature: "帮助", UserID: "user-app-task", ConversationID: "conv-task", Confirm: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer DeleteTask(task.ID)
+	if task.AppID != "app-a" {
+		t.Fatalf("task must capture conversation app, got %q", task.AppID)
 	}
 }

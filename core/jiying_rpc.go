@@ -249,6 +249,32 @@ func (c *JiyingClient) ListMessages(ctx context.Context, conversationID string, 
 	return out.Messages, nil
 }
 
+// RecentMessages 读取应用可见的最近消息，用于个人账号不可见时按应用归属回退。
+func (c *JiyingClient) RecentMessages(ctx context.Context, conversationID string, limit int) ([]JiyingMessage, error) {
+	if strings.TrimSpace(conversationID) == "" {
+		return nil, fmt.Errorf("缺少会话 ID")
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	raw, err := c.Call(ctx, "conversation.messages.list", map[string]any{
+		"conversation_id":     conversationID,
+		"before_or_equal_seq": int64(1<<63 - 1),
+		"limit":               limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Messages []JiyingMessage `json:"messages"`
+	}
+	_ = json.Unmarshal(raw, &out)
+	return out.Messages, nil
+}
+
 // ---- 话题类 ----
 
 // JiyingTopic 是话题创建/查询返回的状态。
@@ -498,12 +524,11 @@ func (c *JiyingClient) GroupSetRole(ctx context.Context, conversationID, memberT
 
 // ---- 脚本运行时暴露 ----
 
-// appClientForScript 返回脚本可用的应用通道客户端：优先按会话归属，否则默认应用。
+// appClientForScript 返回脚本可用的应用通道客户端：会话有上下文时必须按归属路由，
+// 归属通道不可用时返回 nil 让脚本失败，避免把回执或查询发到默认应用。
 func appClientForScript(convID string) *JiyingClient {
 	if convID != "" {
-		if c := clientForConv(convID); c != nil {
-			return c
-		}
+		return clientForConv(convID)
 	}
 	return currentJiying()
 }

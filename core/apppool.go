@@ -13,6 +13,12 @@ import (
 // apppoolKey 是应用连接池在本地桶中的持久化键。
 const apppoolKey = "relay_apps"
 
+// convAppsKey 持久化会话到应用的归属映射，重启后仍能把出站消息送回原通道。
+const convAppsKey = "relay_conv_apps"
+
+// convAppsLimit 限制归属映射规模，超出后按最近使用顺序淘汰最旧记录。
+const convAppsLimit = 2000
+
 type appRuntime struct {
 	cfg    AppConn
 	client *JiyingClient
@@ -29,9 +35,100 @@ type appPool struct {
 	defaultID string
 	// convApp 记录会话归属的应用，用于把出站消息路由回正确通道。
 	convApp map[string]string
+	// convOrder 按最近使用顺序保存会话 ID，用于有界淘汰。
+	convOrder []string
+	// convBucket 标记当前归属映射来自哪个存储桶，测试或热切换时自动重载。
+	convBucket string
+	convLoaded bool
 }
 
 var appConnPool = &appPool{items: map[string]*appRuntime{}, convApp: map[string]string{}}
+
+// ensureConvAppsLocked 在持有 appConnPool.mu 时按需加载归属映射；存储桶变化会清空旧缓存。
+func (p *appPool) ensureConvAppsLocked() {
+	key := ""
+	if BucketApp != nil {
+		key = BucketApp.String()
+	}
+	if p.convLoaded && p.convBucket == key {
+		return
+	}
+	p.convLoaded = true
+	p.convBucket = key
+	p.convApp = map[string]string{}
+	p.convOrder = nil
+	if BucketApp == nil {
+		return
+	}
+	raw := BucketApp.GetString(convAppsKey)
+	if raw == "" {
+		return
+	}
+	var stored struct {
+		Items map[string]string `json:"items"`
+		Order []string          `json:"order"`
+	}
+	if json.Unmarshal([]byte(raw), &stored) != nil {
+		return
+	}
+	seen := make(map[string]bool, len(stored.Order))
+	for _, id := range stored.Order {
+		id = strings.TrimSpace(id)
+		appID := strings.TrimSpace(stored.Items[id])
+		if id == "" || appID == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		p.convApp[id] = appID
+		p.convOrder = append(p.convOrder, id)
+	}
+	for id, appID := range stored.Items {
+		if id == "" || appID == "" || seen[id] || len(p.convApp) >= convAppsLimit {
+			continue
+		}
+		p.convApp[id] = appID
+		p.convOrder = append(p.convOrder, id)
+	}
+}
+
+// persistConvAppsLocked 把当前归属映射写回存储；调用方必须持有 appConnPool.mu。
+func (p *appPool) persistConvAppsLocked() {
+	if BucketApp == nil {
+		return
+	}
+	raw, err := json.Marshal(struct {
+		Items map[string]string `json:"items"`
+		Order []string          `json:"order"`
+	}{Items: p.convApp, Order: p.convOrder})
+	if err != nil {
+		return
+	}
+	BucketApp.Set(convAppsKey, string(raw))
+}
+
+// forgetConvAppsLocked 清理已移除应用的归属记录；调用方必须持有 appConnPool.mu。
+func (p *appPool) forgetConvAppsLocked(alive map[string]bool) bool {
+	changed := false
+	for convID, appID := range p.convApp {
+		if alive[appID] {
+			continue
+		}
+		delete(p.convApp, convID)
+		changed = true
+	}
+	if !changed {
+		return false
+	}
+	kept := p.convOrder[:0]
+	for _, convID := range p.convOrder {
+		if _, ok := p.convApp[convID]; ok {
+			kept = append(kept, convID)
+		}
+	}
+	p.convOrder = kept
+	p.persistConvAppsLocked()
+	return true
+}
 
 // poolMu 串行化连接池配置的「读-改-写」：loadAppConns / loadAccountConns 都基于
 // 整份列表覆写，若两个请求并发修改会发生丢失更新。所有会写配置的入口都要持有它。
@@ -127,6 +224,12 @@ func applyAppConns(list []AppConn) {
 	} else {
 		appConnPool.defaultID = ""
 	}
+	alive := make(map[string]bool, len(want))
+	for id := range want {
+		alive[id] = true
+	}
+	appConnPool.ensureConvAppsLocked()
+	appConnPool.forgetConvAppsLocked(alive)
 	appConnPool.syncDefaultLocked()
 }
 
@@ -150,31 +253,61 @@ func stopAppPool() {
 }
 
 // rememberConvApp 记录某会话所属应用，用于出站消息路由。
+// 只有归属变化时才落盘，避免每条入站消息都重写整份映射。
 func rememberConvApp(conversationID, appID string) {
+	conversationID = strings.TrimSpace(conversationID)
+	appID = strings.TrimSpace(appID)
 	if conversationID == "" || appID == "" {
 		return
 	}
 	appConnPool.mu.Lock()
+	defer appConnPool.mu.Unlock()
+	appConnPool.ensureConvAppsLocked()
+	if old, ok := appConnPool.convApp[conversationID]; ok && old == appID {
+		return
+	}
 	appConnPool.convApp[conversationID] = appID
-	if len(appConnPool.convApp) > 2000 {
-		// 简单上限，避免长期运行无限增长。
-		for k := range appConnPool.convApp {
-			if k != conversationID {
-				delete(appConnPool.convApp, k)
-			}
+	kept := appConnPool.convOrder[:0]
+	for _, id := range appConnPool.convOrder {
+		if id != conversationID {
+			kept = append(kept, id)
 		}
 	}
-	appConnPool.mu.Unlock()
+	appConnPool.convOrder = append(kept, conversationID)
+	for len(appConnPool.convOrder) > convAppsLimit {
+		oldest := appConnPool.convOrder[0]
+		appConnPool.convOrder = appConnPool.convOrder[1:]
+		delete(appConnPool.convApp, oldest)
+	}
+	appConnPool.persistConvAppsLocked()
 }
 
-// clientForConv 返回处理该会话的客户端：优先按会话归属路由，否则回退默认/单连接。
+// ConvAppOwner 返回会话归属的应用资料。known 为 false 表示尚未记录归属。
+func ConvAppOwner(conversationID string) (appID, name string, online, known bool) {
+	appConnPool.mu.Lock()
+	defer appConnPool.mu.Unlock()
+	appConnPool.ensureConvAppsLocked()
+	appID, known = appConnPool.convApp[conversationID]
+	if !known {
+		return "", "", false, false
+	}
+	rt, ok := appConnPool.items[appID]
+	if !ok || rt == nil {
+		return appID, "", false, true
+	}
+	return appID, rt.profile.Name, rt.client.Connected(), true
+}
+
+// clientForConv 返回处理该会话的客户端：已知归属但通道缺失时失败关闭，避免误发到默认应用。
 func clientForConv(conversationID string) *JiyingClient {
 	appConnPool.mu.Lock()
 	defer appConnPool.mu.Unlock()
+	appConnPool.ensureConvAppsLocked()
 	if appID, ok := appConnPool.convApp[conversationID]; ok {
-		if rt, ok := appConnPool.items[appID]; ok {
+		if rt, ok := appConnPool.items[appID]; ok && rt != nil {
 			return rt.client
 		}
+		return nil
 	}
 	if rt, ok := appConnPool.items[appConnPool.defaultID]; ok {
 		return rt.client
@@ -248,22 +381,30 @@ type AppPoolItem struct {
 	Name        string `json:"name,omitempty"`
 	Description string `json:"description,omitempty"`
 	AvatarURL   string `json:"avatar_url,omitempty"`
+	// Conversations 是该应用当前记录的会话归属数量，便于控制台区分活跃应用。
+	Conversations int `json:"conversation_count"`
 }
 
 // AppPoolSnapshot 返回当前所有应用通道状态，密钥仅以掩码呈现。
 func AppPoolSnapshot() []AppPoolItem {
 	appConnPool.mu.Lock()
 	defer appConnPool.mu.Unlock()
+	appConnPool.ensureConvAppsLocked()
+	convCount := make(map[string]int, len(appConnPool.items))
+	for _, appID := range appConnPool.convApp {
+		convCount[appID]++
+	}
 	out := make([]AppPoolItem, 0, len(appConnPool.items))
 	for id, rt := range appConnPool.items {
 		out = append(out, AppPoolItem{
-			AppID:       id,
-			WSURL:       maskURL(rt.cfg.WSURL),
-			Online:      rt.client.Connected(),
-			IsDefault:   id == appConnPool.defaultID,
-			Name:        rt.profile.Name,
-			Description: rt.profile.Description,
-			AvatarURL:   rt.profile.Avatar,
+			AppID:         id,
+			WSURL:         maskURL(rt.cfg.WSURL),
+			Online:        rt.client.Connected(),
+			IsDefault:     id == appConnPool.defaultID,
+			Name:          rt.profile.Name,
+			Description:   rt.profile.Description,
+			AvatarURL:     rt.profile.Avatar,
+			Conversations: convCount[id],
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {

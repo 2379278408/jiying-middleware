@@ -367,7 +367,13 @@ func dispatchMiddleware(sender Sender, msg string) (handled bool, ok bool) {
 		return true, true
 	}
 	if f.Confirm {
-		client := currentJiying()
+		var client *JiyingClient
+		if js, ok := sender.(*JiyingSender); ok {
+			client = js.client
+		}
+		if client == nil {
+			client = clientForConv(chatID)
+		}
 		if client == nil {
 			sender.Reply("需要确认，但即应未连接")
 			return true, true

@@ -15,6 +15,16 @@
     "nav.pinned": { zh: "置顶", en: "Pinned" },
     "nav.home": { zh: "工作台", en: "Dashboard" },
     "nav.chat": { zh: "消息收发", en: "Messages" },
+    "chat.app": { zh: "应用", en: "App" },
+    "chat.user": { zh: "用户", en: "User" },
+    "chat.allApps": { zh: "全部应用", en: "All apps" },
+    "chat.unassigned": { zh: "未归属", en: "Unassigned" },
+    "chat.filter.title": { zh: "按应用筛选会话", en: "Filter conversations by app" },
+    "chat.noAssignment": { zh: "会话未记录应用归属", en: "No app assignment" },
+    "chat.appOffline": { zh: "应用通道离线", en: "app channel offline" },
+    "chat.noIdentity": { zh: "当前会话没有可用发送身份", en: "No send identity available" },
+    "chat.canSend": { zh: "可发送身份：", en: "Send as: " },
+    "chat.filter.empty": { zh: "该筛选下暂无会话", en: "No conversations match this filter" },
     "nav.connect": { zh: "接入系统", en: "Connect" },
     "nav.pool": { zh: "连接池", en: "Connection pool" },
     "nav.roles": { zh: "权限管理", en: "Access control" },
@@ -475,6 +485,17 @@
     "目录": "Folders",
     "列表": "List",
     "全部应用": "All apps",
+    "未归属": "Unassigned",
+    "按应用筛选会话": "Filter conversations by app",
+    "应用": "App",
+    "会话未记录应用归属": "No app assignment",
+    "应用已移除": "App removed",
+    "应用通道可用": "app channel available",
+    "应用通道离线": "app channel offline",
+    "账号通道可用": "account available",
+    "账号通道未登录": "account signed out",
+    "该应用下暂无会话": "No conversations for this app",
+    "该筛选下暂无会话": "No conversations match this filter",
     "未分类": "Uncategorized",
     "搜索插件 / 分类 / 服务 / 应用": "Search plugins / categories / services / apps",
     "搜索插件": "Search plugins",
@@ -793,6 +814,7 @@
     [/^(\d+) 项待处理$/, "$1 items pending"],
     [/^(\d+) 个常用动作$/, "$1 quick actions"],
     [/^(\d+) 条（最近 100 条）$/, "$1 rows (last 100)"],
+    [/^(\d+) 会话$/, "$1 conversations"],
     [/^(\d+) 条$/, "$1 rows"],
     [/^共 (\d+) 个$/, "$1 total"],
     [/^(\d+) 个$/, "$1 items"],
@@ -1134,7 +1156,7 @@
     if (b && retry) b.addEventListener("click", retry);
   }
 
-  var state = { view: "home", cerr: null, convs: [], conv: null, msgs: [], interval: null, baseUptime: null, uptimeAt: 0, uptimeTimer: null, chatEpoch: 0, chatRequest: 0, chatConvID: "", logLines: [], logShown: [], logPending: "", logTimer: null, logLevel: "all", logPinned: true, logFromBottom: 0, logLoadedAt: "", logDay: "", tasks: [], tasksErr: "", silentTasks: [], role: "", auditRows: [], auditErr: "", executions: [], executionsErr: "", execFilter: { kind: "", status: "", name: "" }, chatCaps: null, account: null, app: null, apps: [], appProfiles: {}, appNames: {}, scriptView: "tree", scriptFolders: {} };
+  var state = { view: "home", cerr: null, convs: [], conv: null, msgs: [], interval: null, baseUptime: null, uptimeAt: 0, uptimeTimer: null, chatEpoch: 0, chatRequest: 0, chatConvID: "", logLines: [], logShown: [], logPending: "", logTimer: null, logLevel: "all", logPinned: true, logFromBottom: 0, logLoadedAt: "", logDay: "", tasks: [], tasksErr: "", silentTasks: [], role: "", auditRows: [], auditErr: "", executions: [], executionsErr: "", execFilter: { kind: "", status: "", name: "" }, chatCaps: null, convFilter: "", account: null, app: null, apps: [], appProfiles: {}, appNames: {}, scriptView: "tree", scriptFolders: {} };
   var VIEW_KEY = "relay-view";
   var PROFILE_KEY = "relay-profile";
   var ROLE_LABEL = { master: "主人", ops: "运营", readonly: "只读" };
@@ -2086,7 +2108,7 @@
     var cont = $("#view-chat");
     cont.innerHTML = '<div class="page-head"><div><span class="eyebrow">MESSAGES / 03</span><h2>消息收发</h2><p>选择会话查看消息并发送内容</p></div></div>'
       + '<div class="chat-grid">'
-      + '<div class="panel"><div class="panel-head"><h3>会话</h3></div><div class="panel-body" id="convList">' + loadingState() + '</div></div>'
+      + '<div class="panel"><div class="panel-head"><h3>会话</h3><select class="select" id="convAppFilter" aria-label="' + esc(t("chat.filter.title")) + '" style="max-width:158px;margin-left:auto"></select></div><div class="panel-body" id="convList">' + loadingState() + '</div></div>'
       + '<div class="panel" style="display:flex;flex-direction:column"><div class="panel-head"><h3>消息</h3><span class="hint" id="chatTitle"></span><select class="select" id="chatAccountSelect" style="max-width:220px;margin-left:auto"><option>加载账号中…</option></select></div>'
       + '<div class="panel-body" style="flex:1;display:flex;flex-direction:column"><div class="chat-stream" id="chatStream">' + emptyState("message", "选择一个会话", "从会话列表中选择，即可查看历史消息并发送内容。") + "</div>"
       + '<div class="muted" id="chatCap" style="font-size:12px;margin-top:8px">选择会话后显示可用发送身份</div>'
@@ -2107,6 +2129,8 @@
       if (!select) return;
       if (r.code !== 200) { select.innerHTML = '<option value="">账号状态加载失败，点「刷新」重试</option>'; return; }
       var accounts = r.data && r.data.accounts ? r.data.accounts : [];
+      state.apps = r.data && r.data.apps ? r.data.apps : [];
+      paintConvFilter();
       if (!accounts.length) {
         select.innerHTML = '<option value="">请先在接入系统登录账号</option>';
         return;
@@ -2125,33 +2149,103 @@
     });
   }
 
+  // convAppMeta 把后端补充的 relay_* 归属字段解析成前端可直接展示的应用信息。
+  function convAppMeta(c) {
+    if (!c) return null;
+    var id = String(c.relay_app_id || "").trim();
+    if (!id) return null;
+    var known = state.apps.filter(function (a) { return String(a.app_id || "") === id; })[0] || {};
+    var cached = state.appNames[id] || {};
+    var name = c.relay_app_name || known.name || cached.name || shortID(id);
+    var avatar = known.avatar_url || cached.avatar || "";
+    return { id: id, name: name, avatar: avatar, online: c.relay_app_online !== false && known.online !== false };
+  }
+  function convVisible(c) {
+    var f = state.convFilter;
+    if (!f) return true;
+    var meta = convAppMeta(c);
+    if (f === "__none__") return !meta;
+    return !!meta && meta.id === f;
+  }
+  function paintConvFilter() {
+    var sel = $("#convAppFilter");
+    if (!sel) return;
+    var counts = {};
+    var unowned = 0;
+    (state.convs || []).forEach(function (c) {
+      var meta = convAppMeta(c);
+      if (!meta) unowned += 1;
+      else counts[meta.id] = (counts[meta.id] || 0) + 1;
+    });
+    var seen = {};
+    var html = '<option value="">' + esc(t("chat.allApps")) + "</option>";
+    (state.apps || []).forEach(function (a) {
+      var id = String(a.app_id || "");
+      if (!id || seen[id]) return;
+      seen[id] = true;
+      var name = a.name || state.appNames[id] && state.appNames[id].name || shortID(id);
+      html += '<option value="' + esc(id) + '">' + esc(name) + " (" + (counts[id] || 0) + ")</option>";
+    });
+    Object.keys(counts).forEach(function (id) {
+      if (seen[id]) return;
+      html += '<option value="' + esc(id) + '">' + esc(shortID(id)) + " (" + counts[id] + ")</option>";
+    });
+    html += '<option value="__none__">' + esc(t("chat.unassigned")) + " (" + unowned + ")</option>";
+    sel.innerHTML = html;
+    var want = state.convFilter;
+    if (want && want !== "__none__" && !seen[want]) {
+      var extra = counts[want] ? want : "";
+      if (!extra) { state.convFilter = ""; want = ""; }
+    }
+    sel.value = want || "";
+    sel.onchange = function () {
+      state.convFilter = sel.value;
+      renderConvs();
+    };
+  }
+  function renderConvs() {
+    var box = $("#convList");
+    if (!box) return;
+    paintConvFilter();
+    var list = state.convs || [];
+    if (!list.length) { box.innerHTML = emptyState("message", "暂无会话", "收到或发起会话后，会在这里列出。"); return; }
+    var rows = [];
+    list.forEach(function (c, i) {
+      if (!convVisible(c)) return;
+      var peer = c.peer || c.user || c.target || c.contact || {};
+      var name = c.name || c.title || pickDisplayName(peer, "") || c.id;
+      var meta = convAppMeta(c);
+      var active = state.conv && state.conv.id === c.id;
+      var av = pickAvatarURL(c) || (state.app && state.app.avatar_url) || "";
+      var appLine = meta
+        ? '<span class="conv-app-line" title="' + esc(t("chat.app") + "：" + meta.name) + '">' + avatarHTML(meta.avatar, meta.name, "conv-app-av") + '<span class="conv-app-name">' + esc(meta.name) + (meta.online ? "" : " · " + esc(t("chat.appOffline"))) + "</span></span>"
+        : '<span class="conv-app-line conv-app-none" title="' + esc(t("chat.noAssignment")) + '">' + esc(t("chat.unassigned")) + "</span>";
+      rows.push('<button type="button" class="conv-item' + (active ? " active" : "") + '" data-conv-index="' + i + '" title="' + esc(name + (meta ? " · " + meta.name : "")) + '">' + avatarHTML(av, name, "conv-avatar") + '<span class="conv-main"><span class="cname">' + esc(name) + "</span>" + appLine + "</span></button>");
+    });
+    if (!rows.length) { box.innerHTML = emptyState("message", t("chat.filter.empty"), ""); return; }
+    box.innerHTML = rows.join("");
+    $$("[data-conv-index]", box).forEach(function (item) {
+      item.addEventListener("click", function () { pickConv(Number(item.getAttribute("data-conv-index"))); });
+    });
+    hydrateIcons();
+  }
   function loadConvs(restoreID) {
     var epoch = state.chatEpoch;
     api("/jiying/api/conversations").then(function (r) {
       if (epoch !== state.chatEpoch) return;
       if (r.code !== 200) { errorState($("#convList"), "message", r.code === 403 ? "权限不足" : "会话加载失败", r.msg || r.message, loadConvs); return; }
-      var list = r.data && r.data.conversations ? r.data.conversations : [];
-      state.convs = list;
-      var box = $("#convList");
-      if (!box) return;
-      if (!list.length) { box.innerHTML = emptyState("message", "暂无会话", "收到或发起会话后，会在这里列出。"); return; }
-      box.innerHTML = list.map(function (c, i) {
-        var peer = c.peer || c.user || c.target || c.contact || {};
-        var name = c.name || c.title || pickDisplayName(peer, "") || c.id;
-        var active = state.conv && state.conv.id === c.id;
-        var av = pickAvatarURL(c) || (state.app && state.app.avatar_url) || "";
-        return '<button type="button" class="conv-item' + (active ? " active" : "") + '" data-conv-index="' + i + '" title="' + esc(name) + '">' + avatarHTML(av, name, "conv-avatar") + '<span class="cname">' + esc(name) + "</span></button>";
-      }).join("");
-      $$("[data-conv-index]", box).forEach(function (item) {
-        item.addEventListener("click", function () { pickConv(Number(item.getAttribute("data-conv-index"))); });
-      });
+      state.convs = r.data && r.data.conversations ? r.data.conversations : [];
       var want = restoreID || state.chatConvID;
       if (want) {
-        for (var k = 0; k < list.length; k++) {
-          if (String(list[k].id) === String(want)) { pickConv(k); break; }
+        var hit = (state.convs || []).filter(function (c) { return String(c.id) === String(want); })[0];
+        if (hit && !convVisible(hit)) state.convFilter = "";
+      }
+      renderConvs();
+      if (want) {
+        for (var k = 0; k < state.convs.length; k++) {
+          if (String(state.convs[k].id) === String(want)) { pickConv(k); break; }
         }
       }
-    hydrateIcons();
     }).catch(function () { errorState($("#convList"), "message", "会话列表加载失败", "网络异常，请检查服务状态。", loadConvs); });
   }
 
@@ -2164,10 +2258,20 @@
     $$(".conv-item").forEach(function (item) {
       item.classList.toggle("active", Number(item.getAttribute("data-conv-index")) === i);
     });
-    $("#chatTitle").textContent = c.name || "会话";
+    var meta = convAppMeta(c);
+    $("#chatTitle").textContent = (c.name || "会话") + " · " + (meta ? meta.name : t("chat.unassigned"));
     loadChat();
     loadChatCapabilities();
     startChatTimer();
+  }
+  // capsReasonText 在英文模式下翻译后端返回的中文原因片段，应用名等用户数据保持原样。
+  function capsReasonText(reason) {
+    var raw = String(reason || "");
+    if (!raw || LANG !== "en") return raw;
+    return raw.split("；").map(function (part) {
+      var key = part.trim();
+      return i18nTranslate(key) || key;
+    }).join("; ");
   }
   function loadChatCapabilities() {
     if (!state.conv) return;
@@ -2187,9 +2291,16 @@
       setChatIdentityAvailability(caps);
       if (!el) return;
       var can = [];
-      if (caps.can_send_as_app) can.push("应用");
-      if (caps.can_send_as_user) can.push("用户");
-      el.textContent = can.length ? "可发送身份：" + can.join(" / ") + " · " + (caps.reason || "") : "当前会话没有可用发送身份 · " + (caps.reason || "");
+      if (caps.can_send_as_app) can.push(t("chat.app"));
+      if (caps.can_send_as_user) can.push(t("chat.user"));
+      var route = caps.app_known
+        ? t("chat.app") + (LANG === "en" ? ": " : "：") + (caps.app_name || shortID(caps.app_id))
+        : t("chat.noAssignment");
+      if (caps.app_known && !caps.app_online) route += " · " + t("chat.appOffline");
+      var reason = capsReasonText(caps.reason);
+      el.textContent = can.length
+        ? route + " · " + t("chat.canSend") + can.join(" / ") + (reason ? " · " + reason : "")
+        : route + " · " + t("chat.noIdentity") + (reason ? " · " + reason : "");
       if (!can.length) el.style.color = "var(--err)";
       else el.style.color = "";
       var send = $("#chatSend"), prev = $("#chatPreview");
@@ -3756,7 +3867,7 @@
       var desc = a.description || extra.description || a.ws_url || "";
       var short = shortID(id);
       return '<div class="list-item"><span class="dot ' + (a.online ? "on" : "off") + '"></span>' + avatarHTML(avatar, name || short, "pool-avatar")
-        + '<div class="grow"><div class="name" title="' + esc(id) + '">' + esc(name || short || "(未命名)") + (a.is_default ? ' <span class="badge badge-ok">默认</span>' : "") + "</div>"
+        + '<div class="grow"><div class="name" title="' + esc(id) + '">' + esc(name || short || "(未命名)") + (a.is_default ? ' <span class="badge badge-ok">默认</span>' : "") + (a.conversation_count ? ' <span class="badge">' + Number(a.conversation_count) + " 会话</span>" : "") + "</div>"
         + '<div class="desc mono" title="' + esc(a.ws_url || "") + '">' + esc(desc || "-") + "</div></div>"
         + '<div class="actions">' + (a.is_default ? "" : '<button class="btn btn-ghost btn-sm" onclick="Relay.defaultApp(' + jsArg(id) + ')">设为默认</button>') + '<button class="btn btn-outline-danger btn-sm" onclick="Relay.delApp(' + jsArg(id) + ')">移除</button></div></div>';
     }).join("");

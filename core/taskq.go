@@ -16,19 +16,21 @@ type Task struct {
 	Feature        string `json:"feature"`
 	Args           string `json:"args"`
 	ConversationID string `json:"conversation_id"`
-	UserID         string `json:"user_id"`
-	ReplyTo        string `json:"reply_to"`
-	Status         string `json:"status"`
-	Result         string `json:"result"`
-	Confirm        bool   `json:"confirm"`
-	Silent         bool   `json:"silent"`
-	CreatedAt      string `json:"created_at"`
-	UpdatedAt      string `json:"updated_at,omitempty"`
-	StartedAt      string `json:"started_at,omitempty"`
-	FinishedAt     string `json:"finished_at,omitempty"`
-	DurationMS     int64  `json:"duration_ms,omitempty"`
-	RetryCount     int    `json:"retry_count,omitempty"`
-	ErrorCode      string `json:"error_code,omitempty"`
+	// AppID 记录任务所属应用，重启或归属表淘汰后仍能把回复送回原通道。
+	AppID      string `json:"app_id,omitempty"`
+	UserID     string `json:"user_id"`
+	ReplyTo    string `json:"reply_to"`
+	Status     string `json:"status"`
+	Result     string `json:"result"`
+	Confirm    bool   `json:"confirm"`
+	Silent     bool   `json:"silent"`
+	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at,omitempty"`
+	StartedAt  string `json:"started_at,omitempty"`
+	FinishedAt string `json:"finished_at,omitempty"`
+	DurationMS int64  `json:"duration_ms,omitempty"`
+	RetryCount int    `json:"retry_count,omitempty"`
+	ErrorCode  string `json:"error_code,omitempty"`
 }
 
 const (
@@ -154,6 +156,11 @@ func EnqueueTask(t Task) (*Task, error) {
 	if t.CreatedAt == "" {
 		t.CreatedAt = now.Format(time.RFC3339)
 	}
+	if t.AppID == "" && t.ConversationID != "" {
+		if appID, _, _, known := ConvAppOwner(t.ConversationID); known {
+			t.AppID = appID
+		}
+	}
 	t.UpdatedAt = now.Format(time.RFC3339)
 	tasks.mu.Lock()
 	cp := t
@@ -220,6 +227,9 @@ func (q *taskQueue) next() *Task {
 
 func (q *taskQueue) run(t *Task) {
 	started := time.Now()
+	if t.AppID != "" && t.ConversationID != "" {
+		rememberConvApp(t.ConversationID, t.AppID)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), taskRunTimeout)
 	result, err := safeExecute(func() (string, error) {
 		return executeFeature(ctx, t.Feature, t.Args, t.UserID, t.ConversationID)

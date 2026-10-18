@@ -881,21 +881,168 @@ func jiyingAPITaskDelete(c *gin.Context) {
 }
 
 func jiyingAPIConversations(c *gin.Context) {
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 12*time.Second)
 	defer cancel()
-	raw, err := UserCall(ctx, http.MethodGet, "/api/client/conversations", nil)
+	data, err := mergedConversationList(ctx)
 	if err != nil {
 		jiyingErr(c, err.Error())
 		return
 	}
-	var parsed struct {
-		Data json.RawMessage `json:"data"`
+	c.Data(http.StatusOK, "application/json; charset=utf-8", wrapJiyingData(annotateConversations(data)))
+}
+
+type appConversationSource struct {
+	appID  string
+	client *JiyingClient
+}
+
+// appConversationSources 快照当前在线的应用通道，供会话列表合并使用。
+func appConversationSources() []appConversationSource {
+	appConnPool.mu.Lock()
+	defer appConnPool.mu.Unlock()
+	out := make([]appConversationSource, 0, len(appConnPool.items))
+	for id, rt := range appConnPool.items {
+		if rt == nil || rt.client == nil || !rt.client.Connected() {
+			continue
+		}
+		out = append(out, appConversationSource{appID: id, client: rt.client})
 	}
-	if json.Unmarshal(raw, &parsed) != nil || len(parsed.Data) == 0 {
-		jiyingErr(c, "会话列表解析失败")
-		return
+	sort.Slice(out, func(i, j int) bool { return out[i].appID < out[j].appID })
+	return out
+}
+
+// mergedConversationList 合并个人账号可见会话与各应用可见会话，按最近活跃时间排序。
+// 账号未登录或查询失败时仍返回应用会话，保证多应用场景不因个人账号缺失而空白。
+func mergedConversationList(ctx context.Context) (json.RawMessage, error) {
+	root := map[string]any{"conversations": []any{}}
+	var accountErr error
+	if userLoggedIn() {
+		callCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
+		raw, err := UserCall(callCtx, http.MethodGet, "/api/client/conversations", nil)
+		cancel()
+		if err == nil {
+			var parsed struct {
+				Data json.RawMessage `json:"data"`
+			}
+			switch {
+			case json.Unmarshal(raw, &parsed) != nil || len(parsed.Data) == 0:
+				accountErr = fmt.Errorf("会话列表解析失败")
+			case json.Unmarshal(parsed.Data, &root) != nil:
+				accountErr = fmt.Errorf("会话列表解析失败")
+				root = map[string]any{"conversations": []any{}}
+			}
+		} else {
+			accountErr = err
+		}
 	}
-	c.Data(http.StatusOK, "application/json; charset=utf-8", wrapJiyingData(parsed.Data))
+	list, _ := root["conversations"].([]any)
+	index := make(map[string]map[string]any, len(list))
+	for _, item := range list {
+		if conv, ok := item.(map[string]any); ok {
+			if id, _ := conv["id"].(string); id != "" {
+				index[id] = conv
+			}
+		}
+	}
+	sources := appConversationSources()
+	added := 0
+	for _, src := range sources {
+		callCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		convs, err := src.client.ListConversations(callCtx, "", 100)
+		cancel()
+		if err != nil {
+			GetMyLog().Warn("应用会话列表读取失败 %s: %v", src.appID, err)
+			continue
+		}
+		for _, conv := range convs {
+			if conv.ID == "" {
+				continue
+			}
+			if _, _, _, known := ConvAppOwner(conv.ID); !known {
+				rememberConvApp(conv.ID, src.appID)
+			}
+			row, exists := index[conv.ID]
+			if !exists {
+				row = map[string]any{
+					"id":             conv.ID,
+					"name":           conv.Name,
+					"type":           conv.Type,
+					"member_count":   conv.MemberCount,
+					"last_active_at": conv.LastActiveAt,
+				}
+				index[conv.ID] = row
+				list = append(list, row)
+				added++
+			}
+			if _, ok := row["relay_app_online"]; !ok {
+				row["relay_app_online"] = true
+			}
+		}
+	}
+	if accountErr != nil && len(list) == 0 && len(sources) == 0 {
+		return nil, accountErr
+	}
+	if !userLoggedIn() && len(list) == 0 && len(sources) == 0 {
+		return nil, fmt.Errorf("账号未登录且没有在线应用")
+	}
+	sort.SliceStable(list, func(i, j int) bool {
+		a, _ := list[i].(map[string]any)
+		b, _ := list[j].(map[string]any)
+		ta, _ := a["last_active_at"].(string)
+		tb, _ := b["last_active_at"].(string)
+		if ta == tb {
+			return false
+		}
+		if ta == "" {
+			return false
+		}
+		if tb == "" {
+			return true
+		}
+		return ta > tb
+	})
+	root["conversations"] = list
+	root["total"] = len(list)
+	return json.Marshal(root)
+}
+
+// annotateConversations 给上游会话列表补充本地应用归属，供控制台区分不同应用的会话。
+// 上游字段保持不变，仅新增 relay_* 字段；无法识别的结构原样返回。
+func annotateConversations(data json.RawMessage) json.RawMessage {
+	var root map[string]any
+	if json.Unmarshal(data, &root) != nil {
+		return data
+	}
+	list, ok := root["conversations"].([]any)
+	if !ok {
+		return data
+	}
+	for _, item := range list {
+		conv, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		id, _ := conv["id"].(string)
+		if id == "" {
+			continue
+		}
+		appID, appName, online, known := ConvAppOwner(id)
+		if !known {
+			conv["relay_app_known"] = false
+			continue
+		}
+		conv["relay_app_known"] = true
+		conv["relay_app_id"] = appID
+		conv["relay_app_online"] = online
+		if appName != "" {
+			conv["relay_app_name"] = appName
+		}
+	}
+	out, err := json.Marshal(root)
+	if err != nil {
+		return data
+	}
+	return out
 }
 
 func wrapJiyingData(data json.RawMessage) []byte {
@@ -932,19 +1079,42 @@ func jiyingAPIMessages(c *gin.Context) {
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
-	raw, err := UserCall(ctx, http.MethodGet, "/api/client/conversations/"+convID+"/messages", nil)
-	if err != nil {
-		jiyingErr(c, err.Error())
-		return
+	var userErr error
+	if userLoggedIn() {
+		raw, err := UserCall(ctx, http.MethodGet, "/api/client/conversations/"+convID+"/messages", nil)
+		if err == nil {
+			var parsed struct {
+				Data json.RawMessage `json:"data"`
+			}
+			if json.Unmarshal(raw, &parsed) == nil && len(parsed.Data) > 0 {
+				c.Data(http.StatusOK, "application/json; charset=utf-8", wrapJiyingData(parsed.Data))
+				return
+			}
+			userErr = fmt.Errorf("消息解析失败")
+		} else {
+			userErr = err
+		}
 	}
-	var parsed struct {
-		Data json.RawMessage `json:"data"`
+	// 账号看不到该会话时，按归属应用回退读取，避免多应用会话在控制台空白。
+	if appID, _, online, known := ConvAppOwner(convID); known && online {
+		if client := clientForApp(appID); client != nil {
+			callCtx, callCancel := context.WithTimeout(ctx, 8*time.Second)
+			msgs, err := client.RecentMessages(callCtx, convID, 50)
+			callCancel()
+			if err == nil {
+				data, _ := json.Marshal(gin.H{"messages": msgs, "source": "app"})
+				c.Data(http.StatusOK, "application/json; charset=utf-8", wrapJiyingData(data))
+				return
+			}
+			if userErr == nil {
+				userErr = err
+			}
+		}
 	}
-	if json.Unmarshal(raw, &parsed) != nil || len(parsed.Data) == 0 {
-		jiyingErr(c, "消息解析失败")
-		return
+	if userErr == nil {
+		userErr = errAccountNotLoggedIn
 	}
-	c.Data(http.StatusOK, "application/json; charset=utf-8", wrapJiyingData(parsed.Data))
+	jiyingErr(c, userErr.Error())
 }
 
 func jiyingAPIConversationCapabilities(c *gin.Context) {

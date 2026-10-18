@@ -39,47 +39,51 @@ type SendResult struct {
 	Reason         string `json:"reason,omitempty"`
 }
 
-// ConversationCapabilities 描述指定会话可以使用的发送身份。
+// ConversationCapabilities 描述指定会话可以使用的发送身份与应用归属。
 type ConversationCapabilities struct {
 	ConversationID string `json:"conversation_id"`
 	CanSendAsUser  bool   `json:"can_send_as_user"`
 	CanSendAsApp   bool   `json:"can_send_as_app"`
+	AppID          string `json:"app_id,omitempty"`
+	AppName        string `json:"app_name,omitempty"`
+	AppOnline      bool   `json:"app_online"`
+	AppKnown       bool   `json:"app_known"`
+	AccountEmail   string `json:"account_email,omitempty"`
 	Reason         string `json:"reason"`
 }
 
 func ownedAppForConv(conversationID string) (string, bool) {
-	appConnPool.mu.Lock()
-	defer appConnPool.mu.Unlock()
-	appID, ok := appConnPool.convApp[conversationID]
-	if !ok || appID == "" {
-		return "", false
-	}
-	rt, ok := appConnPool.items[appID]
-	if !ok || rt == nil || rt.client == nil || !rt.client.Connected() {
-		return appID, false
-	}
-	return appID, true
+	appID, _, online, known := ConvAppOwner(conversationID)
+	return appID, known && online
 }
 
 func conversationCapabilities(conversationID string) ConversationCapabilities {
-	appID, appOnline := ownedAppForConv(conversationID)
-	appReason := "会话不属于当前应用"
-	if appID != "" && !appOnline {
-		appReason = "应用通道离线"
-	}
-	if appOnline {
+	appID, appName, appOnline, appKnown := ConvAppOwner(conversationID)
+	appReason := "会话未记录应用归属"
+	switch {
+	case appKnown && appOnline:
 		appReason = "应用通道可用"
+	case appKnown:
+		appReason = "应用通道离线"
 	}
 	userOK := userLoggedIn()
 	userReason := "账号通道可用"
+	accountEmail := ""
 	if !userOK {
 		userReason = "账号通道未登录"
+	} else {
+		accountEmail = UserSessionEmail()
 	}
 	reason := appReason + "；" + userReason
 	return ConversationCapabilities{
 		ConversationID: conversationID,
 		CanSendAsUser:  userOK,
-		CanSendAsApp:   appOnline,
+		CanSendAsApp:   appKnown && appOnline,
+		AppID:          appID,
+		AppName:        appName,
+		AppOnline:      appOnline,
+		AppKnown:       appKnown,
+		AccountEmail:   accountEmail,
 		Reason:         reason,
 	}
 }
@@ -98,8 +102,12 @@ func resolveSendIdentity(conversationID, identity string) (string, error) {
 	}
 	switch identity {
 	case "app":
-		if _, ok := ownedAppForConv(conversationID); !ok {
-			return "", fmt.Errorf("会话不属于当前应用，无法以应用身份发送")
+		appID, _, online, known := ConvAppOwner(conversationID)
+		if !known || appID == "" {
+			return "", fmt.Errorf("会话未记录应用归属，无法以应用身份发送")
+		}
+		if !online {
+			return "", fmt.Errorf("会话所属应用通道离线，无法以应用身份发送")
 		}
 		return "app", nil
 	case "user":
