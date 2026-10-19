@@ -1,0 +1,4 @@
+.monkeycode/
+.monkeycode-tmp-files/
+dist/
+.DS_Store
