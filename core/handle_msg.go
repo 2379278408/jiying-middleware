@@ -74,13 +74,26 @@ func agentWakePrompt(sender Sender) (string, bool) {
 	if !js.IsGroup() {
 		return prompt, true
 	}
-	appID := strings.TrimSpace(CurrentAppConfig().AppID)
+	appID := senderAppID(js)
 	mention := "{(@app/" + appID + ")}"
 	if appID == "" || !strings.Contains(prompt, mention) {
 		return "", false
 	}
 	prompt = strings.TrimSpace(strings.ReplaceAll(prompt, mention, ""))
 	return prompt, prompt != ""
+}
+
+// senderAppID 优先取消息来源连接的应用；缺失时回退会话归属与默认应用。
+func senderAppID(sender *JiyingSender) string {
+	if sender != nil && sender.client != nil {
+		if appID := strings.TrimSpace(sender.client.cfg.AppID); appID != "" {
+			return appID
+		}
+	}
+	if sender != nil {
+		return appIDForConversation(sender.ChatID)
+	}
+	return strings.TrimSpace(CurrentAppConfig().AppID)
 }
 
 func dispatchAgentReply(sender *JiyingSender, prompt string) {

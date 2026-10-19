@@ -298,6 +298,14 @@ func ConvAppOwner(conversationID string) (appID, name string, online, known bool
 	return appID, rt.profile.Name, rt.client.Connected(), true
 }
 
+// appIDForConversation 返回会话所属应用；未记录归属时回退默认应用。
+func appIDForConversation(conversationID string) string {
+	if appID, _, _, known := ConvAppOwner(conversationID); known && appID != "" {
+		return appID
+	}
+	return strings.TrimSpace(CurrentAppConfig().AppID)
+}
+
 // clientForConv 返回处理该会话的客户端：已知归属但通道缺失时失败关闭，避免误发到默认应用。
 func clientForConv(conversationID string) *JiyingClient {
 	appConnPool.mu.Lock()

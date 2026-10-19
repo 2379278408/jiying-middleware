@@ -529,6 +529,54 @@
     "公开": "Public",
     "主控": "Master",
     "需确认": "Needs confirmation",
+    "手动范围": "Manual scope",
+    "详情": "Details",
+    "功能详情 ·": "Feature details ·",
+    "HTTP 地址": "HTTP URL",
+    "目标": "Target",
+    "插件目标由插件文件决定，请通过「编辑插件」修改。": "The plugin target comes from its file. Use Edit plugin to change it.",
+    "权限范围": "Permission scope",
+    "public · 公开": "public · Public",
+    "master · 主控": "master · Master",
+    "调用身份": "Call identity",
+    "账号": "Account",
+    "调用前需要用户确认": "Require user confirmation before calls",
+    "应用范围": "App scope",
+    "尚未接入应用；接入后可为该功能指定应用范围。": "No apps connected yet. Once connected, you can scope this feature.",
+    "取消「全部应用」后可勾选部分应用；保存后以手动设置为准，插件重启不会被清单覆盖。": "Clear All apps to select specific apps. Manual scope survives plugin rescans and reinstalls.",
+    "功能不存在或列表未加载": "Feature not found or the list is not loaded",
+    "插件配置": "Plugin config",
+    "恢复插件声明范围": "Restore manifest scope",
+    "恢复全部应用": "Restore all apps",
+    "请选择至少一个应用，或勾选全部应用": "Select at least one app, or choose All apps",
+    "功能设置已保存": "Feature settings saved",
+    "应用范围已恢复": "App scope restored",
+    "恢复失败": "Restore failed",
+    "该插件未关联功能记录": "This plugin has no feature record",
+    "该插件尚未登记为功能": "This plugin is not registered as a feature",
+    "编辑应用 ·": "Edit app ·",
+    "应用 ID": "App ID",
+    "应用 ID 由 MagicChat 分配，不可修改。": "The app ID is assigned by MagicChat and cannot be changed.",
+    "WebSocket 接入地址": "WebSocket endpoint",
+    "应用密钥": "App secret",
+    "保持 **** 表示沿用已保存密钥；更换接入地址时必须重新填写密钥。": "Keep **** to reuse the saved secret. Re-enter the secret if the endpoint changes.",
+    "应用已更新": "App updated",
+    "更新失败": "Update failed",
+    "应用不在当前连接池中": "The app is not in the current pool",
+    "编辑": "Edit",
+    "全局系统提示": "Global system prompt",
+    "按应用覆盖系统提示": "Per-app system prompt overrides",
+    "该应用的系统提示": "System prompt for this app",
+    "留空则继承全局系统提示": "Leave blank to inherit the global prompt",
+    "在系统提示后追加该应用的约束与上下文。": "Adds app-specific constraints and context after the system prompt.",
+    "保存应用提示": "Save app prompt",
+    "暂无应用": "No apps",
+    "接入应用后可为其设置独立系统提示。": "Connect an app to give it a dedicated system prompt.",
+    "该应用当前使用独立系统提示；留空保存即恢复继承全局。": "This app uses its own prompt. Save an empty value to inherit the global prompt.",
+    "留空保存即继承全局系统提示。": "Save an empty value to inherit the global prompt.",
+    "请选择应用": "Select an app",
+    "应用系统提示已保存": "App system prompt saved",
+    "已清除覆盖，继承全局": "Override cleared; inheriting the global prompt",
     "暂无功能": "No features",
     "安装 HTTP 功能或添加插件后，会在这里统一管理。": "HTTP features and installed plugins are managed here.",
     "运行功能 ·": "Run feature ·",
@@ -824,6 +872,8 @@
     [/^(.*)？引用它的插件可能因此报错。$/, "Delete $1? Plugins that reference it may break."],
     [/^(.*)？已安装的插件与功能不受影响。$/, "Remove $1 from the market? Installed plugins and features are unaffected."],
     [/^功能 · (.*)$/, "Feature · $1"],
+    [/^功能详情 · (.*)$/, "Feature details · $1"],
+    [/^编辑应用 · (.*)$/, "Edit app · $1"],
     [/^角色 · 主人$/, "Role · Owner"],
     [/^角色 · 运营$/, "Role · Operator"],
     [/^角色 · 只读$/, "Role · Read-only"],
@@ -2476,6 +2526,7 @@
     if (state.appNamesLoaded) { if (cb) cb(); return; }
     api("/jiying/api/connections", { silent: true }).then(function (r) {
       var apps = (r && r.data && r.data.apps) || [];
+      state.apps = apps;
       apps.forEach(function (a) {
         var id = String(a.app_id || "");
         if (!id) return;
@@ -2517,9 +2568,10 @@
     detail.push((s.size || 0) + " B");
     if (s.rules && s.rules.length) detail.push("规则 " + esc(s.rules.join(" / ")));
     return '<div class="list-item plugin-row" data-name="' + esc(s.name) + '"><div class="ico li-ico">' + pluginIcon(s.icon) + '</div>'
-      + '<div class="grow"><div class="name">' + esc(s.title || s.name) + ' <span class="badge badge-off">' + esc(s.name) + '</span> ' + meta + '</div>'
+      + '<div class="grow rl-clickable" onclick="Relay.editScript(' + jsArg(encodeURIComponent(s.name)) + ')"><div class="name">' + esc(s.title || s.name) + ' <span class="badge badge-off">' + esc(s.name) + '</span> ' + meta + '</div>'
       + '<div class="desc">' + detail.join(" · ") + '</div><div class="app-chips">' + scriptAppChips(s) + "</div></div>"
       + '<div class="actions">'
+      + '<button class="btn btn-ghost btn-sm" onclick="Relay.editScriptApps(' + jsArg(encodeURIComponent(s.name)) + ')">应用范围</button>'
       + (s.config_schema && s.config_schema.length ? '<button class="btn btn-ghost btn-sm" onclick="Relay.scriptConfig(' + jsArg(encodeURIComponent(s.name)) + ')">配置</button>' : "")
       + '<button class="btn btn-ghost btn-sm" onclick="Relay.editScript(' + jsArg(encodeURIComponent(s.name)) + ')">编辑</button>'
       + '<button class="btn btn-ghost btn-sm" onclick="Relay.runScript(' + jsArg(encodeURIComponent(s.name)) + ')">运行</button>'
@@ -2887,18 +2939,20 @@
     var enc = encodeURIComponent(f.name);
     var kind = FEATURE_KIND[f.kind] || f.kind || "-";
     var ik = f.kind === "script" ? "code" : "zap";
-    return '<div class="list-item' + (on ? "" : " rl-dim") + '">'
+    return '<div class="list-item rl-clickable' + (on ? "" : " rl-dim") + '" data-feature="' + esc(f.name) + '">'
       + '<div class="ico li-ico">' + ico(ik) + "</div>"
       + '<div class="grow"><div class="name">' + esc(f.name) + " " + metaBadge(kind) + " "
       + metaBadge(FEATURE_SCOPE[f.scope] || f.scope, f.scope === "public" ? "badge-info" : "badge-off") + " "
       + metaBadge(FEATURE_IDENTITY[f.identity] || f.identity, "badge-off")
       + (f.class ? " " + metaBadge(f.class, "badge-info") : "")
       + (f.service ? " " + metaBadge(f.service, "badge-off") : "")
+      + (f.apps_locked ? " " + metaBadge("手动范围", "badge-warn") : "")
       + (f.confirm ? " " + metaBadge("需确认", "badge-warn") : "") + "</div>"
       + (f.kind === "script" ? '<div class="app-chips">' + scriptAppChips(f) + "</div>" : "")
       + '<div class="desc mono clip" title="' + esc(f.target) + '">' + esc(f.target || "-") + "</div></div>"
       + '<div class="actions">' + featureSwitch(f)
       + (f.kind === "script" ? '<button class="btn btn-ghost btn-sm" onclick="Relay.editPluginOf(' + jsArg(encodeURIComponent(f.target || "")) + ')">编辑插件</button>' : "")
+      + '<button class="btn btn-ghost btn-sm" onclick="Relay.featureDetail(' + jsArg(f.name) + ')">详情</button>'
       + '<button class="btn btn-ghost btn-sm" onclick="Relay.runFeature(decodeURIComponent(' + jsArg(enc) + '))">运行</button>'
       + '<button class="btn btn-outline-danger btn-sm" onclick="Relay.delFeature(decodeURIComponent(' + jsArg(enc) + '), ' + jsArg(f.kind || "") + ')">删除</button></div></div>';
   }
@@ -2926,6 +2980,11 @@
       return String(a.class || "").localeCompare(String(b.class || ""), "zh") || String(a.kind).localeCompare(String(b.kind)) || String(a.name).localeCompare(String(b.name), "zh");
     });
     box.innerHTML = '<div class="list">' + list.map(featureRow).join("") + "</div>";
+    box.onclick = function (e) {
+      if (e.target.closest("button, input, select, a, label")) return;
+      var row = e.target.closest("[data-feature]");
+      if (row) featureDetail(row.getAttribute("data-feature"));
+    };
     hydrateIcons();
   }
   function setFeature(name, on) {
@@ -2943,6 +3002,127 @@
         if (r.code === 200) { closeModal(); toast(String(r.data).slice(0, 80), "ok"); }
         else toast(r.msg || "运行失败", "err");
       });
+    });
+  }
+  function featureByName(name) {
+    var list = state.featureRows || [];
+    for (var i = 0; i < list.length; i++) {
+      if (String(list[i].name) === String(name)) return list[i];
+    }
+    return null;
+  }
+  function featureAppLabel(id) {
+    var known = state.appNames && state.appNames[id];
+    if (known && known.name) return known.name;
+    var app = appLookup(id);
+    return (app && app.name) || shortID(id);
+  }
+  function featureAppPicker(f) {
+    var selected = (f.apps || []).slice();
+    var all = !selected.length || selected.indexOf("*") >= 0;
+    var ids = [], seen = {};
+    function addApp(id) {
+      id = String(id || "");
+      if (id && id !== "*" && !seen[id]) { seen[id] = 1; ids.push(id); }
+    }
+    (state.apps || []).forEach(function (a) { addApp(a.app_id); });
+    // 未接入连接池时，仍保留功能与插件清单中出现过的应用 ID，避免只能选「全部应用」。
+    (state.featureRows || []).forEach(function (row) { (row.apps || []).forEach(addApp); });
+    (SCRIPT_CACHE || []).forEach(function (row) { (row.apps || []).forEach(addApp); });
+    selected.forEach(addApp);
+    var boxes = ids.map(function (id) {
+      return '<label class="check app-pick"><input type="checkbox" data-app="' + esc(id) + '"' + (!all && selected.indexOf(id) >= 0 ? " checked" : "") + "> "
+        + esc(featureAppLabel(id)) + ' <span class="mono muted">' + esc(shortID(id)) + "</span></label>";
+    }).join("");
+    if (!boxes) boxes = '<div class="muted" style="font-size:12px">尚未接入应用；接入后可为该功能指定应用范围。</div>';
+    return '<div class="field"><label>应用范围</label>'
+      + '<label class="check"><input type="checkbox" id="fa_all"' + (all ? " checked" : "") + "> 全部应用</label>"
+      + '<div class="app-picker" id="fa_apps">' + boxes + "</div>"
+      + '<div class="hint">取消「全部应用」后可勾选部分应用；保存后以手动设置为准，插件重启不会被清单覆盖。</div></div>';
+  }
+  function featureDetail(name) {
+    var nm = String(name || "");
+    var f = featureByName(nm);
+    if (!f) { toast("功能不存在或列表未加载", "err"); return; }
+    var isHttp = f.kind === "http";
+    var title = "功能详情 · " + nm;
+    var body = '<div class="feature-detail">'
+      + '<div class="kv"><span class="k">名称</span><span class="v"><b>' + esc(f.name) + '</b> ' + metaBadge(FEATURE_KIND[f.kind] || f.kind || "-", "badge-off") + "</span></div>"
+      + '<div class="field"><label>' + (isHttp ? "HTTP 地址" : "目标") + '</label><input class="input" id="fd_target" value="' + esc(f.target || "") + '"' + (isHttp ? "" : " readonly") + ">"
+      + (isHttp ? "" : '<div class="hint">插件目标由插件文件决定，请通过「编辑插件」修改。</div>') + "</div>"
+      + '<div class="grid grid-2"><div class="field"><label>权限范围</label><select class="select" id="fd_scope">'
+      + '<option value="public"' + (f.scope === "public" ? " selected" : "") + '>public · 公开</option>'
+      + '<option value="master"' + (f.scope === "master" ? " selected" : "") + '>master · 主控</option></select></div>'
+      + '<div class="field"><label>调用身份</label><select class="select" id="fd_identity">'
+      + '<option value="app"' + (f.identity === "app" ? " selected" : "") + '>应用</option>'
+      + '<option value="user"' + (f.identity === "user" ? " selected" : "") + '>账号</option></select></div></div>'
+      + '<label class="check"><input type="checkbox" id="fd_confirm"' + (f.confirm ? " checked" : "") + "> 调用前需要用户确认</label>"
+      + featureAppPicker(f)
+      + '<div class="rl-row" style="margin-top:10px">'
+      + (f.kind === "script" ? '<button type="button" class="btn btn-ghost btn-sm" id="fd_edit_plugin">编辑插件</button><button type="button" class="btn btn-ghost btn-sm" id="fd_config">插件配置</button>' : "")
+      + '<button type="button" class="btn btn-ghost btn-sm" id="fd_reset_apps">' + (f.kind === "script" ? "恢复插件声明范围" : "恢复全部应用") + "</button>"
+      + '<div class="spacer"></div><button type="button" class="btn btn-ghost btn-sm" id="fd_run">运行</button></div>'
+      + "</div>";
+    showModal(title, body,
+      '<button class="btn btn-ghost" onclick="Relay.closeModal()">取消</button><button class="btn btn-primary" id="fd_save">保存</button>');
+    var allEl = $("#fa_all"), boxes = $$("#fa_apps input[type=checkbox]");
+    function syncApps() {
+      boxes.forEach(function (b) {
+        b.disabled = allEl.checked;
+        if (allEl.checked) b.checked = false;
+      });
+    }
+    allEl.addEventListener("change", syncApps);
+    syncApps();
+    function refresh() {
+      closeModal();
+      loadFeatures();
+      if (state.view === "scripts") loadScripts();
+    }
+    $("#fd_save").addEventListener("click", function () {
+      var apps;
+      if (allEl.checked) {
+        apps = ["*"];
+      } else {
+        apps = boxes.filter(function (b) { return b.checked; }).map(function (b) { return b.getAttribute("data-app"); });
+        if (!apps.length) { toast("请选择至少一个应用，或勾选全部应用", "err"); return; }
+      }
+      var form = {
+        name: nm,
+        scope: $("#fd_scope").value,
+        identity: $("#fd_identity").value,
+        confirm: $("#fd_confirm").checked ? "true" : "false",
+        apps: JSON.stringify(apps)
+      };
+      if (isHttp) form.target = $("#fd_target").value.trim();
+      api("/jiying/api/feature/update", { method: "POST", form: form }).then(function (r) {
+        if (r.code === 200) { toast("功能设置已保存", "ok"); refresh(); }
+        else toast(r.msg || r.message || "保存失败", "err");
+      });
+    });
+    $("#fd_reset_apps").addEventListener("click", function () {
+      api("/jiying/api/feature/update", { method: "POST", form: { name: nm, reset_apps: "true" } }).then(function (r) {
+        if (r.code === 200) { toast("应用范围已恢复", "ok"); refresh(); }
+        else toast(r.msg || "恢复失败", "err");
+      });
+    });
+    var runBtn = $("#fd_run");
+    if (runBtn) runBtn.addEventListener("click", function () { closeModal(); runFeature(nm); });
+    var editBtn = $("#fd_edit_plugin");
+    if (editBtn) editBtn.addEventListener("click", function () { closeModal(); editPluginOf(encodeURIComponent(f.target || "")); });
+    var cfgBtn = $("#fd_config");
+    if (cfgBtn) cfgBtn.addEventListener("click", function () { closeModal(); openScriptConfig(encodeURIComponent(f.target || "")); });
+  }
+  // 插件页直接调整应用范围：按脚本目标找到对应功能后复用功能详情弹窗。
+  function editScriptApps(target) {
+    var nm = decodeURIComponent(target || "");
+    if (!nm) { toast("该插件未关联功能记录", "err"); return; }
+    api("/jiying/api/features").then(function (r) {
+      var list = (r && r.data) || [];
+      var hit = list.filter(function (f) { return String(f.target || "") === nm; })[0];
+      if (!hit) { toast("该插件尚未登记为功能", "err"); return; }
+      state.featureRows = list;
+      featureDetail(hit.name);
     });
   }
   function delFeature(name, kind) {
@@ -3008,11 +3188,17 @@
        + '<div class="field"><label>模型</label><input class="input" id="ag_model" list="agentModelOptions" value="' + esc(d.model || "") + '" placeholder="填写服务商支持的模型名">' + modelList + "</div>"
          + '<div class="field"><label>后备模型</label><input class="input" id="ag_fallback" value="' + esc((d.fallback_models || []).join(", ")) + '" placeholder="模型A, 模型B"><div class="hint">主模型不可用时按顺序降级，逗号分隔；留空表示不降级。</div></div>'
         + '<div class="field"><label>API Key</label><input class="input" id="ag_key" type="password" placeholder="' + (d.has_key ? "已配置，留空保持不变" : "尚未配置") + '"></div>'
-        + '<div class="field"><label>系统提示</label><textarea class="input" id="ag_system" rows="3">' + esc(d.system || "") + "</textarea></div>"
+        + '<div class="field"><label>全局系统提示</label><textarea class="input" id="ag_system" rows="3">' + esc(d.system || "") + "</textarea></div>"
+        + '<details class="agent-advanced" open><summary>按应用覆盖系统提示</summary>'
+        + '<div class="grid grid-2"><div class="field"><label>应用</label><select class="select" id="ag_app"></select></div>'
+        + '<div class="field"><label>该应用的系统提示</label><textarea class="input" id="ag_app_system" rows="3" placeholder="留空则继承全局系统提示"></textarea><div class="hint" id="ag_app_hint">在系统提示后追加该应用的约束与上下文。</div></div></div>'
+        + '<div class="rl-row"><div class="spacer"></div><button class="btn btn-ghost btn-sm" id="ag_app_save">保存应用提示</button></div></details>'
          + '<div class="field"><label>上下文消息数</label><input class="input" id="ag_hist" type="number" min="2" max="64" value="' + esc(String(d.max_history || 12)) + '"><div class="hint">每个会话保留的最近消息数量，数值越大越能延续上下文。</div></div>'
          + '<details class="agent-advanced"><summary>高级运行保护</summary><div class="field"><label>单次工具调用上限</label><input class="input" id="ag_turns" type="number" min="1" max="20" value="' + esc(String(d.max_turns || 6)) + '"><div class="hint">模型连续调用功能的最大次数，用于防止异常循环。</div></div></details>'
         + '<div class="rl-row"><div class="spacer"></div><button class="btn btn-primary btn-sm" id="ag_save">保存配置</button></div>';
       $("#ag_save").addEventListener("click", saveAgentConfig);
+      $("#ag_app_save").addEventListener("click", saveAgentAppSystem);
+      loadAgentAppOptions(d);
     }).catch(function () { errorState($("#agentCfg"), "robot", "Agent 配置加载失败", "网络异常，请检查服务状态。", loadAgentConfig); });
   }
   function loadAgentTools() {
@@ -3044,6 +3230,52 @@
     };
     api("/jiying/api/agent/config", { method: "POST", form: form }).then(function (r) {
       if (r.code === 200) { toast("配置已保存", "ok"); loadAgentConfig(); }
+      else toast(r.msg || "保存失败", "err");
+    });
+  }
+  function loadAgentAppOptions(d) {
+    var sel = $("#ag_app");
+    if (!sel) return;
+    function fill(apps) {
+      state.apps = apps || [];
+      var overrides = (d && d.app_systems) || {};
+      var ids = [], seen = {};
+      state.apps.forEach(function (a) {
+        var id = String(a.app_id || "");
+        if (id && !seen[id]) { seen[id] = 1; ids.push(id); }
+      });
+      Object.keys(overrides).forEach(function (id) {
+        if (id && !seen[id]) { seen[id] = 1; ids.push(id); }
+      });
+      if (!ids.length) {
+        sel.innerHTML = '<option value="">暂无应用</option>';
+        sel.disabled = true;
+        $("#ag_app_system").disabled = true;
+        $("#ag_app_save").disabled = true;
+        $("#ag_app_hint").textContent = "接入应用后可为其设置独立系统提示。";
+        return;
+      }
+      sel.innerHTML = ids.map(function (id) {
+        return '<option value="' + esc(id) + '">' + esc(featureAppLabel(id)) + " · " + esc(shortID(id)) + "</option>";
+      }).join("");
+      function paint() {
+        var id = sel.value;
+        $("#ag_app_system").value = overrides[id] || "";
+        $("#ag_app_hint").textContent = overrides[id] ? "该应用当前使用独立系统提示；留空保存即恢复继承全局。" : "留空保存即继承全局系统提示。";
+      }
+      sel.addEventListener("change", paint);
+      paint();
+    }
+    if (state.apps && state.apps.length) { fill(state.apps); return; }
+    api("/jiying/api/connections", { silent: true }).then(function (r) {
+      fill((r && r.data && r.data.apps) || []);
+    }).catch(function () { fill([]); });
+  }
+  function saveAgentAppSystem() {
+    var sel = $("#ag_app");
+    if (!sel || !sel.value) { toast("请选择应用", "err"); return; }
+    api("/jiying/api/agent/app-system", { method: "POST", form: { app_id: sel.value, system: $("#ag_app_system").value } }).then(function (r) {
+      if (r.code === 200) { toast($("#ag_app_system").value.trim() ? "应用系统提示已保存" : "已清除覆盖，继承全局", "ok"); loadAgentConfig(); }
       else toast(r.msg || "保存失败", "err");
     });
   }
@@ -3832,6 +4064,7 @@
     api("/jiying/api/connections").then(function (r) {
       if (r.code !== 200) { toast(r.msg || "加载失败", "err"); return; }
       var apps = r.data.apps || [];
+      state.apps = apps;
       renderPoolApps(apps);
       ensureAppProfiles(apps);
       renderPoolAccount(r.data.account || {});
@@ -3869,7 +4102,7 @@
       return '<div class="list-item"><span class="dot ' + (a.online ? "on" : "off") + '"></span>' + avatarHTML(avatar, name || short, "pool-avatar")
         + '<div class="grow"><div class="name" title="' + esc(id) + '">' + esc(name || short || "(未命名)") + (a.is_default ? ' <span class="badge badge-ok">默认</span>' : "") + (a.conversation_count ? ' <span class="badge">' + Number(a.conversation_count) + " 会话</span>" : "") + "</div>"
         + '<div class="desc mono" title="' + esc(a.ws_url || "") + '">' + esc(desc || "-") + "</div></div>"
-        + '<div class="actions">' + (a.is_default ? "" : '<button class="btn btn-ghost btn-sm" onclick="Relay.defaultApp(' + jsArg(id) + ')">设为默认</button>') + '<button class="btn btn-outline-danger btn-sm" onclick="Relay.delApp(' + jsArg(id) + ')">移除</button></div></div>';
+        + '<div class="actions"><button class="btn btn-ghost btn-sm" onclick="Relay.editApp(' + jsArg(id) + ')">编辑</button>' + (a.is_default ? "" : '<button class="btn btn-ghost btn-sm" onclick="Relay.defaultApp(' + jsArg(id) + ')">设为默认</button>') + '<button class="btn btn-outline-danger btn-sm" onclick="Relay.delApp(' + jsArg(id) + ')">移除</button></div></div>';
     }).join("");
   }
   function bindPoolEmptyAdd() {
@@ -3915,6 +4148,25 @@
       api("/jiying/api/connections/app", { method: "POST", form: { ws_url: ws, app_id: id, app_secret: secret } }).then(function (r) {
         if (r.code === 200) { closeModal(); toast("已接入", "ok"); loadPool(); }
         else toast(r.msg || "接入失败", "err");
+      });
+    });
+  }
+  function editApp(appID) {
+    var id = String(appID || "");
+    var apps = state.apps || [];
+    var a = apps.filter(function (x) { return String(x.app_id || "") === id; })[0];
+    if (!a) { toast("应用不在当前连接池中", "err"); return; }
+    showModal("编辑应用 · " + (a.name || shortID(id)),
+      '<div class="field"><label>应用 ID</label><input class="input mono" value="' + esc(id) + '" readonly><div class="hint">应用 ID 由 MagicChat 分配，不可修改。</div></div>'
+      + '<div class="field"><label>WebSocket 接入地址</label><input class="input" id="pa_ws" value="' + esc(a.ws_url || "") + '" placeholder="wss://<host>/api/app/ws"></div>'
+      + '<div class="field"><label>应用密钥</label><input class="input" id="pa_secret" type="password" value="****"><div class="hint">保持 **** 表示沿用已保存密钥；更换接入地址时必须重新填写密钥。</div></div>',
+      '<button class="btn btn-ghost" onclick="Relay.closeModal()">取消</button><button class="btn btn-primary" id="pa_save">保存</button>');
+    $("#pa_save").addEventListener("click", function () {
+      var ws = $("#pa_ws").value.trim(), secret = $("#pa_secret").value.trim();
+      if (!ws || !secret) { toast("请填写完整信息", "err"); return; }
+      api("/jiying/api/connections/app", { method: "POST", form: { ws_url: ws, app_id: id, app_secret: secret } }).then(function (r) {
+        if (r.code === 200) { closeModal(); toast("应用已更新", "ok"); loadPool(); }
+        else toast(r.msg || "更新失败", "err");
       });
     });
   }
@@ -4741,6 +4993,8 @@
     setFeature: setFeature,
     runFeature: runFeature,
     delFeature: delFeature,
+    featureDetail: featureDetail,
+    editScriptApps: editScriptApps,
     toggleCron: toggleCron,
     delCron: delCron,
     loadExecutions: loadExecutions,
@@ -4755,6 +5009,7 @@
     removeMaster: removeMaster,
     deleteRole: deleteRole,
     loadPool: loadPool,
+    editApp: editApp,
     delApp: delApp,
     defaultApp: defaultApp,
     loadMarket: loadMarket,

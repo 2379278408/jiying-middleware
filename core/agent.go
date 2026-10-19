@@ -28,6 +28,8 @@ type AgentConfig struct {
 	System     string   `json:"system"`
 	MaxTurns   int      `json:"max_turns"`
 	MaxHistory int      `json:"max_history"`
+	// AppSystems 按应用覆盖系统提示；未配置或为空时使用全局 System。
+	AppSystems map[string]string `json:"app_systems,omitempty"`
 }
 
 const agentConfigKey = "agent_config"
@@ -76,6 +78,14 @@ func LoadAgentConfig() AgentConfig {
 				if stored.System != "" {
 					cfg.System = stored.System
 				}
+				if len(stored.AppSystems) > 0 {
+					cfg.AppSystems = make(map[string]string, len(stored.AppSystems))
+					for id, prompt := range stored.AppSystems {
+						if id = strings.TrimSpace(id); id != "" {
+							cfg.AppSystems[id] = prompt
+						}
+					}
+				}
 				// 已保存的配置是权威来源，允许管理员清空后备模型列表。
 				cfg.Fallback = stored.Fallback
 				if stored.MaxTurns > 0 {
@@ -113,6 +123,40 @@ func SaveAgentConfig(cfg AgentConfig) {
 
 func (c AgentConfig) ready() bool {
 	return c.Enabled && c.BaseURL != "" && c.APIKey != "" && c.Model != ""
+}
+
+// SystemForApp 返回指定应用的系统提示；未配置应用级提示时回退全局提示。
+func (c AgentConfig) SystemForApp(appID string) string {
+	appID = strings.TrimSpace(appID)
+	if appID != "" {
+		if prompt, ok := c.AppSystems[appID]; ok && strings.TrimSpace(prompt) != "" {
+			return prompt
+		}
+	}
+	return c.System
+}
+
+// SetAppSystem 写入或清除应用级系统提示；空字符串表示恢复继承全局提示。
+func SetAppSystem(appID, prompt string) error {
+	appID = strings.TrimSpace(appID)
+	if appID == "" {
+		return fmt.Errorf("缺少应用 ID")
+	}
+	prompt = strings.TrimSpace(prompt)
+	if len(prompt) > 20000 {
+		return fmt.Errorf("系统提示过长，最多 20000 字符")
+	}
+	cfg := LoadAgentConfig()
+	if cfg.AppSystems == nil {
+		cfg.AppSystems = map[string]string{}
+	}
+	if prompt == "" {
+		delete(cfg.AppSystems, appID)
+	} else {
+		cfg.AppSystems[appID] = prompt
+	}
+	SaveAgentConfig(cfg)
+	return nil
 }
 
 // parseModelList 解析逗号、分号或换行分隔的模型列表，去空去重并保持顺序。
@@ -167,10 +211,15 @@ func agentToolName(i int) string { return fmt.Sprintf("tool_%d", i) }
 
 // buildAgentTools 为已启用且当前用户有权执行的功能生成工具定义与反查表。
 func buildAgentTools(userID string) ([]map[string]any, map[string]string, []agentTool) {
+	return buildAgentToolsForApp(userID, CurrentAppConfig().AppID)
+}
+
+// buildAgentToolsForApp 按会话所属应用生成工具定义，避免把未授权插件暴露给模型。
+func buildAgentToolsForApp(userID, appID string) ([]map[string]any, map[string]string, []agentTool) {
 	defs := make([]map[string]any, 0)
 	index := map[string]string{}
 	names := make([]agentTool, 0)
-	for _, c := range BuildToolContracts(userID) {
+	for _, c := range BuildToolContractsForApp(userID, appID) {
 		index[c.Tool] = c.Feature
 		names = append(names, agentTool{Name: c.Tool, Feature: c.Feature})
 		defs = append(defs, map[string]any{
@@ -395,7 +444,7 @@ func resetAgentHistory(convID string) {
 
 // loadServerHistory 读取服务端会话历史作为 Agent 上下文；seq 缺失或读取失败时返回 nil，
 // 由本地历史回退。当前消息（seq）作为 prompt 单独传入，故从历史中剔除以免重复。
-func loadServerHistory(ctx context.Context, convID string, seq int64) []chatMessage {
+func loadServerHistory(ctx context.Context, convID string, seq int64, appID string) []chatMessage {
 	if convID == "" || seq <= 0 {
 		return nil
 	}
@@ -415,12 +464,12 @@ func loadServerHistory(ctx context.Context, convID string, seq int64) []chatMess
 		GetMyLog().Debug("读取服务端历史失败 conv=%s seq=%d: %v", convID, seq, err)
 		return nil
 	}
-	return messagesToChatHistory(msgs, strings.TrimSpace(CurrentAppConfig().AppID), seq)
+	return messagesToChatHistory(msgs, strings.TrimSpace(appID), seq)
 }
 
 // agentContext 组装 Agent 的既有上下文：优先服务端可见历史，不可用时回退本地短历史。
-func agentContext(ctx context.Context, convID string, seq int64) []chatMessage {
-	if h := loadServerHistory(ctx, convID, seq); len(h) > 0 {
+func agentContext(ctx context.Context, convID string, seq int64, appID string) []chatMessage {
+	if h := loadServerHistory(ctx, convID, seq, appID); len(h) > 0 {
 		return h
 	}
 	return getAgentHistory(convID)
@@ -501,13 +550,14 @@ func RunAgent(ctx context.Context, convID, userID, prompt string, seq int64) (st
 	if !cfg.ready() {
 		return "", fmt.Errorf("Agent 未配置：请设置 USER_LLM_BASE_URL / USER_LLM_API_KEY / USER_LLM_MODEL")
 	}
-	defs, index, _ := buildAgentTools(userID)
+	appID := appIDForConversation(convID)
+	defs, index, _ := buildAgentToolsForApp(userID, appID)
 	runtime := newAgentRuntime(cfg)
 	msgs := []chatMessage{}
-	if sys := agentSystemPrompt(cfg.System, userID); sys != "" {
+	if sys := agentSystemPrompt(cfg.SystemForApp(appID), userID); sys != "" {
 		msgs = append(msgs, chatMessage{Role: "system", Content: sys})
 	}
-	msgs = append(msgs, agentContext(ctx, convID, seq)...)
+	msgs = append(msgs, agentContext(ctx, convID, seq, appID)...)
 	msgs = append(msgs, chatMessage{Role: "user", Content: prompt})
 
 	turns := cfg.MaxTurns
@@ -768,6 +818,7 @@ func registerAgentAPI() {
 			"model":           cfg.Model,
 			"fallback_models": cfg.Fallback,
 			"system":          cfg.System,
+			"app_systems":     cfg.AppSystems,
 			"max_turns":       cfg.MaxTurns,
 			"max_history":     cfg.MaxHistory,
 			"has_key":         cfg.APIKey != "",
@@ -799,6 +850,16 @@ func registerAgentAPI() {
 		normalizeAgentLimits(&cfg)
 		SaveAgentConfig(cfg)
 		RecordAudit(consoleUser(c), "agent.config", cfg.Model, fmt.Sprintf("enabled=%v", cfg.Enabled), "成功")
+		jiyingJSON(c, "ok")
+	})
+	g.POST("/agent/app-system", requireRole(RoleMaster), func(c *gin.Context) {
+		appID := strings.TrimSpace(c.PostForm("app_id"))
+		prompt := c.PostForm("system")
+		if err := SetAppSystem(appID, prompt); err != nil {
+			jiyingErr(c, err.Error())
+			return
+		}
+		RecordAudit(consoleUser(c), "agent.app_system", appID, fmt.Sprintf("%d 字符", len([]rune(strings.TrimSpace(prompt)))), "成功")
 		jiyingJSON(c, "ok")
 	})
 	g.GET("/agent/tools", requireRole(RoleOps), func(c *gin.Context) {

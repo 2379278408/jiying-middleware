@@ -27,6 +27,8 @@ type Feature struct {
 	Class    string   `json:"class,omitempty"`
 	Service  string   `json:"service,omitempty"`
 	Apps     []string `json:"apps,omitempty"`
+	// AppsLocked 表示应用范围由控制台手动设置，插件重启扫描时不再用清单覆盖。
+	AppsLocked bool `json:"apps_locked,omitempty"`
 }
 
 type featureTable struct {
@@ -77,6 +79,9 @@ func (t *featureTable) setScriptMeta(name, class, service string, apps []string)
 	f, ok := t.items[name]
 	if !ok || f == nil {
 		return
+	}
+	if f.AppsLocked {
+		apps = f.Apps
 	}
 	if f.Class == class && f.Service == service && sameStringSet(f.Apps, apps) {
 		return
@@ -185,6 +190,108 @@ func SetFeatureEnabled(name string, enabled bool) error {
 		return fmt.Errorf("没有功能 %s", name)
 	}
 	f.Enabled = enabled
+	features.saveLocked()
+	return nil
+}
+
+// featurePatch 描述控制台可修改的功能字段；指针为空表示保持原值。
+type featurePatch struct {
+	Target   *string
+	Scope    *string
+	Identity *string
+	Confirm  *bool
+	Apps     []string
+	SetApps  bool
+}
+
+// normalizeFeatureApps 清洗应用白名单：去空、去重、忽略大小写重复；包含 * 时统一为全部应用。
+func normalizeFeatureApps(apps []string) []string {
+	out := make([]string, 0, len(apps))
+	seen := map[string]bool{}
+	for _, raw := range apps {
+		app := strings.TrimSpace(raw)
+		if app == "" {
+			continue
+		}
+		if app == "*" {
+			return []string{"*"}
+		}
+		key := strings.ToLower(app)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, app)
+	}
+	return out
+}
+
+// UpdateFeatureSettings 更新功能的目标、权限范围、调用身份、确认策略与应用白名单。
+// 应用白名单一经控制台保存即锁定，插件重启扫描不会再覆盖。
+func UpdateFeatureSettings(name string, patch featurePatch) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("缺少功能名")
+	}
+	features.mu.Lock()
+	defer features.mu.Unlock()
+	f, ok := features.items[name]
+	if !ok || f == nil {
+		return fmt.Errorf("没有功能 %s", name)
+	}
+	if patch.Target != nil {
+		target := strings.TrimSpace(*patch.Target)
+		if f.Kind != "http" {
+			return fmt.Errorf("只有 HTTP 功能可以修改地址")
+		}
+		if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
+			return fmt.Errorf("HTTP 功能需要 http(s) 地址")
+		}
+		f.Target = target
+	}
+	if patch.Scope != nil {
+		scope := strings.TrimSpace(*patch.Scope)
+		if scope != "public" && scope != "master" {
+			return fmt.Errorf("范围只能是 public 或 master")
+		}
+		f.Scope = scope
+	}
+	if patch.Identity != nil {
+		identity := strings.TrimSpace(*patch.Identity)
+		if identity != "app" && identity != "user" {
+			return fmt.Errorf("身份只能是 app 或 user")
+		}
+		f.Identity = identity
+	}
+	if patch.Confirm != nil {
+		f.Confirm = *patch.Confirm
+	}
+	if patch.SetApps {
+		f.Apps = normalizeFeatureApps(patch.Apps)
+		f.AppsLocked = true
+	}
+	features.saveLocked()
+	return nil
+}
+
+// ResetFeatureApps 恢复插件清单声明的应用范围；非插件功能恢复为全部应用。
+func ResetFeatureApps(name string) error {
+	name = strings.TrimSpace(name)
+	features.mu.Lock()
+	defer features.mu.Unlock()
+	f, ok := features.items[name]
+	if !ok || f == nil {
+		return fmt.Errorf("没有功能 %s", name)
+	}
+	f.AppsLocked = false
+	f.Apps = nil
+	if f.Kind == "script" && strings.TrimSpace(f.Target) != "" {
+		if full := safeScriptPath(f.Target); full != "" {
+			if data, err := os.ReadFile(full); err == nil {
+				f.Apps = normalizeFeatureApps(ParsePluginManifest(string(data)).Apps)
+			}
+		}
+	}
 	features.saveLocked()
 	return nil
 }
@@ -333,7 +440,7 @@ func executeFeature(ctx context.Context, name, args, userID, chatID string) (str
 	if !featureAllowedFor(userID, f) {
 		return "", fmt.Errorf("无权限")
 	}
-	if !featureAllowedForApp(f, CurrentAppConfig().AppID) {
+	if !featureAllowedForApp(f, appIDForConversation(chatID)) {
 		return "", fmt.Errorf("该插件未授权当前应用")
 	}
 	switch f.Kind {

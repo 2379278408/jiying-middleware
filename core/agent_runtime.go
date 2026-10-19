@@ -79,6 +79,11 @@ type ToolContract struct {
 // BuildToolContracts 为已启用且当前用户有权执行的功能生成工具契约（含 JSON Schema 参数）。
 // 按功能名排序，保证同一环境下工具编号稳定，便于在线预览与复现。
 func BuildToolContracts(userID string) []ToolContract {
+	return BuildToolContractsForApp(userID, CurrentAppConfig().AppID)
+}
+
+// BuildToolContractsForApp 按指定应用裁剪工具契约，供多应用会话使用各自的白名单。
+func BuildToolContractsForApp(userID, appID string) []ToolContract {
 	items := ListFeatureItems()
 	sort.SliceStable(items, func(i, j int) bool {
 		if items[i] == nil || items[j] == nil {
@@ -88,7 +93,7 @@ func BuildToolContracts(userID string) []ToolContract {
 	})
 	out := make([]ToolContract, 0, len(items))
 	for i, f := range items {
-		if f == nil || !f.Enabled || !featureAllowedFor(userID, f) || !featureAllowedForApp(f, CurrentAppConfig().AppID) {
+		if f == nil || !f.Enabled || !featureAllowedFor(userID, f) || !featureAllowedForApp(f, appID) {
 			continue
 		}
 		out = append(out, buildToolContract(agentToolName(i), f))

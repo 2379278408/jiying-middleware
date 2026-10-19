@@ -349,6 +349,7 @@ func registerJiyingAPI() {
 	g.GET("/features", jiyingAPIFeatures)
 	g.POST("/feature/toggle", requireRole(RoleOps), jiyingAPIFeatureToggle)
 	g.POST("/feature/install", requireRole(RoleOps), jiyingAPIFeatureInstall)
+	g.POST("/feature/update", requireRole(RoleOps), jiyingAPIFeatureUpdate)
 	g.POST("/feature/delete", requireRole(RoleOps), jiyingAPIFeatureDelete)
 	g.POST("/feature/run", requireRole(RoleOps), jiyingAPIFeatureRun)
 	g.GET("/scripts", jiyingAPIScripts)
@@ -523,6 +524,59 @@ func jiyingAPIFeatureInstall(c *gin.Context) {
 	jiyingJSON(c, "已安装功能 "+name)
 }
 
+// jiyingAPIFeatureUpdate 修改功能的应用范围与元数据；插件应用范围保存后锁定，重启不再被清单覆盖。
+func jiyingAPIFeatureUpdate(c *gin.Context) {
+	name := strings.TrimSpace(c.PostForm("name"))
+	if name == "" {
+		jiyingErr(c, "缺少功能名")
+		return
+	}
+	if c.PostForm("reset_apps") == "true" {
+		if err := ResetFeatureApps(name); err != nil {
+			jiyingErr(c, err.Error())
+			return
+		}
+		RecordAudit(consoleUser(c), "feature.update", name, "恢复应用范围", "成功")
+		jiyingJSON(c, "ok")
+		return
+	}
+	patch := featurePatch{}
+	if _, ok := c.GetPostForm("target"); ok {
+		v := strings.TrimSpace(c.PostForm("target"))
+		patch.Target = &v
+	}
+	if _, ok := c.GetPostForm("scope"); ok {
+		v := strings.TrimSpace(c.PostForm("scope"))
+		patch.Scope = &v
+	}
+	if _, ok := c.GetPostForm("identity"); ok {
+		v := strings.TrimSpace(c.PostForm("identity"))
+		patch.Identity = &v
+	}
+	if _, ok := c.GetPostForm("confirm"); ok {
+		v := c.PostForm("confirm") == "true" || c.PostForm("confirm") == "1"
+		patch.Confirm = &v
+	}
+	if raw, ok := c.GetPostForm("apps"); ok {
+		raw = strings.TrimSpace(raw)
+		var apps []string
+		if raw != "" {
+			if err := json.Unmarshal([]byte(raw), &apps); err != nil {
+				apps = strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == ';' || r == ' ' || r == '\n' })
+			}
+		}
+		patch.Apps = apps
+		patch.SetApps = true
+	}
+	if err := UpdateFeatureSettings(name, patch); err != nil {
+		RecordAudit(consoleUser(c), "feature.update", name, "", "失败: "+err.Error())
+		jiyingErr(c, err.Error())
+		return
+	}
+	RecordAudit(consoleUser(c), "feature.update", name, fmt.Sprintf("apps=%v", patch.Apps), "成功")
+	jiyingJSON(c, "ok")
+}
+
 func jiyingAPIFeatureDelete(c *gin.Context) {
 	name := strings.TrimSpace(c.PostForm("name"))
 	if err := deleteFeatureWithPlugin(name); err != nil {
@@ -667,7 +721,13 @@ func jiyingAPIScriptInstall(c *gin.Context) {
 	base := filepathBase(name)
 	title, scope := scriptFeatureNameScope(base, code)
 	m := ParsePluginManifest(code)
-	_ = UpsertFeature(Feature{Name: title, Kind: "script", Target: base, Scope: scope, Identity: "app", Enabled: true, Class: m.Class, Apps: m.Apps})
+	feature := Feature{Name: title, Kind: "script", Target: base, Scope: scope, Identity: "app", Enabled: true, Class: m.Class, Apps: m.Apps}
+	// 控制台手动设置过的应用范围优先保留，避免更新插件代码后丢失按应用分发配置。
+	if prev, ok := getFeatureRaw(title); ok && prev.AppsLocked {
+		feature.Apps = prev.Apps
+		feature.AppsLocked = true
+	}
+	_ = UpsertFeature(feature)
 	RecordAudit(consoleUser(c), "script.install", base, fmt.Sprintf("%d 字节", len(code)), "成功")
 	jiyingJSON(c, "脚本已安装 "+base)
 }

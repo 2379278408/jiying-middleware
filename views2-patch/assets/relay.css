@@ -1723,3 +1723,12 @@ a:hover { color: var(--primary-hover); text-decoration: none; }
   .dudu-bubble.pop { animation: none; }
 }
 .dudu[hidden], .dudu-restore[hidden] { display: none !important; }
+
+/* ---------- 功能详情与按应用范围 ---------- */
+.rl-clickable { cursor: pointer; }
+.feature-detail .field { margin-top: 10px; }
+.feature-detail .kv:first-child { margin-top: -2px; }
+.app-picker { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 3px; background: var(--panel-2); }
+.app-picker:empty { display: none; }
+.check.app-pick { color: var(--text); }
+.check.app-pick .mono { font-size: 10.5px; }
