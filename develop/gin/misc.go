@@ -194,7 +194,8 @@ func uploadTextFile(c *gin.Context, sub string) {
 }
 
 func getCronCmds(c *gin.Context) {
-	jsonOK(c, core.CronCmdsSnapshot())
+	actor, role := core.ConsoleActor(c)
+	jsonOK(c, core.CronCmdsSnapshotFor(actor, role))
 }
 
 func postCronCmds(c *gin.Context) {

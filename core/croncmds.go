@@ -147,6 +147,18 @@ func (c *cronCmdContainer) schedule(cmd *CronCmd) {
 	cmd.CronEntityId = eid
 }
 
+// rescheduleLocked 移除旧调度并按当前状态重新挂载。调用方必须持有 ccs 写锁。
+func (c *cronCmdContainer) rescheduleLocked(cmd *CronCmd) {
+	if cmd == nil {
+		return
+	}
+	if c.cronSched != nil && cmd.CronEntityId > 0 {
+		c.cronSched.Remove(cmd.CronEntityId)
+		cmd.CronEntityId = 0
+	}
+	c.schedule(cmd)
+}
+
 func (c *cronCmdContainer) cleanOnceTasks() {
 	c.Lock()
 	defer c.Unlock()
@@ -317,13 +329,20 @@ func isValidCronSpec(spec string) bool {
 	return err == nil
 }
 
+// CronCmdsSnapshot 返回全部定时任务快照，供内部与主控视图使用。
 func CronCmdsSnapshot() []*CronCmd {
+	return CronCmdsSnapshotFor("", RoleMaster)
+}
+
+// CronCmdsSnapshotFor 按操作者权限返回定时任务快照：
+// 主控可见全部，其他角色只能看到自己创建的任务，避免泄露命令与会话参数。
+func CronCmdsSnapshotFor(actor, role string) []*CronCmd {
 	ccs.RLock()
 	defer ccs.RUnlock()
 	now := time.Now()
 	out := make([]*CronCmd, 0, len(ccs.Pts))
 	for _, p := range ccs.Pts {
-		if p == nil {
+		if p == nil || !cronManageable(p, actor, role) {
 			continue
 		}
 		cp := *p
@@ -378,7 +397,7 @@ func cronManageable(cmd *CronCmd, actor, role string) bool {
 		return false
 	}
 	actor = strings.TrimSpace(actor)
-	if role == RoleMaster || privilegedUser(actor) {
+	if role == RoleMaster {
 		return true
 	}
 	return actor != "" && cmd.Owner == actor
@@ -451,8 +470,15 @@ func AddCronCmdFrom(fields map[string]interface{}, actor, role string) *CronCmd 
 	return cmd
 }
 
-// UpdateCronCmdFrom 更新定时任务；仅创建者或主控可改，归属与角色保持原值。
+// UpdateCronCmdFrom 兼容旧控制台调用：忽略错误并返回更新后的任务。
 func UpdateCronCmdFrom(id string, fields map[string]interface{}, actor, role string) *CronCmd {
+	cmd, _ := UpdateCronCmd(id, fields, actor, role)
+	return cmd
+}
+
+// UpdateCronCmd 更新定时任务并立即重排调度；仅创建者或主控可改，归属与角色保持原值。
+// 表达式或命令非法时返回错误且不修改原任务，避免出现“保存成功但不再触发”。
+func UpdateCronCmd(id string, fields map[string]interface{}, actor, role string) (*CronCmd, error) {
 	ccs.Lock()
 	defer ccs.Unlock()
 	for _, p := range ccs.Pts {
@@ -460,17 +486,32 @@ func UpdateCronCmdFrom(id string, fields map[string]interface{}, actor, role str
 			continue
 		}
 		if !cronManageable(p, actor, role) {
-			return nil
+			return nil, fmt.Errorf("定时任务不存在或无权操作")
 		}
-		if v, ok := fields["name"].(string); ok && v != "" {
-			p.Name = v
+		name := p.Name
+		if v, ok := fields["name"].(string); ok && strings.TrimSpace(v) != "" {
+			name = strings.TrimSpace(v)
 		}
+		command := p.Command
 		if v, ok := fields["command"].(string); ok {
-			p.Command = v
+			command = strings.TrimSpace(v)
 		}
+		spec := p.Cron
 		if v, ok := fields["cron"].(string); ok {
-			p.Cron = v
+			spec = strings.TrimSpace(v)
 		}
+		if name == "" || command == "" {
+			return nil, fmt.Errorf("缺少名称/命令")
+		}
+		if !isValidCronSpec(spec) {
+			return nil, fmt.Errorf("Cron 表达式无效，支持 5 段或 6 段（含秒）写法")
+		}
+		if err := validateCronFeatureCommand(command); err != nil {
+			return nil, err
+		}
+		p.Name = name
+		p.Command = command
+		p.Cron = spec
 		if v, ok := fields["status"].(bool); ok {
 			p.Status = v
 		}
@@ -478,10 +519,12 @@ func UpdateCronCmdFrom(id string, fields map[string]interface{}, actor, role str
 			p.Type = strSlice(v)
 		}
 		p.UpdateOn = time.Now().Format("2006-01-02 15:04:05")
+		ccs.rescheduleLocked(p)
 		ccs.save(p)
-		return p
+		cp := *p
+		return &cp, nil
 	}
-	return nil
+	return nil, fmt.Errorf("定时任务不存在")
 }
 
 func DeleteCronCmdsByIds(ids []string, actor, role string) int {

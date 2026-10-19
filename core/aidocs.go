@@ -33,15 +33,16 @@ var aiEndpoints = []apiDoc{
 	{"POST", "/jiying/api/script/run", "直接运行插件", "ops", []string{"name", "args"}, ""},
 	{"POST", "/jiying/api/script/config", "读取插件配置 schema 与当前值", "ops", []string{"name"}, "secret 字段只返回是否已设置"},
 	{"POST", "/jiying/api/script/config/save", "保存插件配置", "ops", []string{"name", "values"}, "values 为 JSON 对象字符串"},
-	{"GET", "/jiying/api/crons", "定时任务列表（含下次运行时间与最近结果）", "readonly", nil, ""},
-	{"POST", "/jiying/api/cron/add", "新建定时任务", "ops", []string{"name", "cron", "command", "chat_id"}, "command 支持功能 JSON 或系统命令"},
-	{"POST", "/jiying/api/cron/toggle", "启用或停用定时任务", "ops", []string{"id", "enabled"}, ""},
-	{"POST", "/jiying/api/cron/delete", "删除定时任务", "ops", []string{"id"}, "破坏性操作，执行前确认"},
-	{"POST", "/jiying/api/cron/run", "立即执行一次定时任务", "ops", []string{"id"}, ""},
+	{"GET", "/jiying/api/crons", "定时任务列表（含下次运行时间与最近结果）", "readonly", nil, "主控返回全部，其他身份只返回本人创建的任务"},
+	{"POST", "/jiying/api/cron/add", "新建定时任务", "ops", []string{"name", "cron", "command", "chat_id"}, "command 支持功能 JSON 或系统命令；chat_id 可省略"},
+	{"POST", "/jiying/api/cron/update", "修改并重新调度定时任务", "ops", []string{"id", "name", "cron", "command", "chat_id"}, "字段可选，只更新传入项；非法表达式或命令返回错误且保留原任务"},
+	{"POST", "/jiying/api/cron/toggle", "启用或停用定时任务", "ops", []string{"id", "enabled"}, "仅本人任务或主控可操作"},
+	{"POST", "/jiying/api/cron/delete", "删除定时任务", "ops", []string{"id"}, "破坏性操作，执行前确认；仅本人任务或主控可操作"},
+	{"POST", "/jiying/api/cron/run", "立即执行一次定时任务", "ops", []string{"id"}, "仅本人任务或主控可操作"},
 	{"GET", "/jiying/api/executions", "执行账本", "readonly", []string{"kind", "name", "status", "limit"}, "kind: cron/feature/task/message"},
-	{"GET", "/jiying/api/tasks", "任务队列（含 app_id 应用归属）", "readonly", []string{"status", "feature", "user_id", "limit", "silent"}, "app_id 在入队时由会话归属填充；silent=1 返回最近 50 条 Agent 工具调用（静默任务）"},
-	{"POST", "/jiying/api/task/retry", "重试任务", "ops", []string{"id"}, ""},
-	{"POST", "/jiying/api/task/delete", "删除任务", "ops", []string{"id"}, ""},
+	{"GET", "/jiying/api/tasks", "任务队列（含 app_id 应用归属）", "readonly", []string{"status", "feature", "user_id", "limit", "silent"}, "主控返回全部，其他身份只返回本人发起的任务；silent=1 返回最近 50 条 Agent 工具调用（静默任务）"},
+	{"POST", "/jiying/api/task/retry", "重试任务", "ops", []string{"id"}, "仅本人任务或主控可操作，并写入审计"},
+	{"POST", "/jiying/api/task/delete", "删除任务", "ops", []string{"id"}, "仅本人任务或主控可操作，并写入审计"},
 	{"GET", "/jiying/api/conversations", "会话列表（个人账号与在线应用合并，含 relay_app_* 归属字段）", "readonly", nil, "账号未登录或查询失败时仍返回应用会话；relay_app_known=false 表示尚未记录归属"},
 	{"GET", "/jiying/api/messages", "会话消息", "readonly", []string{"conversation_id"}, "账号通道不可用时按会话归属应用回退读取最近 50 条，data.source=app"},
 	{"GET", "/jiying/api/conversation/capabilities", "会话能力（发送身份与应用归属）", "readonly", []string{"conversation_id"}, "返回 app_id/app_name/app_online/app_known/account_email/reason"},
@@ -94,7 +95,7 @@ var aiEndpoints = []apiDoc{
 	{"POST", "/jiying/api/skill/delete", "删除技能", "ops", []string{"name"}, ""},
 	{"GET", "/jiying/api/agent/tools", "AI 工具能力列表", "ops", nil, ""},
 	{"GET", "/jiying/api/agent/config", "读取 Agent 模型配置（含 app_systems，密钥仅返回是否已设置）", "master", nil, ""},
-	{"POST", "/jiying/api/agent/config", "保存 Agent 模型配置", "master", []string{"enabled", "base_url", "model", "fallback_models", "system", "api_key", "max_turns", "max_history"}, "api_key 传 **** 表示不修改"},
+	{"POST", "/jiying/api/agent/config", "保存 Agent 模型配置", "master", []string{"enabled", "base_url", "model", "fallback_models", "system", "api_key", "max_turns", "max_history", "max_tools", "max_context_kb"}, "api_key 传 **** 表示不修改；max_context_kb 限制 32-1024，max_tools 限制 1-32"},
 	{"POST", "/jiying/api/agent/app-system", "设置或清除单个应用的系统提示", "master", []string{"app_id", "system"}, "app_id 必填；system 最多 20000 字符，留空删除覆盖并继承全局提示"},
 	{"POST", "/jiying/api/agent/run", "调用内置 AI 代理", "ops", []string{"prompt", "conversation_id", "reset"}, "需要先在控制台配置模型；按会话归属应用选择系统提示与工具范围；reset=true 清空上下文"},
 	{"GET", "/jiying/api/icon", "生成并缓存图标（需 msg 关键词）", "readonly", []string{"msg", "n"}, "n 非空时返回 PNG"},
@@ -234,7 +235,8 @@ func aiManifest(c *gin.Context) {
 		plugin["install"] = "POST /jiying/api/script/install，name 决定类型，code 为完整源码；高风险代码需同时传 confirm=true"
 	}
 	features := ListFeatureItems()
-	crons := CronCmdsSnapshot()
+	cronActor, cronRole := ConsoleActor(c)
+	crons := CronCmdsSnapshotFor(cronActor, cronRole)
 	if public {
 		features = []*Feature{}
 		crons = []*CronCmd{}
@@ -559,7 +561,8 @@ func buildAIGuide(base, scope string, public bool) string {
 command 推荐写成功能 JSON：
   {"type":"feature","feature":"状态","args":"","conversation_id":"<可选>"}
 chat_id 可选，用于把结果发回指定会话。
-新建后默认启用；停用、删除、立即执行分别用 /cron/toggle、/cron/delete、/cron/run。
+新建后默认启用；调整用 /cron/update，停用、删除、立即执行分别用 /cron/toggle、/cron/delete、/cron/run。
+非主控身份只能查看和操作自己创建的任务。
 `)
 	}
 	b.WriteString(`

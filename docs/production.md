@@ -121,7 +121,7 @@ curl -fsS https://jiying.example.com/readyz
 curl -fsS https://jiying.example.com/metrics
 ```
 
-接入配置是否完整看控制台连接页，或登录后请求 `/jiying/api/connect/readiness`，返回 `status=invalid` 时按 `issues[].hint` 修复。磁盘告警重点看 `.db`、`logs/` 和插件目录增长。
+任务健康重点看 `jiying_task_queue_wait_seconds`（排队等待）、`jiying_task_duration_seconds`（执行耗时）与 `jiying_task_completed_total{status}`（终态计数）；队列持续堆积或 `timeout` 增长时优先检查插件耗时与 worker 数量。接入配置是否完整看控制台连接页，或登录后请求 `/jiying/api/connect/readiness`，返回 `status=invalid` 时按 `issues[].hint` 修复。磁盘告警重点看 `.db`、`logs/` 和插件目录增长。
 
 ## 6. 多实例
 

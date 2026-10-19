@@ -132,6 +132,29 @@ func parseCronFeatureCommand(raw string) (cronFeatureCommand, bool, error) {
 	return spec, true, nil
 }
 
+// validateCronFeatureCommand 校验定时命令中的功能存在性与会话 ID 合法性。
+// 纯系统命令与命令包装不做功能存在性检查，交由执行阶段按注册表校验。
+func validateCronFeatureCommand(command string) error {
+	parsed, isJSON, err := parseCronFeatureCommand(command)
+	if err != nil {
+		return err
+	}
+	if !isJSON || parsed.Type != "feature" {
+		return nil
+	}
+	name := strings.TrimSpace(parsed.Feature)
+	if name == "" {
+		return fmt.Errorf("缺少功能名")
+	}
+	if _, ok := GetFeature(name); !ok {
+		return fmt.Errorf("功能不存在: %s", name)
+	}
+	if conv := strings.TrimSpace(parsed.ConversationID); conv != "" && !validConversationID(conv) {
+		return fmt.Errorf("会话 ID 不合法")
+	}
+	return nil
+}
+
 // dispatchLocalCommandFor 执行系统命令或 JSON 功能命令，并按 userID 校验敏感命令权限。
 // 纯命令名维持原有系统命令语义，供 cron 与 socket 调用方复用。
 func dispatchLocalCommandFor(cmd, userID string) (string, error) {

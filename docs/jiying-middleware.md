@@ -224,7 +224,7 @@
 - 执行账本：`core/executions.go` 记录定时、手动与流程执行，内存保留最近 500 条，并异步单槽落盘到 `executions.json`（权限 `0600`，临时文件 + rename）；记录字段包含 `id` / `kind` / `name` / `command` / `status` / `started_at` / `finished_at` / `duration_ms` / `owner` / `trace_id` / `detail` / `error`。状态取 `success` / `failed` / `timeout` / `skipped` / `running`。
 - 查询接口：`GET /jiying/api/executions?kind=&status=&name=&limit=`，按类型、状态与名称过滤；执行详情可在控制台打开并跳转运行日志按 `trace_id` 查找。
 - 定时执行：`runCronCmd` 按任务 `owner_role` / `owner` 解析执行身份，写入开始与结束记录，并真实回写 `last_run` / `last_success` / `last_status` / `last_error` / `run_count` / `fail_count`；连续失败 3 次自动停用任务（`status=false`），panic 会被捕获并记为失败。
-- 下次运行：`GET /jiying/api/crons` 按 cron 表达式计算并返回 `next_run_at`，控制台直接展示；`POST /jiying/api/cron/run` 可立即触发一次，执行异步进行，结果进入执行记录。
+- 下次运行：`GET /jiying/api/crons` 按 cron 表达式计算并返回 `next_run_at`，控制台直接展示；`POST /jiying/api/cron/update` 可修改名称、表达式与命令并立即重排，非法表达式或命令返回错误且保留原任务；`POST /jiying/api/cron/run` 可立即触发一次，执行异步进行，结果进入执行记录。
 - 命令格式：定时任务接受纯系统命令名，或 JSON 功能命令 `{"type":"feature","feature":"功能名","args":"参数","conversation_id":"会话 ID"}`；`type=command` 可显式包装系统命令。功能模式会校验功能存在与 `conversation_id` 合法性，执行超时 2 分钟。系统命令若标记 `Admin`，仅 `system` / 主人 / `admin` 可运行，避免通过定时任务提权。
 
 ### 账号会话持久化与健康
@@ -326,7 +326,7 @@
 - 失败可感知：工具执行被拒绝、超时或失败时，回灌内容以 `FAILED:` 开头并附带「不要编造结果」提示，模型据此如实回复；成功结果保持原样。等待任务时使用调用方上下文并覆盖 `taskRunTimeout`，只有 `done` 状态才算成功，`failed` / `timeout` / `canceled` 及取消时仍为 `running` 的快照都按失败处理。
 - 图片降级：模型最终文本中的 Markdown 图片语法 `![alt](url)` 统一改写为 `[图片：alt](url)`。Agent 需要发图必须调用图片工具，防止未真正发送却让客户端渲染出图片。
 - 静默任务可追溯：`taskq` 为静默任务保留最近 50 条内存副本（`RecentSilentTasks`），`GET /jiying/api/tasks?silent=1` 返回；控制台任务队列新增「含 Agent 调用」开关，Agent 行带标记并只提供详情，不参与重试/删除。该接口要求运维及以上角色，主控可看全量，其他角色只返回自己发起的静默任务。静默任务仍不进入持久层，重启即清空。
-- 参数边界：`max_turns` 限制在 1~12，`max_history` 限制在 1~50，保存与加载都会归一化；回灌给模型的单次工具结果截断到 12 KiB，避免超长输出挤占上下文。
+- 参数边界：`max_turns` 限制在 1~12，`max_history` 限制在 1~50，`max_tools` 限制在 1~32，`max_context_bytes` 限制在 32 KiB~1 MiB（控制台按 KB 提交），保存与加载都会归一化；输入提示最多 8000 字符，历史按预算从最旧开始裁剪，单次工具结果截断到 12 KiB，单轮工具结果总量截断到 64 KiB，超出上下文预算时直接返回明确错误。工具次数用尽后不再向模型下发工具定义，强制其基于已有结果作答。
 
 ### 插件运行环境与失败详情
 
@@ -374,3 +374,10 @@
 - 按应用系统提示：Agent 配置新增 `app_systems`，`POST /jiying/api/agent/app-system` 写入或清除单个应用的提示；为空时继承全局系统提示。运行 Agent 时按 `appIDForConversation` 选择提示，并使用同一应用的工具契约。
 - AI 文档同步：`/jiying/ai.txt`、`/jiying/openapi.json` 与 `/jiying/api/ai/manifest` 补充多应用会话归属、`relay_app_*`、`source=app`、任务 `app_id`、`apps_locked`/`reset_apps`、`app_systems`，以及插件清单的 `class/service/apps` 字段；OpenAPI 写接口示例补 `apps` JSON、`app_id`、`reset_apps` 等参数形状。
 - 控制台：连接池应用行新增编辑入口，可查看应用 ID、接入地址并复用已保存密钥；Agent 页新增「按应用覆盖系统提示」选择器。
+
+### 权限收口、定时编辑与调度观测（2026-10-19）
+
+- 任务归属：`GET /jiying/api/tasks` 主控返回全部，其他身份只返回本人发起的任务；显式 `user_id` 查询也不能突破该范围。`task/retry` 与 `task/delete` 先经 `TaskForActor` 校验归属，主控可操作全部，其他身份只能操作自己的任务，拒绝、失败与成功都会写审计。系统内部调用仍走 `RetryTask` / `DeleteTask`，保持全量语义。
+- 定时编辑：新增 `POST /jiying/api/cron/update`，按 `id` 更新 `name` / `cron` / `command` / `chat_id`，未传字段保持不变。更新前校验表达式、功能命令与归属，成功后先移除旧调度再挂载新调度，避免留下旧触发器；失败路径不修改原任务。控制台定时任务行新增编辑入口并复用新建弹窗。
+- 定时可见性：`CronCmdsSnapshotFor` 按调用者裁剪，主控看全部，其他身份只看本人创建的任务；`cronManageable` 以角色为准，只读 API Key 即使用户是主控也不能管理他人任务。AI 文档中的定时列表同样按调用者裁剪。
+- 调度指标：`/metrics` 新增 `jiying_task_queue_wait_seconds`（入队到开始执行）、`jiying_task_duration_seconds`（执行耗时）与 `jiying_task_completed_total{status}`，均为 Prometheus 文本格式并带累计桶；不引入第三方依赖，桶覆盖 10ms~120s。

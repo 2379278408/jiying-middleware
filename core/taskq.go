@@ -31,6 +31,8 @@ type Task struct {
 	DurationMS int64  `json:"duration_ms,omitempty"`
 	RetryCount int    `json:"retry_count,omitempty"`
 	ErrorCode  string `json:"error_code,omitempty"`
+	// enqueuedAt 仅用于排队等待指标，不参与序列化。
+	enqueuedAt time.Time
 }
 
 const (
@@ -153,6 +155,7 @@ func EnqueueTask(t Task) (*Task, error) {
 		}
 	}
 	now := time.Now().UTC()
+	t.enqueuedAt = time.Now()
 	if t.CreatedAt == "" {
 		t.CreatedAt = now.Format(time.RFC3339)
 	}
@@ -219,6 +222,7 @@ func (q *taskQueue) next() *Task {
 			t.ErrorCode = ""
 			q.saveLocked()
 			cp := *t
+			observeTaskPicked(t)
 			return &cp
 		}
 	}
@@ -240,6 +244,7 @@ func (q *taskQueue) run(t *Task) {
 	q.mu.Lock()
 	cur := q.items[t.ID]
 	text := result
+	finishedStatus := taskFailed
 	if cur != nil {
 		finished := time.Now().UTC()
 		cur.FinishedAt = finished.Format(time.RFC3339)
@@ -258,12 +263,14 @@ func (q *taskQueue) run(t *Task) {
 			cur.Status = taskDone
 			cur.Result = result
 		}
+		finishedStatus = cur.Status
 		q.saveLocked()
 	}
 	conv := t.ConversationID
 	reply := t.ReplyTo
 	waiter := q.waits[t.ID]
 	q.mu.Unlock()
+	observeTaskFinished(finishedStatus, time.Since(started))
 	if t.Silent {
 		q.mu.Lock()
 		fin := q.items[t.ID]
@@ -541,10 +548,13 @@ func RecentSilentTasks(userID string, all bool, limit int) []*Task {
 }
 
 // TaskFilter 控制任务列表的筛选条件，空字段表示不过滤。
+// Viewer 非空时只返回该发起人的任务；All 为 true 时忽略 Viewer（主控视角）。
 type TaskFilter struct {
 	Status  string
 	Feature string
 	UserID  string
+	Viewer  string
+	All     bool
 	Limit   int
 }
 
@@ -570,6 +580,9 @@ func listTaskItems(filter TaskFilter) []*Task {
 		if filter.UserID != "" && t.UserID != filter.UserID {
 			continue
 		}
+		if !filter.All && strings.TrimSpace(filter.Viewer) != "" && t.UserID != filter.Viewer {
+			continue
+		}
 		cp := *t
 		out = append(out, &cp)
 	}
@@ -579,12 +592,38 @@ func listTaskItems(filter TaskFilter) []*Task {
 	return out
 }
 
-func RetryTask(id string) error {
+// taskAccessibleLocked 判断操作者能否管理指定任务。调用方必须持有 tasks.mu。
+// 主控可管理全部；其他身份只能管理自己发起的任务，避免跨用户读取或删除结果。
+func taskAccessibleLocked(t *Task, actor string, all bool) bool {
+	if t == nil {
+		return false
+	}
+	if all {
+		return true
+	}
+	actor = strings.TrimSpace(actor)
+	return actor != "" && t.UserID == actor
+}
+
+// TaskForActor 返回任务快照，仅当操作者有权管理该任务时。用于审计与前置校验。
+func TaskForActor(id, actor string, all bool) *Task {
+	tasks.mu.Lock()
+	defer tasks.mu.Unlock()
+	t := tasks.items[id]
+	if !taskAccessibleLocked(t, actor, all) {
+		return nil
+	}
+	cp := *t
+	return &cp
+}
+
+// RetryTaskAs 按操作者权限重试任务，非主控只能重试自己的任务。
+func RetryTaskAs(id, actor string, all bool) error {
 	tasks.mu.Lock()
 	t := tasks.items[id]
-	if t == nil {
+	if !taskAccessibleLocked(t, actor, all) {
 		tasks.mu.Unlock()
-		return fmt.Errorf("任务不存在")
+		return fmt.Errorf("任务不存在或无权操作")
 	}
 	if t.Status == taskRunning || t.Status == taskPending {
 		tasks.mu.Unlock()
@@ -594,6 +633,7 @@ func RetryTask(id string) error {
 	t.Confirm = false
 	t.RetryCount++
 	t.ErrorCode = ""
+	t.enqueuedAt = time.Now()
 	t.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	tasks.saveLocked()
 	tasks.mu.Unlock()
@@ -601,10 +641,16 @@ func RetryTask(id string) error {
 	return nil
 }
 
-func DeleteTask(id string) bool {
+// RetryTask 以系统身份重试任务，仅供内部命令与测试使用。
+func RetryTask(id string) error {
+	return RetryTaskAs(id, "", true)
+}
+
+// DeleteTaskAs 按操作者权限删除任务，非主控只能删除自己的任务。
+func DeleteTaskAs(id, actor string, all bool) bool {
 	tasks.mu.Lock()
 	defer tasks.mu.Unlock()
-	if tasks.items[id] == nil {
+	if !taskAccessibleLocked(tasks.items[id], actor, all) {
 		return false
 	}
 	delete(tasks.items, id)
@@ -617,6 +663,11 @@ func DeleteTask(id string) bool {
 	tasks.order = out
 	tasks.saveLocked()
 	return true
+}
+
+// DeleteTask 以系统身份删除任务，仅供内部命令与测试使用。
+func DeleteTask(id string) bool {
+	return DeleteTaskAs(id, "", true)
 }
 
 func kickTaskLoop() {

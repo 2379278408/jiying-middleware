@@ -28,6 +28,10 @@ type AgentConfig struct {
 	System     string   `json:"system"`
 	MaxTurns   int      `json:"max_turns"`
 	MaxHistory int      `json:"max_history"`
+	// MaxContextBytes 限制单次请求组装后的上下文总量（含系统提示与当前输入）。
+	MaxContextBytes int `json:"max_context_bytes"`
+	// MaxTools 限制单次运行实际执行的工具调用总数。
+	MaxTools int `json:"max_tools"`
 	// AppSystems 按应用覆盖系统提示；未配置或为空时使用全局 System。
 	AppSystems map[string]string `json:"app_systems,omitempty"`
 }
@@ -35,11 +39,20 @@ type AgentConfig struct {
 const agentConfigKey = "agent_config"
 
 const (
-	agentMinTurns      = 1
-	agentMaxTurns      = 12
-	agentMinHistory    = 1
-	agentMaxHistory    = 50
-	agentToolResultCap = 12 * 1024
+	agentMinTurns        = 1
+	agentMaxTurns        = 12
+	agentMinHistory      = 1
+	agentMaxHistory      = 50
+	agentMinContextBytes = 32 * 1024
+	agentMaxContextBytes = 1024 * 1024
+	agentDefaultContext  = 128 * 1024
+	agentMinTools        = 1
+	agentMaxTools        = 32
+	agentDefaultTools    = 8
+	agentToolResultCap   = 12 * 1024
+	// agentToolResultTotalCap 限制单次运行回灌给模型的全部工具结果总量。
+	agentToolResultTotalCap = 64 * 1024
+	agentMaxPromptRunes     = 8000
 )
 
 func clampInt(v, min, max int) int {
@@ -53,12 +66,26 @@ func clampInt(v, min, max int) int {
 }
 
 func normalizeAgentLimits(cfg *AgentConfig) {
+	if cfg.MaxTurns == 0 {
+		cfg.MaxTurns = 6
+	}
+	if cfg.MaxHistory == 0 {
+		cfg.MaxHistory = 12
+	}
+	if cfg.MaxContextBytes == 0 {
+		cfg.MaxContextBytes = agentDefaultContext
+	}
+	if cfg.MaxTools == 0 {
+		cfg.MaxTools = agentDefaultTools
+	}
 	cfg.MaxTurns = clampInt(cfg.MaxTurns, agentMinTurns, agentMaxTurns)
 	cfg.MaxHistory = clampInt(cfg.MaxHistory, agentMinHistory, agentMaxHistory)
+	cfg.MaxContextBytes = clampInt(cfg.MaxContextBytes, agentMinContextBytes, agentMaxContextBytes)
+	cfg.MaxTools = clampInt(cfg.MaxTools, agentMinTools, agentMaxTools)
 }
 
 func LoadAgentConfig() AgentConfig {
-	cfg := AgentConfig{Model: "gpt-4o-mini", MaxTurns: 6, MaxHistory: 12}
+	cfg := AgentConfig{Model: "gpt-4o-mini", MaxTurns: 6, MaxHistory: 12, MaxContextBytes: agentDefaultContext, MaxTools: agentDefaultTools}
 	cfg.BaseURL = strings.TrimRight(strings.TrimSpace(os.Getenv("USER_LLM_BASE_URL")), "/")
 	cfg.APIKey = strings.TrimSpace(os.Getenv("USER_LLM_API_KEY"))
 	if m := strings.TrimSpace(os.Getenv("USER_LLM_MODEL")); m != "" {
@@ -93,6 +120,12 @@ func LoadAgentConfig() AgentConfig {
 				}
 				if stored.MaxHistory > 0 {
 					cfg.MaxHistory = stored.MaxHistory
+				}
+				if stored.MaxContextBytes > 0 {
+					cfg.MaxContextBytes = stored.MaxContextBytes
+				}
+				if stored.MaxTools > 0 {
+					cfg.MaxTools = stored.MaxTools
 				}
 				cfg.Enabled = stored.Enabled
 				if key := openSecret(stored.APIKey); key != "" {
@@ -543,6 +576,51 @@ func sanitizeAgentReply(out string) string {
 	return agentMarkdownImageRE.ReplaceAllString(out, "[图片：$1]($2)")
 }
 
+// agentMessagesBytes 估算一组消息占用的上下文字节数，用于全局预算控制。
+func agentMessagesBytes(msgs []chatMessage) int {
+	total := 0
+	for _, m := range msgs {
+		total += len(m.Content) + len(m.ToolCallID)
+		for _, tc := range m.ToolCalls {
+			total += len(tc.Function.Name) + len(tc.Function.Arguments)
+		}
+	}
+	return total
+}
+
+// trimAgentHistory 从最旧的消息开始丢弃，直到历史总量不超过预算。
+// 历史只含普通 user/assistant 消息，不会破坏工具调用配对。
+func trimAgentHistory(msgs []chatMessage, budget int) []chatMessage {
+	if budget < 0 {
+		budget = 0
+	}
+	start := 0
+	total := agentMessagesBytes(msgs)
+	for start < len(msgs) && total > budget {
+		total -= agentMessagesBytes(msgs[start : start+1])
+		start++
+	}
+	return msgs[start:]
+}
+
+// capAgentToolOutput 在单次运行的总结果预算内截断工具输出。
+func capAgentToolOutput(s string, remaining int) (string, int) {
+	if remaining <= 0 {
+		return "工具结果预算已用尽，请直接回答用户。", 0
+	}
+	if len(s) <= remaining {
+		return s, len(s)
+	}
+	cut := remaining
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	if cut == 0 {
+		return "工具结果预算已用尽，请直接回答用户。", 0
+	}
+	return s[:cut] + "\n...[结果已按预算截断]", cut
+}
+
 // RunAgent 执行一轮薄 Agent：模型决策、调用功能、回灌结果，直到出最终答复。
 // seq 为触发消息的会话序号，用于读取服务端历史；无序号时回退本地历史。
 func RunAgent(ctx context.Context, convID, userID, prompt string, seq int64) (string, error) {
@@ -550,27 +628,48 @@ func RunAgent(ctx context.Context, convID, userID, prompt string, seq int64) (st
 	if !cfg.ready() {
 		return "", fmt.Errorf("Agent 未配置：请设置 USER_LLM_BASE_URL / USER_LLM_API_KEY / USER_LLM_MODEL")
 	}
+	if utf8.RuneCountInString(prompt) > agentMaxPromptRunes {
+		return "", fmt.Errorf("输入过长，最多 %d 字符", agentMaxPromptRunes)
+	}
 	appID := appIDForConversation(convID)
 	defs, index, _ := buildAgentToolsForApp(userID, appID)
 	runtime := newAgentRuntime(cfg)
 	msgs := []chatMessage{}
-	if sys := agentSystemPrompt(cfg.SystemForApp(appID), userID); sys != "" {
-		msgs = append(msgs, chatMessage{Role: "system", Content: sys})
+	system := agentSystemPrompt(cfg.SystemForApp(appID), userID)
+	if system != "" {
+		msgs = append(msgs, chatMessage{Role: "system", Content: system})
 	}
-	msgs = append(msgs, agentContext(ctx, convID, seq, appID)...)
+	remaining := cfg.MaxContextBytes - agentMessagesBytes(msgs) - len(prompt)
+	if remaining < 0 {
+		return "", fmt.Errorf("上下文预算不足，请缩短系统提示或输入")
+	}
+	msgs = append(msgs, trimAgentHistory(agentContext(ctx, convID, seq, appID), remaining)...)
 	msgs = append(msgs, chatMessage{Role: "user", Content: prompt})
 
 	turns := cfg.MaxTurns
 	if turns <= 0 {
 		turns = 6
 	}
+	maxTools := cfg.MaxTools
+	if maxTools <= 0 {
+		maxTools = agentDefaultTools
+	}
+	usedTools := 0
+	toolResultBytes := 0
 	for i := 0; i < turns; i++ {
+		if agentMessagesBytes(msgs) > cfg.MaxContextBytes {
+			return "", fmt.Errorf("上下文超过预算，请缩短输入或减少工具输出")
+		}
 		// 首轮命中实时类意图时强制选择工具，避免模型直接编造实时数据。
+		// 工具预算用尽后不再下发工具定义，让模型基于已有结果直接作答。
+		callDefs := defs
 		choice := ""
-		if i == 0 {
+		if usedTools >= maxTools {
+			callDefs = nil
+		} else if i == 0 {
 			choice = agentToolChoice(prompt, defs)
 		}
-		resp, err := runtime.Complete(ctx, msgs, defs, choice)
+		resp, err := runtime.Complete(ctx, msgs, callDefs, choice)
 		if err != nil {
 			return "", err
 		}
@@ -585,6 +684,11 @@ func RunAgent(ctx context.Context, convID, userID, prompt string, seq int64) (st
 		}
 		msgs = append(msgs, msg)
 		for _, tc := range msg.ToolCalls {
+			if usedTools >= maxTools {
+				msgs = append(msgs, chatMessage{Role: "tool", ToolCallID: tc.ID, Content: "工具调用预算已用尽，请直接回答用户。"})
+				continue
+			}
+			usedTools++
 			if tc.Function.Name == askChoiceTool {
 				out := runAgentAskChoice(ctx, convID, userID, tc.Function.Arguments)
 				msgs = append(msgs, chatMessage{Role: "tool", ToolCallID: tc.ID, Content: out})
@@ -592,7 +696,10 @@ func RunAgent(ctx context.Context, convID, userID, prompt string, seq int64) (st
 			}
 			feature := index[tc.Function.Name]
 			out := runAgentTool(ctx, feature, tc.Function.Arguments, userID, convID)
-			msgs = append(msgs, chatMessage{Role: "tool", ToolCallID: tc.ID, Content: truncateAgentToolResult(out)})
+			out = truncateAgentToolResult(out)
+			out, used := capAgentToolOutput(out, agentToolResultTotalCap-toolResultBytes)
+			toolResultBytes += used
+			msgs = append(msgs, chatMessage{Role: "tool", ToolCallID: tc.ID, Content: out})
 		}
 	}
 	return "", fmt.Errorf("Agent 超过最大轮次")
@@ -813,15 +920,18 @@ func registerAgentAPI() {
 	g.GET("/agent/config", requireRole(RoleMaster), func(c *gin.Context) {
 		cfg := LoadAgentConfig()
 		jiyingJSON(c, gin.H{
-			"enabled":         cfg.Enabled,
-			"base_url":        maskURL(cfg.BaseURL),
-			"model":           cfg.Model,
-			"fallback_models": cfg.Fallback,
-			"system":          cfg.System,
-			"app_systems":     cfg.AppSystems,
-			"max_turns":       cfg.MaxTurns,
-			"max_history":     cfg.MaxHistory,
-			"has_key":         cfg.APIKey != "",
+			"enabled":           cfg.Enabled,
+			"base_url":          maskURL(cfg.BaseURL),
+			"model":             cfg.Model,
+			"fallback_models":   cfg.Fallback,
+			"system":            cfg.System,
+			"app_systems":       cfg.AppSystems,
+			"max_turns":         cfg.MaxTurns,
+			"max_history":       cfg.MaxHistory,
+			"max_context_bytes": cfg.MaxContextBytes,
+			"max_context_kb":    cfg.MaxContextBytes / 1024,
+			"max_tools":         cfg.MaxTools,
+			"has_key":           cfg.APIKey != "",
 		})
 	})
 	g.POST("/agent/config", requireRole(RoleMaster), func(c *gin.Context) {
@@ -846,6 +956,21 @@ func registerAgentAPI() {
 		}
 		if v := c.PostForm("max_history"); v != "" {
 			fmt.Sscan(v, &cfg.MaxHistory)
+		}
+		if v := strings.TrimSpace(c.PostForm("max_context_kb")); v != "" {
+			var kb int
+			if _, err := fmt.Sscan(v, &kb); err == nil {
+				cfg.MaxContextBytes = kb * 1024
+			}
+		}
+		if v := strings.TrimSpace(c.PostForm("max_context_bytes")); v != "" {
+			var raw int
+			if _, err := fmt.Sscan(v, &raw); err == nil {
+				cfg.MaxContextBytes = raw
+			}
+		}
+		if v := c.PostForm("max_tools"); v != "" {
+			fmt.Sscan(v, &cfg.MaxTools)
 		}
 		normalizeAgentLimits(&cfg)
 		SaveAgentConfig(cfg)

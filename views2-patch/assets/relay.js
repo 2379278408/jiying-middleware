@@ -3198,7 +3198,10 @@
         + '<div class="field"><label>该应用的系统提示</label><textarea class="input" id="ag_app_system" rows="3" placeholder="留空则继承全局系统提示"></textarea><div class="hint" id="ag_app_hint">在系统提示后追加该应用的约束与上下文。</div></div></div>'
         + '<div class="rl-row"><div class="spacer"></div><button class="btn btn-ghost btn-sm" id="ag_app_save">保存应用提示</button></div></details>'
          + '<div class="field"><label>上下文消息数</label><input class="input" id="ag_hist" type="number" min="2" max="64" value="' + esc(String(d.max_history || 12)) + '"><div class="hint">每个会话保留的最近消息数量，数值越大越能延续上下文。</div></div>'
-         + '<details class="agent-advanced"><summary>高级运行保护</summary><div class="field"><label>单次工具调用上限</label><input class="input" id="ag_turns" type="number" min="1" max="20" value="' + esc(String(d.max_turns || 6)) + '"><div class="hint">模型连续调用功能的最大次数，用于防止异常循环。</div></div></details>'
+         + '<details class="agent-advanced"><summary>高级运行保护</summary>'
+         + '<div class="grid grid-2"><div class="field"><label>最大模型轮次</label><input class="input" id="ag_turns" type="number" min="1" max="12" value="' + esc(String(d.max_turns || 6)) + '"><div class="hint">模型连续决策的最大轮次，用于防止异常循环。</div></div>'
+         + '<div class="field"><label>工具调用上限</label><input class="input" id="ag_tools" type="number" min="1" max="32" value="' + esc(String(d.max_tools || 8)) + '"><div class="hint">单次运行实际执行的功能调用总数，超出后要求模型直接作答。</div></div></div>'
+         + '<div class="field"><label>上下文预算（KB）</label><input class="input" id="ag_ctx" type="number" min="32" max="1024" value="' + esc(String(Math.round((d.max_context_bytes || 131072) / 1024))) + '"><div class="hint">系统提示、历史消息与当前输入的总预算；超出时优先丢弃最旧历史。</div></div></details>'
         + '<div class="rl-row"><div class="spacer"></div><button class="btn btn-primary btn-sm" id="ag_save">保存配置</button></div>';
       $("#ag_save").addEventListener("click", saveAgentConfig);
       $("#ag_app_save").addEventListener("click", saveAgentAppSystem);
@@ -3230,6 +3233,8 @@
       api_key: $("#ag_key").value,
       system: $("#ag_system").value,
       max_turns: $("#ag_turns").value.trim(),
+      max_tools: $("#ag_tools").value.trim(),
+      max_context_kb: $("#ag_ctx").value.trim(),
       max_history: $("#ag_hist").value.trim()
     };
     api("/jiying/api/agent/config", { method: "POST", form: form }).then(function (r) {
@@ -3487,6 +3492,7 @@
       if (!box) return;
       if (r.code !== 200) { tableError(box, 7, "clock", r.code === 403 ? "权限不足" : "定时任务加载失败", r.msg || r.message, loadCrons); return; }
       var list = r.data ? r.data : [];
+      state.crons = list;
       if (!list.length) { box.innerHTML = '<tr><td colspan="7">' + emptyState("clock", "暂无定时任务", "新建定时后，中间件会按 cron 表达式自动执行，并记录每次结果。", '<button class="btn btn-primary btn-sm" id="cronEmptyAdd">新建定时</button>') + "</td></tr>"; var b = $("#cronEmptyAdd"); if (b) b.addEventListener("click", openCronModal); return; }
       box.innerHTML = list.map(function (c) {
         var on = Boolean(c.status);
@@ -3509,34 +3515,55 @@
           + '<td class="text-right nowrap"><button class="btn btn-ghost btn-sm" title="立即执行一次" onclick="Relay.runCron(' + jsArg(c.id) + ')">运行一次</button>'
           + '<button class="btn btn-ghost btn-sm" title="查看该任务执行记录" onclick="Relay.gotoExecutions(' + jsArg(c.name) + ')">记录</button>'
           + '<button class="btn btn-ghost btn-sm" onclick="Relay.toggleCron(' + jsArg(c.id) + "," + (on ? "false" : "true") + ')">' + (on ? "停用" : "启用") + "</button>"
+          + '<button class="btn btn-ghost btn-sm" onclick="Relay.editCron(' + jsArg(c.id) + ')">编辑</button>'
           + '<button class="btn btn-outline-danger btn-sm" onclick="Relay.delCron(' + jsArg(c.id) + ')">删除</button></td></tr>';
       }).join("");
     }).catch(function () { tableError($("#cronList"), 7, "clock", "定时任务加载失败", "网络异常，请检查服务状态。", loadCrons); });
   }
-  function openCronModal() {
-    showModal("新建定时任务", '<div class="field"><label>名称</label><input class="input" id="cm_name" placeholder="每日额度重置"></div>'
+  function parseCronCommand(cmd) {
+    var raw = String(cmd || "").trim();
+    var out = { type: "command", command: raw };
+    if (raw.charAt(0) === "{") {
+      try {
+        var o = JSON.parse(raw);
+        if (o.type === "feature" || o.feature) {
+          out = { type: "feature", feature: o.feature || "", args: o.args || "", conv: o.conversation_id || "" };
+        } else if (o.type === "command" && o.command) {
+          out = { type: "command", command: o.command };
+        }
+      } catch (e) { /* 保持纯命令 */ }
+    }
+    return out;
+  }
+  function openCronModal(c) {
+    var editing = !!c;
+    var parsed = parseCronCommand(editing ? c.command : "");
+    var initType = parsed.type === "command" ? "command" : "feature";
+    var preset = editing ? String(c.cron || "") : CRON_PRESETS[0][0];
+    var knownPreset = CRON_PRESETS.some(function (p) { return p[0] === preset; });
+    var selectPreset = editing && !knownPreset ? "custom" : preset;
+    showModal(editing ? "编辑定时任务" : "新建定时任务", '<div class="field"><label>名称</label><input class="input" id="cm_name" placeholder="每日额度重置" value="' + esc(editing ? c.name : "") + '"></div>'
       + '<div class="field"><label>执行频率</label><select class="select" id="cm_preset">'
-      + CRON_PRESETS.map(function (p) { return '<option value="' + esc(p[0]) + '">' + esc(p[1]) + "</option>"; }).join("")
-      + '<option value="custom">自定义</option></select><div class="hint" id="cm_preset_hint">' + esc(CRON_PRESETS[0][1]) + "执行一次</div></div>"
-      + '<div class="field" id="cm_cron_box" hidden><label>Cron 表达式</label><input class="input" id="cm_cron" placeholder="0 5 * * * *"><div class="hint">秒 分 时 日 月 周，例如 <code>0 5 * * * *</code> 表示每小时第 5 分钟。</div></div>'
-      + '<div class="field"><label>执行类型</label><select class="select" id="cm_type"><option value="feature">已启用功能</option><option value="command">系统命令</option></select></div>'
-      + '<div id="cm_feature_box"><div class="field"><label>功能名</label><input class="input" id="cm_feature" list="cm_features" placeholder="选择或输入已启用功能"><datalist id="cm_features"></datalist></div>'
-      + '<div class="field"><label>功能参数（可选）</label><input class="input" id="cm_args" placeholder="例如：重置"></div>'
-      + '<div class="field"><label>会话 ID（可选）</label><input class="input" id="cm_conv" placeholder="功能需要会话上下文时填写"></div></div>'
-      + '<div id="cm_command_box" hidden><div class="field"><label>系统命令</label><input class="input" id="cm_command" placeholder="status"></div><div class="hint">管理员命令仅主人角色可创建与运行。</div></div>'
+      + CRON_PRESETS.map(function (p) { return '<option value="' + esc(p[0]) + '"' + (p[0] === selectPreset ? " selected" : "") + '>' + esc(p[1]) + "</option>"; }).join("")
+      + '<option value="custom"' + (selectPreset === "custom" ? " selected" : "") + '>自定义</option></select><div class="hint" id="cm_preset_hint"></div></div>'
+      + '<div class="field" id="cm_cron_box" hidden><label>Cron 表达式</label><input class="input" id="cm_cron" placeholder="0 5 * * * *" value="' + esc(selectedCronValue(selectPreset, preset)) + '"><div class="hint">秒 分 时 日 月 周，例如 <code>0 5 * * * *</code> 表示每小时第 5 分钟。</div></div>'
+      + '<div class="field"><label>执行类型</label><select class="select" id="cm_type"><option value="feature"' + (initType === "feature" ? " selected" : "") + '>已启用功能</option><option value="command"' + (initType === "command" ? " selected" : "") + '>系统命令</option></select></div>'
+      + '<div id="cm_feature_box"><div class="field"><label>功能名</label><input class="input" id="cm_feature" list="cm_features" placeholder="选择或输入已启用功能" value="' + esc(parsed.feature || "") + '"><datalist id="cm_features"></datalist></div>'
+      + '<div class="field"><label>功能参数（可选）</label><input class="input" id="cm_args" placeholder="例如：重置" value="' + esc(parsed.args || "") + '"></div>'
+      + '<div class="field"><label>会话 ID（可选）</label><input class="input" id="cm_conv" placeholder="功能需要会话上下文时填写" value="' + esc(parsed.conv || "") + '"></div></div>'
+      + '<div id="cm_command_box" hidden><div class="field"><label>系统命令</label><input class="input" id="cm_command" placeholder="status" value="' + esc(parsed.command || "") + '"></div><div class="hint">管理员命令仅主人角色可创建与运行。</div></div>'
       + '<pre class="rl-codeblock" id="cm_preview" style="margin:0;max-height:120px"></pre>',
-      '<button class="btn btn-ghost" onclick="Relay.closeModal()">取消</button><button class="btn btn-primary" id="cm_save">创建</button>');
+      '<button class="btn btn-ghost" onclick="Relay.closeModal()">取消</button><button class="btn btn-primary" id="cm_save">' + (editing ? "保存" : "创建") + "</button>");
     var typeEl = $("#cm_type"), fbox = $("#cm_feature_box"), cbox = $("#cm_command_box"), prev = $("#cm_preview");
     var cronEl = $("#cm_cron"), presetEl = $("#cm_preset"), cronBox = $("#cm_cron_box"), presetHint = $("#cm_preset_hint");
-    cronEl.value = CRON_PRESETS[0][0];
     function syncCron() {
       var custom = presetEl.value === "custom";
       cronBox.hidden = !custom;
       if (!custom) cronEl.value = presetEl.value;
       presetHint.textContent = (custom ? "按秒 分 时 日 月 周填写" : presetEl.options[presetEl.selectedIndex].text + "执行一次");
+      syncPreview();
     }
     presetEl.addEventListener("change", syncCron);
-    syncCron();
     function syncType() {
       var isFeature = typeEl.value === "feature";
       fbox.hidden = !isFeature;
@@ -3563,6 +3590,7 @@
       var el = $("#" + id);
       if (el) el.addEventListener("input", syncPreview);
     });
+    syncCron();
     syncType();
     api("/jiying/api/features").then(function (r) {
       var dl = $("#cm_features");
@@ -3572,11 +3600,17 @@
     $("#cm_save").addEventListener("click", function () {
       var name = $("#cm_name").value.trim(), cron = cronEl.value.trim(), cmd = buildCronCommand();
       if (!name || !cron || !cmd) { toast("请填写名称、执行频率与执行内容", "err"); return; }
-      api("/jiying/api/cron/add", { method: "POST", form: { name: name, cron: cron, command: cmd } }).then(function (r) {
-        if (r.code === 200) { closeModal(); toast("已创建", "ok"); loadCrons(); }
-        else toast(r.msg || "创建失败", "err");
+      var form = { name: name, cron: cron, command: cmd };
+      var url = "/jiying/api/cron/add";
+      if (editing) { url = "/jiying/api/cron/update"; form.id = c.id; }
+      api(url, { method: "POST", form: form }).then(function (r) {
+        if (r.code === 200) { closeModal(); toast(editing ? "已保存" : "已创建", "ok"); loadCrons(); }
+        else toast(r.msg || (editing ? "保存失败" : "创建失败"), "err");
       });
     });
+  }
+  function selectedCronValue(preset, custom) {
+    return preset === "custom" ? custom : preset;
   }
   function runCron(id) {
     api("/jiying/api/cron/run", { method: "POST", form: { id: id } }).then(function (r) {
@@ -3591,6 +3625,11 @@
       if (r.code === 200) { toast(on ? "已启用" : "已停用", "ok"); loadCrons(); }
       else toast(r.msg || "操作失败", "err");
     });
+  }
+  function editCron(id) {
+    var c = (state.crons || []).filter(function (x) { return String(x.id) === String(id); })[0];
+    if (!c) { toast("定时任务已不在列表中，请刷新", "err"); return; }
+    openCronModal(c);
   }
   function delCron(id) {
     confirmDialog("删除定时任务", "确认删除该定时任务？", "删除", function () {
@@ -5057,6 +5096,7 @@
     featureDetail: featureDetail,
     editScriptApps: editScriptApps,
     toggleCron: toggleCron,
+    editCron: editCron,
     delCron: delCron,
     loadExecutions: loadExecutions,
     gotoExecutions: gotoExecutions,

@@ -361,6 +361,7 @@ func registerJiyingAPI() {
 	g.POST("/script/config/save", requireRole(RoleOps), jiyingAPIScriptConfigSave)
 	g.GET("/crons", jiyingAPICrons)
 	g.POST("/cron/add", requireRole(RoleOps), jiyingAPICronAdd)
+	g.POST("/cron/update", requireRole(RoleOps), jiyingAPICronUpdate)
 	g.POST("/cron/toggle", requireRole(RoleOps), jiyingAPICronToggle)
 	g.POST("/cron/delete", requireRole(RoleOps), jiyingAPICronDelete)
 	g.POST("/cron/run", requireRole(RoleOps), jiyingAPICronRun)
@@ -835,7 +836,8 @@ func jiyingAPIScriptConfigSave(c *gin.Context) {
 }
 
 func jiyingAPICrons(c *gin.Context) {
-	jiyingJSON(c, CronCmdsSnapshot())
+	actor, role := ConsoleActor(c)
+	jiyingJSON(c, CronCmdsSnapshotFor(actor, role))
 }
 
 func jiyingAPICronAdd(c *gin.Context) {
@@ -876,6 +878,90 @@ func jiyingAPICronAdd(c *gin.Context) {
 	id := ccs.add(cmd)
 	RecordAudit(consoleUser(c), "cron.add", name, spec+" "+command, "成功")
 	jiyingJSON(c, gin.H{"id": id})
+}
+
+func jiyingAPICronUpdate(c *gin.Context) {
+	id := strings.TrimSpace(c.PostForm("id"))
+	if id == "" {
+		jiyingErr(c, "缺少定时任务 ID")
+		return
+	}
+	actor, role := ConsoleActor(c)
+	if actor == "" {
+		actor = "unknown"
+	}
+	ccs.RLock()
+	cur := findCronByIDLocked(id)
+	allowed := cur != nil && cronManageable(cur, actor, role)
+	var current CronCmd
+	if allowed {
+		current = *cur
+	}
+	ccs.RUnlock()
+	if !allowed {
+		RecordAudit(actor, "cron.update", id, "", "拒绝: 定时任务不存在或无权操作")
+		jiyingErr(c, "定时任务不存在或无权操作")
+		return
+	}
+
+	name := strings.TrimSpace(c.PostForm("name"))
+	spec := strings.TrimSpace(c.PostForm("cron"))
+	command := strings.TrimSpace(c.PostForm("command"))
+	chat, chatSet := c.GetPostForm("chat_id")
+	chat = strings.TrimSpace(chat)
+	if name == "" {
+		name = current.Name
+	}
+	if spec == "" {
+		spec = current.Cron
+	}
+	if command == "" {
+		command = current.Command
+	}
+	if !isValidCronSpec(spec) {
+		RecordAudit(actor, "cron.update", id, spec+" "+command, "失败: 表达式无效")
+		jiyingErr(c, "Cron 表达式无效，支持 5 段或 6 段（含秒）写法，如 0 */30 * * * *（每 30 分钟）")
+		return
+	}
+	if err := validateCronFeatureCommand(command); err != nil {
+		RecordAudit(actor, "cron.update", id, spec+" "+command, "失败: "+err.Error())
+		jiyingErr(c, err.Error())
+		return
+	}
+	cmd, err := UpdateCronCmd(id, map[string]interface{}{"name": name, "cron": spec, "command": command}, actor, role)
+	if err != nil {
+		RecordAudit(actor, "cron.update", id, spec+" "+command, "失败: "+err.Error())
+		jiyingErr(c, err.Error())
+		return
+	}
+	if chatSet {
+		ccs.Lock()
+		if cur := findCronByIDLocked(id); cur != nil {
+			if chat == "" {
+				cur.GroupManager = nil
+			} else {
+				cur.GroupManager = []string{chat}
+			}
+			ccs.save(cur)
+		}
+		ccs.Unlock()
+	}
+	RecordAudit(actor, "cron.update", id, spec+" "+command, "成功")
+	next := ""
+	if cmd.Status {
+		next = nextCronRun(cmd.Cron, time.Now())
+	}
+	jiyingJSON(c, gin.H{"id": cmd.ID, "next_run_at": next})
+}
+
+// findCronByIDLocked 在已持有 ccs 锁时按 ID 查找任务。
+func findCronByIDLocked(id string) *CronCmd {
+	for _, p := range ccs.Pts {
+		if p != nil && p.ID == id {
+			return p
+		}
+	}
+	return nil
 }
 
 func jiyingAPICronToggle(c *gin.Context) {
@@ -936,6 +1022,8 @@ func jiyingAPITasks(c *gin.Context) {
 			limit = 100
 		}
 	}
+	actor := consoleUser(c)
+	master := requestRole(c) == RoleMaster
 	// silent=1 返回 Agent 工具调用等静默任务的最近记录，便于排查未展示的调用。
 	// 静默任务可能包含工具入参与结果，只对运维及以上开放，非主控仅能看到自己的记录。
 	if v := strings.TrimSpace(c.Query("silent")); v == "1" || strings.EqualFold(v, "true") {
@@ -943,34 +1031,63 @@ func jiyingAPITasks(c *gin.Context) {
 			jiyingErr(c, "权限不足")
 			return
 		}
-		master := requestHasRole(c, RoleMaster)
-		jiyingJSON(c, RecentSilentTasks(consoleUser(c), master, limit))
+		jiyingJSON(c, RecentSilentTasks(actor, master, limit))
 		return
 	}
 	jiyingJSON(c, listTaskItems(TaskFilter{
 		Status:  strings.TrimSpace(c.Query("status")),
 		Feature: strings.TrimSpace(c.Query("feature")),
 		UserID:  strings.TrimSpace(c.Query("user_id")),
+		Viewer:  actor,
+		All:     master,
 		Limit:   limit,
 	}))
 }
 
 func jiyingAPITaskRetry(c *gin.Context) {
 	id := strings.TrimSpace(c.PostForm("id"))
-	if err := RetryTask(id); err != nil {
+	actor := consoleUser(c)
+	all := requestRole(c) == RoleMaster
+	t := TaskForActor(id, actor, all)
+	if t == nil {
+		RecordAudit(actor, "task.retry", id, "", "拒绝: 任务不存在或无权操作")
+		jiyingErr(c, "任务不存在或无权操作")
+		return
+	}
+	if err := RetryTaskAs(id, actor, all); err != nil {
+		RecordAudit(actor, "task.retry", id, taskAuditDetail(t), "失败: "+err.Error())
 		jiyingErr(c, err.Error())
 		return
 	}
+	RecordAudit(actor, "task.retry", id, taskAuditDetail(t), "成功")
 	jiyingJSON(c, "ok")
 }
 
 func jiyingAPITaskDelete(c *gin.Context) {
 	id := strings.TrimSpace(c.PostForm("id"))
-	if !DeleteTask(id) {
+	actor := consoleUser(c)
+	all := requestRole(c) == RoleMaster
+	t := TaskForActor(id, actor, all)
+	if t == nil {
+		RecordAudit(actor, "task.delete", id, "", "拒绝: 任务不存在或无权操作")
+		jiyingErr(c, "任务不存在或无权操作")
+		return
+	}
+	if !DeleteTaskAs(id, actor, all) {
+		RecordAudit(actor, "task.delete", id, taskAuditDetail(t), "失败: 任务不存在")
 		jiyingErr(c, "任务不存在")
 		return
 	}
+	RecordAudit(actor, "task.delete", id, taskAuditDetail(t), "成功")
 	jiyingJSON(c, "ok")
+}
+
+// taskAuditDetail 生成任务审计摘要，避免把结果正文写入审计。
+func taskAuditDetail(t *Task) string {
+	if t == nil {
+		return ""
+	}
+	return fmt.Sprintf("feature=%s user=%s status=%s", t.Feature, t.UserID, t.Status)
 }
 
 func jiyingAPIConversations(c *gin.Context) {

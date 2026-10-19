@@ -74,6 +74,7 @@ func metrics(c *gin.Context) {
 	for _, status := range []string{taskWaitingConfirmation, taskCanceled, taskTimeout} {
 		fmt.Fprintf(&b, "jiying_tasks{status=\"%s\"} %d\n", status, statusCounts[status])
 	}
+	writeTaskMetrics(&b)
 	fmt.Fprintf(&b, "# HELP jiying_app_connections_configured 已配置应用连接数\n")
 	fmt.Fprintf(&b, "# TYPE jiying_app_connections_configured gauge\n")
 	fmt.Fprintf(&b, "jiying_app_connections_configured %d\n", len(loadAppConns()))
