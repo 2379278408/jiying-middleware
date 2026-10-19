@@ -713,6 +713,11 @@ func jiyingAPIScriptInstall(c *gin.Context) {
 		jiyingErr(c, "缺少文件名或代码")
 		return
 	}
+	if msg := scriptRiskMessage(name, code); msg != "" && c.PostForm("confirm") != "true" {
+		RecordAudit(consoleUser(c), "script.install", name, "", "待确认: "+msg)
+		jiyingErr(c, msg)
+		return
+	}
 	if err := InstallScript(name, code); err != nil {
 		RecordAudit(consoleUser(c), "script.install", name, "", "失败: "+err.Error())
 		jiyingErr(c, "安装失败: "+err.Error())

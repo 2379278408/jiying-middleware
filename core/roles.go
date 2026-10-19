@@ -156,12 +156,16 @@ func requireRole(min string) gin.HandlerFunc {
 func registerRolesAPI() {
 	g := Server.Group("/jiying/api", requireLogin)
 	g.GET("/roles", func(c *gin.Context) {
-		jiyingJSON(c, gin.H{
-			"me":      UserRole(consoleUser(c)),
-			"me_id":   consoleUser(c),
-			"roles":   ListUserRoles(),
-			"masters": ListMasters(),
-		})
+		data := gin.H{
+			"me":    UserRole(consoleUser(c)),
+			"me_id": consoleUser(c),
+		}
+		// 主人列表属于权限面，只对 master 返回；其他角色仍可读取自身角色用于顶栏展示。
+		if requestHasRole(c, RoleMaster) {
+			data["roles"] = ListUserRoles()
+			data["masters"] = ListMasters()
+		}
+		jiyingJSON(c, data)
 	})
 	g.POST("/masters", requireRole(RoleMaster), func(c *gin.Context) {
 		user := strings.TrimSpace(c.PostForm("user"))

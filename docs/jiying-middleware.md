@@ -71,6 +71,10 @@
 
 插件还可用 `[class: 分类名]` 归档，用 `[service: 服务名]` 把同一业务/项目的多个插件收进同一文件夹，用 `[apps: app-a, app-b]` 声明可服务的应用白名单（`*` 或省略表示全部应用）。`/jiying/api/scripts` 会返回 `class` / `service` / `apps`，功能记录同步保存；执行功能与 Agent 工具裁剪都会校验当前应用是否命中白名单，未授权返回「该插件未授权当前应用」。控制台按「分类 → 服务 → 插件」三层展示：分类是顶层文件夹，服务是分类内的子文件夹，未声明服务的插件直接挂在分类下；搜索同时匹配分类、服务、应用与插件说明。
 
+脚本运行时按最小权限执行：每次运行创建独立工作目录并替换 `HOME` / `TMPDIR`，环境变量只放行 `PATH`、语言与 `JIYING_*` 白名单，插件目录通过 `JIYING_PLUGIN_DIR` 只读暴露；Python 子进程用 `prlimit` 限制地址空间、CPU、进程数与文件句柄，输出上限 256 KB，超时 15 秒。`[network: false]` 的 Python 插件在独立网络命名空间中运行；非 root 部署使用 `unshare -Urn`，内核禁用用户命名空间时会直接失败。安装含 `subprocess`、`os.system`、`child_process`、`requests`、`fetch`、`eval` 等高风险能力的脚本时，API 要求 `confirm=true`，控制台先弹确认框。
+
+插件市场使用 Ed25519 发布者签名。本机发布者首次发布自动生成 `<数据目录>/.market_signing_key`(0600) 并登记 `local` 公钥；外部发布者先通过 `POST /jiying/api/market/publishers` 登记公钥，再在发布或导入时携带 `publisher` 与 `signature`（base64，payload 为规范化元数据）。安装前同时校验发布者签名与内容摘要，签名失败或未知发布者直接拒绝；`force` 仅允许降级，不能绕过校验。发布者的公钥登记后不能更换，需要先删除旧记录。
+
 ## 聊天命令
 
 所有人：`帮助`、`我的ID`、`状态`、`功能列表`，以及已授权功能。
@@ -267,8 +271,8 @@
 - 鉴权：`requireLogin` 先解析 `Authorization: Bearer jy_...`，失败直接 401；无该头时回退 `jiying_session` Cookie。`requireRole` 对密钥按 `scope`（readonly / ops / master）比较角色等级，`consoleUser` 返回 `key:备注(前缀)` 写入审计，密钥调用与人工操作可区分。
 - 管理边界：密钥的创建、列表、轮换、撤销仅允许浏览器会话（`requireConsoleSession`），API Key 不能自我复制或提权；撤销与轮换即时生效。
 - 生命周期：单实例最多保留 100 把有效密钥；读取列表与创建时自动清理已过期密钥；轮换会作废旧密钥并签发同备注、同 scope 的新密钥，留空有效期时沿用旧密钥剩余天数（永久密钥保持永久）；限流窗口表超过 256 项时回收两个窗口周期前的条目。
-- 公开文档：`GET /jiying/ai.txt` 为面向 AI 的纯文本说明（认证、响应约定、常用流程、定时与插件规范），`GET /jiying/openapi.json` 为 OpenAPI 3.0 文档，均无需登录。
-- 能力清单：`GET /jiying/api/ai/manifest` 返回当前功能、定时任务、就绪度、调用者角色、端点表、cron 示例与插件协议，供 AI 在执行前自助读取。端点表覆盖连接池应用/账号管理与资料刷新；删除类接口按路由实际权限标记为 `ops`。OpenAPI 中密钥管理使用 `cookieAuth`，并注明不支持 Bearer。
+- 公开文档：`GET /jiying/ai.txt` 为面向 AI 的纯文本说明（认证、响应约定、常用流程、定时与插件规范），`GET /jiying/openapi.json` 为 OpenAPI 3.0 文档。两者都按调用者 scope 裁剪：匿名只保留只读 GET，readonly / ops / master 各自看到授权范围内的端点，密钥管理、角色列表与写操作不会出现在低权限文档中；无效 Bearer 返回 401，响应带 `Cache-Control: no-store` 与 `Vary`。
+- 能力清单：`GET /jiying/api/ai/manifest` 返回当前功能、定时任务、就绪度、调用者角色、端点表、cron 示例与插件协议，供 AI 在执行前自助读取。匿名调用时功能、定时与插件安装信息为空；端点表覆盖连接池应用/账号管理与资料刷新；删除类接口按路由实际权限标记为 `ops`，`/jiying/api/roles` 仅 master 可见。OpenAPI 中密钥管理使用 `cookieAuth`，并注明不支持 Bearer。
 - 控制台新增「AI 接入」页（`view-ai`）：三步说明、密钥列表（状态 / 最后使用 / 轮换 / 撤销）、带可见标签的创建表单（备注 / 权限 / 有效期）、文件上传区与「给 AI 的说明书」；创建或轮换成功后弹窗提供复制密钥与复制带密钥的接入说明，未点击「我已保存」前阻止关闭，避免明文丢失。只读账号可阅读文档，文件上传、签发与撤销仍要求运营或主人。
 - 文件上传：`POST /jiying/api/upload`（运营及以上）接受 multipart 字段 `file`，或表单字段 `name` / `content_type` / `data_base64`，单文件最大 20 MB，同时最多处理 2 个上传，返回 `file_id` 供 `send/file` 引用；审计只记录文件名、大小与类型，不记录内容。
 - 测试：`core/apikeys_test.go` 覆盖创建、摘要落盘、校验、过期、清理、轮换、撤销、非法输入与限流窗口；`core/aidocs_test.go` 校验 `aiEndpoints` 与 Gin 实际路由逐条一致，并检查 OpenAPI 安全方案与操作数量。

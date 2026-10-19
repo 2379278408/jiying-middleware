@@ -23,6 +23,7 @@ type PluginManifest struct {
 	Priority    *int                `json:"priority,omitempty"`
 	Platform    []string            `json:"platform"`
 	OpenSource  *bool               `json:"open_source,omitempty"`
+	Network     *bool               `json:"network,omitempty"`
 	Icon        string              `json:"icon"`
 	Version     string              `json:"version"`
 	Public      *bool               `json:"public,omitempty"`
@@ -90,6 +91,10 @@ func ParsePluginManifest(content string) PluginManifest {
 		case "open_source":
 			if b, ok := parseManifestBool(value); ok {
 				m.OpenSource = &b
+			}
+		case "network":
+			if b, ok := parseManifestBool(value); ok {
+				m.Network = &b
 			}
 		case "icon":
 			m.Icon = strings.TrimSpace(value)

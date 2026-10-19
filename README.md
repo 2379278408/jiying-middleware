@@ -9,6 +9,9 @@
 - 应用通道与账号通道双身份接入，事件按 cursor 去重、确认与重放。
 - 聊天、定时、Webhook 统一任务队列，支持确认卡片、超时与重试。
 - 内置 / HTTP / 脚本三类功能，插件支持 `[config: ...]` 配置 schema。
+- 插件市场使用 Ed25519 发布者签名，安装前校验签名与内容摘要，禁止静默降级。
+- Python 脚本在独立工作目录执行，带环境变量白名单、CPU/内存/输出限制，`[network: false]` 使用无网络命名空间。
+- 公开 AI 文档按 scope 裁剪：匿名只暴露只读 GET，运维与主控接口按 API Key 角色收敛。
 - 控制台：会话、消息发送、媒体上传、功能、插件、技能、定时、执行记录、审计。
 - API Key（readonly / ops / master）、公开 AI 文档与 OpenAPI、角色分级。
 
@@ -104,6 +107,7 @@ export JIYING_RANK4_KEY='<32 字节以上随机串>'
 ## 文档与接口
 
 - 开发方案：`docs/jiying-middleware.md`
+- 生产部署、Docker、反向代理、备份恢复、告警与多实例边界：`docs/production.md`
 - AI 接入说明：`GET /jiying/ai.txt`（无需登录）
 - OpenAPI：`GET /jiying/openapi.json`（无需登录）
 - 能力清单：`GET /jiying/api/ai/manifest`（需登录或 API Key）

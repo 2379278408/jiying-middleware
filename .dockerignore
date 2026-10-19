@@ -1,0 +1,7 @@
+.git
+.gitignore
+.github
+dist
+docs/images
+*.log
+data

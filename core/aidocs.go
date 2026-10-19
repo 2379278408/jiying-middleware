@@ -28,7 +28,7 @@ var aiEndpoints = []apiDoc{
 	{"POST", "/jiying/api/feature/run", "执行功能并返回输出", "ops", []string{"name", "args"}, "args 为字符串，按功能自行解析；按当前用户权限与会话归属应用校验"},
 	{"GET", "/jiying/api/scripts", "插件列表与清单（title/class/service/apps/description/rules/config_schema）", "readonly", nil, "apps 为插件声明的应用范围；功能上的 apps_locked 表示控制台手动覆盖"},
 	{"POST", "/jiying/api/script/get", "读取插件源码与语言", "ops", []string{"name"}, ""},
-	{"POST", "/jiying/api/script/install", "安装或覆盖插件源码", "ops", []string{"name", "code"}, "name 扩展名 .js/.py 决定运行方式；文件头可声明 class/service/apps，已有手动应用范围不会被覆盖"},
+	{"POST", "/jiying/api/script/install", "安装或覆盖插件源码", "ops", []string{"name", "code", "confirm"}, "name 扩展名 .js/.py 决定运行方式；文件头可声明 class/service/apps 与 network，已有手动应用范围不会被覆盖；高风险代码需 confirm=true"},
 	{"POST", "/jiying/api/script/delete", "删除插件文件与配置", "ops", []string{"name"}, "破坏性操作，执行前确认"},
 	{"POST", "/jiying/api/script/run", "直接运行插件", "ops", []string{"name", "args"}, ""},
 	{"POST", "/jiying/api/script/config", "读取插件配置 schema 与当前值", "ops", []string{"name"}, "secret 字段只返回是否已设置"},
@@ -72,18 +72,21 @@ var aiEndpoints = []apiDoc{
 	{"POST", "/jiying/api/connections/app/default", "设置默认应用", "ops", []string{"app_id"}, ""},
 	{"POST", "/jiying/api/connections/account/select", "切换当前账号（必要时自动登录）", "ops", []string{"email"}, ""},
 	{"POST", "/jiying/api/connections/account/delete", "从连接池删除账号", "ops", []string{"email"}, "破坏性操作，执行前确认"},
-	{"POST", "/jiying/api/connections/account/profile", "刷新当前账号资料（昵称/头像）", "readonly", nil, ""},
+	{"POST", "/jiying/api/connections/account/profile", "刷新当前账号资料（昵称/头像）", "readonly", nil, "幂等刷新，无业务写入"},
 	{"GET", "/jiying/api/apps/profile", "刷新应用资料（名称/头像/描述）", "readonly", []string{"app_id"}, "省略 app_id 时取默认应用；会发起上游调用"},
-	{"GET", "/jiying/api/roles", "角色列表", "readonly", nil, ""},
+	{"GET", "/jiying/api/roles", "角色列表（master 返回成员与主人列表，其他角色只返回自身）", "master", nil, "非 master 仅返回 me/me_id"},
 	{"POST", "/jiying/api/roles", "设置用户角色", "master", []string{"user", "role"}, "role: readonly/ops/master"},
 	{"POST", "/jiying/api/roles/delete", "移除角色覆盖", "master", []string{"user"}, ""},
 	{"POST", "/jiying/api/masters", "添加 owner 用户", "master", []string{"user"}, ""},
 	{"POST", "/jiying/api/masters/delete", "移除 owner 用户", "master", []string{"user"}, ""},
 	{"GET", "/jiying/api/audit", "审计日志", "readonly", []string{"limit"}, ""},
 	{"GET", "/jiying/api/market", "插件市场列表", "readonly", nil, ""},
+	{"GET", "/jiying/api/market/publishers", "受信任插件发布者公钥列表", "master", nil, "公钥用于安装时校验发布者签名"},
+	{"POST", "/jiying/api/market/publishers", "登记受信任发布者公钥", "master", []string{"name", "public_key"}, "public_key 为 32 字节 Ed25519 公钥的 Base64；名称登记后不可换键"},
+	{"POST", "/jiying/api/market/publishers/delete", "删除受信任发布者公钥", "master", []string{"name"}, "删除后其已上架插件将无法通过签名校验"},
 	{"GET", "/jiying/api/market/export", "导出插件包内容", "ops", []string{"name"}, ""},
-	{"POST", "/jiying/api/market/install", "从市场安装插件", "ops", []string{"name"}, ""},
-	{"POST", "/jiying/api/market/publish", "发布插件到市场", "ops", []string{"name", "version", "author", "description", "identity", "scope", "kind", "target", "content", "force"}, ""},
+	{"POST", "/jiying/api/market/install", "从市场安装插件", "ops", []string{"name", "force", "confirm"}, "安装前校验内容摘要与发布者签名；force 只允许降级，不能绕过校验；脚本插件需 confirm=true"},
+	{"POST", "/jiying/api/market/publish", "发布插件到市场", "ops", []string{"name", "version", "author", "description", "identity", "scope", "kind", "target", "content", "publisher", "signature", "force"}, "未指定 publisher 时用本机密钥自动签名；外部发布者需先登记公钥并提供签名"},
 	{"POST", "/jiying/api/market/delete", "从市场移除插件", "ops", []string{"name"}, ""},
 	{"GET", "/jiying/api/skills", "技能列表", "readonly", nil, ""},
 	{"POST", "/jiying/api/skill/run", "运行技能", "ops", []string{"name", "args"}, ""},
@@ -117,12 +120,96 @@ func requestBaseURL(c *gin.Context) string {
 	return scheme + "://" + host
 }
 
+// normalizeScope 把空值、未知角色与大小写差异统一成只读。
+func normalizeScope(scope string) string {
+	scope = strings.ToLower(strings.TrimSpace(scope))
+	if _, ok := roleRank[scope]; !ok {
+		return RoleReadonly
+	}
+	return scope
+}
+
+func scopeRank(scope string) int {
+	return roleRank[normalizeScope(scope)]
+}
+
+// filterEndpointsByScope 按角色等级裁剪端点；调用方拿不到高于自身 scope 的条目。
+func filterEndpointsByScope(items []apiDoc, scope string) []apiDoc {
+	allowed := scopeRank(scope)
+	out := make([]apiDoc, 0, len(items))
+	for _, ep := range items {
+		need := roleRank[ep.Scope]
+		if need == 0 {
+			need = roleRank[RoleReadonly]
+		}
+		if allowed >= need {
+			out = append(out, ep)
+		}
+	}
+	return out
+}
+
+// requestPublic 判断是否为匿名公开访问；带有效密钥或会话的请求返回 false。
+func requestPublic(c *gin.Context) bool {
+	if v, ok := c.Get(ctxAPIKeyScope); ok {
+		if scope, ok := v.(string); ok && strings.TrimSpace(scope) != "" {
+			return false
+		}
+	}
+	return !CheckCookie(c)
+}
+
+// requestScope 解析文档请求方权限：API Key 优先，其次登录会话，最后只读。
+func requestScope(c *gin.Context) string {
+	if v, ok := c.Get(ctxAPIKeyScope); ok {
+		if scope, ok := v.(string); ok && strings.TrimSpace(scope) != "" {
+			return normalizeScope(scope)
+		}
+	}
+	if CheckCookie(c) {
+		return normalizeScope(UserRole(consoleUser(c)))
+	}
+	return RoleReadonly
+}
+
+// visibleEndpoints 先按权限裁剪；匿名访问只暴露可安全公开的 GET 端点。
+func visibleEndpoints(items []apiDoc, scope string, public bool) []apiDoc {
+	out := filterEndpointsByScope(items, scope)
+	if !public {
+		return out
+	}
+	safe := out[:0]
+	for _, ep := range out {
+		if ep.Method == http.MethodGet {
+			safe = append(safe, ep)
+		}
+	}
+	return safe
+}
+
+// optionalAPIKeyAuth 让公开文档也能识别 Bearer；无效密钥仍按 401 拒绝。
+func optionalAPIKeyAuth(c *gin.Context) {
+	if authenticateAPIKey(c) && c.IsAborted() {
+		return
+	}
+	c.Next()
+}
+
 func registerAIDocs() {
-	Server.GET("/jiying/ai.txt", func(c *gin.Context) {
-		c.Data(http.StatusOK, "text/plain; charset=utf-8", []byte(buildAIGuide(requestBaseURL(c))))
+	Server.GET("/jiying/ai.txt", optionalAPIKeyAuth, func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store")
+		c.Header("Vary", "Authorization, Cookie")
+		c.Data(http.StatusOK, "text/plain; charset=utf-8", []byte(buildAIGuide(requestBaseURL(c), requestScope(c), requestPublic(c))))
 	})
-	Server.GET("/jiying/openapi.json", func(c *gin.Context) {
-		c.JSON(http.StatusOK, buildOpenAPI(requestBaseURL(c)))
+	Server.GET("/jiying/openapi.json", optionalAPIKeyAuth, func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store")
+		c.Header("Vary", "Authorization, Cookie")
+		c.JSON(http.StatusOK, buildOpenAPI(requestBaseURL(c), requestScope(c), requestPublic(c)))
+	})
+	Server.GET("/jiying/api/ai/manifest", optionalAPIKeyAuth, func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store")
+		c.Header("Vary", "Authorization, Cookie")
+		aiManifest(c)
 	})
 }
 
@@ -134,18 +221,30 @@ func aiManifest(c *gin.Context) {
 			connected++
 		}
 	}
-	role := UserRole(consoleUser(c))
-	if v, ok := c.Get(ctxAPIKeyScope); ok {
-		if scope, ok := v.(string); ok && scope != "" {
-			role = scope
-		}
+	scope := requestScope(c)
+	public := requestPublic(c)
+	plugin := gin.H{
+		"extensions": []string{".js 在 JS 运行时执行，.py 在 Python 执行"},
+		"manifest":   "文件头注释块，每行 Key: Value；支持 title/class/service/apps/author/version/description/rule/cron/platform/priority/admin/icon/config/network",
+		"apps":       "[apps: app-id-1, app-id-2] 声明插件默认应用范围，* 或省略表示全部应用；控制台手动设置后以 apps_locked=true 的记录为准",
+		"output":     "功能调用返回 stdout / 返回值；多段结果用 SEND: 前缀可直接回发会话",
+		"security":   "插件以服务进程权限运行；[network: false] 的 Python 插件在无网络命名空间中执行，只安装可信来源",
+	}
+	if scopeRank(scope) >= roleRank[RoleOps] {
+		plugin["install"] = "POST /jiying/api/script/install，name 决定类型，code 为完整源码；高风险代码需同时传 confirm=true"
+	}
+	features := ListFeatureItems()
+	crons := CronCmdsSnapshot()
+	if public {
+		features = []*Feature{}
+		crons = []*CronCmd{}
 	}
 	jiyingJSON(c, gin.H{
 		"name":     "Relay 即应控制台",
 		"base_url": requestBaseURL(c),
 		"auth": gin.H{
 			"header": "Authorization: Bearer <API Key>",
-			"note":   "在控制台「AI 接入」页创建密钥；密钥按 scope 映射角色，管理密钥本身仍需浏览器登录。",
+			"note":   "匿名访问只返回只读 GET 文档；在控制台「AI 接入」页创建密钥后按 scope 读取写操作与管理接口。",
 		},
 		"conventions": gin.H{
 			"success":       `{"code":200,"data":...}，部分接口 data 为业务对象或字符串`,
@@ -161,30 +260,24 @@ func aiManifest(c *gin.Context) {
 			"no_simulation": "除 send/unified 的 dry_run=true 外，没有演练模式",
 		},
 		"runtime": gin.H{
-			"role":           role,
+			"role":           scope,
+			"public":         public,
 			"app_count":      len(apps),
 			"app_connected":  connected,
 			"account_logged": userLoggedIn(),
 			"readiness":      connectionReadiness(),
 			"uptime_seconds": JiyingUptimeSeconds(),
 		},
-		"features":  ListFeatureItems(),
-		"crons":     CronCmdsSnapshot(),
-		"endpoints": aiEndpoints,
+		"features":  features,
+		"crons":     crons,
+		"endpoints": visibleEndpoints(aiEndpoints, scope, public),
 		"cron": gin.H{
 			"format":   "5 段（分 时 日 月 周）或 6 段（秒 分 时 日 月 周），支持 @daily 等描述符",
 			"examples": []string{"*/30 * * * * * 每 30 秒", "0 */5 * * * * 每 5 分钟", "0 0 9 * * 1-5 工作日 9 点", "0 0 18 * * * 每天 18 点"},
-			"command":  `{"type":"feature","feature":"状态","args":"","conversation_id":"<可选>"}；也可直接写系统命令字符串`,
+			"command":  `{"type":"feature","feature":"状态","args":"","conversation_id":"<可选>"}`,
 			"chat_id":  "可选，指定结果回发的会话 ID",
 		},
-		"plugin": gin.H{
-			"extensions": []string{".js 在 JS 运行时执行，.py 在 Python 执行"},
-			"manifest":   "文件头注释块，每行 Key: Value；支持 title/class/service/apps/author/version/description/rule/cron/platform/priority/admin/icon/config",
-			"apps":       "[apps: app-id-1, app-id-2] 声明插件默认应用范围，* 或省略表示全部应用；控制台手动设置后以 apps_locked=true 的记录为准",
-			"output":     "功能调用返回 stdout / 返回值；多段结果用 SEND: 前缀可直接回发会话",
-			"install":    "POST /jiying/api/script/install，name 决定类型，code 为完整源码",
-			"security":   "插件以服务进程权限运行，只安装可信来源",
-		},
+		"plugin": plugin,
 		"links": gin.H{
 			"guide":   requestBaseURL(c) + "/jiying/ai.txt",
 			"openapi": requestBaseURL(c) + "/jiying/openapi.json",
@@ -279,9 +372,10 @@ func openAPIResponse() gin.H {
 	}
 }
 
-func buildOpenAPI(base string) gin.H {
+func buildOpenAPI(base, scope string, public bool) gin.H {
+	scope = normalizeScope(scope)
 	paths := gin.H{}
-	for _, ep := range aiEndpoints {
+	for _, ep := range visibleEndpoints(aiEndpoints, scope, public) {
 		path := ep.Path
 		security := []gin.H{{"bearerAuth": []string{}}}
 		if aiSessionOnly[path] {
@@ -337,12 +431,20 @@ func buildOpenAPI(base string) gin.H {
 		}
 		paths[path].(gin.H)[strings.ToLower(ep.Method)] = op
 	}
+	infoDescription := "控制台 REST 接口。统一响应 {code:200,data}；认证使用 Authorization: Bearer <API Key>。文档按请求方权限裁剪。" + base
+	if scope == RoleReadonly {
+		if public {
+			infoDescription = "只读公开版：仅包含只读 GET 端点。写操作与管理能力需在控制台「AI 接入」创建密钥后读取。统一响应 {code:200,data}；认证使用 Authorization: Bearer <API Key>。" + base
+		} else {
+			infoDescription = "只读版：仅包含 readonly 端点。写操作需使用 ops 及以上密钥。统一响应 {code:200,data}；认证使用 Authorization: Bearer <API Key>。" + base
+		}
+	}
 	return gin.H{
 		"openapi": "3.0.3",
 		"info": gin.H{
 			"title":       "Relay 即应控制台 API",
 			"version":     "1.0.0",
-			"description": "控制台 REST 接口。统一响应 {code:200,data}；认证使用 Authorization: Bearer <API Key>。" + base,
+			"description": infoDescription,
 		},
 		"servers": []gin.H{{"url": base}},
 		"components": gin.H{
@@ -355,7 +457,10 @@ func buildOpenAPI(base string) gin.H {
 	}
 }
 
-func buildAIGuide(base string) string {
+func buildAIGuide(base, scope string, public bool) string {
+	scope = normalizeScope(scope)
+	ops := scopeRank(scope) >= roleRank[RoleOps]
+	master := scope == RoleMaster
 	var b strings.Builder
 	b.WriteString("Relay 即应控制台 API 接入说明\n")
 	b.WriteString("Base URL: " + base + "\n")
@@ -365,47 +470,88 @@ func buildAIGuide(base string) string {
   Authorization: Bearer jy_xxxxxxxx
 密钥权限分为 readonly / ops / master，分别对应只读、日常操作与角色管理。
 密钥只在创建时显示一次；管理密钥本身仍要求浏览器登录。
-
-二、响应约定
+`)
+	if public {
+		b.WriteString("当前为只读公开文档，只包含只读 GET 端点。写操作、管理能力与完整清单需要 API Key。\n\n")
+	} else if !ops {
+		b.WriteString("当前为只读文档，只包含 readonly 端点。写操作需要 ops 及以上密钥。\n\n")
+	} else if master {
+		b.WriteString("当前为 master 文档，包含只读、日常操作与管理接口。\n\n")
+	} else {
+		b.WriteString("当前为 ops 文档，包含只读与日常操作接口。\n\n")
+	}
+	b.WriteString(`二、响应约定
 - 成功：{"code":200,"data":...}
 - 业务失败：{"code":1,"message":"原因"}
 - HTTP 失败：401 未认证、403 权限不足、429 请求过于频繁（每把钥匙 180 次/分钟）
-- 写接口使用 application/x-www-form-urlencoded，所有参数按字符串传递
+`)
+	if !public {
+		b.WriteString(`- 写接口使用 application/x-www-form-urlencoded，所有参数按字符串传递
 - 先读后写；删除、停用、退出、改角色前必须先向用户确认
 - 发送消息、执行功能、运行插件都会产生真实外部效果
-
+`)
+	}
+	b.WriteString(`
 三、读懂系统
-1. GET /jiying/api/ai/manifest：当前功能、定时任务、权限、就绪度、多应用约定、端点清单与插件规范
+1. GET /jiying/api/ai/manifest：当前权限、就绪度、多应用约定、端点清单与插件规范
 2. GET /jiying/api/overview：连接、账号、应用、任务与运行状态
-3. GET /jiying/api/features：功能名称、启用状态、应用范围与应用锁定状态；执行用 POST /jiying/api/feature/run
+3. GET /jiying/api/features：功能名称、启用状态、应用范围与应用锁定状态
 4. GET /jiying/api/scripts：插件清单、分类、服务分组、应用白名单、说明、规则与 config_schema
 5. GET /jiying/api/connect/status：应用是否连接、账号是否登录
 6. GET /jiying/api/conversations：账号与在线应用会话合并列表，含 relay_app_id/name/online/known
 7. GET /jiying/api/conversation/capabilities：指定会话能否以应用或账号身份发送
+8. GET /jiying/api/tasks：任务队列；GET /jiying/api/executions：执行账本
 
 四、多应用与会话归属
 - 发送、功能执行、Agent 工具与系统提示都按会话归属应用选择通道、权限与提示
 - 发送类接口只传 conversation_id，不接收 app_id；未记录归属时回退默认应用，已记录但应用离线时拒绝发送
 - 账号未登录或账号看不到会话时，消息接口按归属应用回退，响应 data.source=app
 - 功能 apps 为空或 ["*"] 表示全部应用；手工保存后 apps_locked=true，插件重装/重扫保留；传 reset_apps=true 恢复插件清单
-- Agent 的 app_systems 按应用覆盖系统提示；POST /jiying/api/agent/app-system 的 system 留空即恢复全局提示
+- Agent 的 app_systems 按应用覆盖系统提示；system 留空即恢复全局提示
 
 五、常用流程
 - 查看连接：GET /jiying/api/connect/status
 - 查看会话：GET /jiying/api/conversations，再用 /conversation/capabilities 判断发送身份
 - 读取消息：GET /jiying/api/messages?conversation_id=<id>
+- 查看任务：GET /jiying/api/tasks
+- 查看执行结果：GET /jiying/api/executions?limit=50
+`)
+	if ops {
+		b.WriteString(`- 执行功能：POST /jiying/api/feature/run  name,args
 - 上传文件：POST /jiying/api/upload  name,content_type,data_base64（或 multipart file），最大 20 MB
 - 发送文件：POST /jiying/api/send/file  conversation_id,file_id,name,size
 - 预演发送：POST /jiying/api/send/unified  conversation_id,text,dry_run=true
 - 正式发送：同上去掉 dry_run；身份不确定时先 dry_run
-- 执行功能：POST /jiying/api/feature/run  name,args
 - 调整范围：POST /jiying/api/feature/update  name,apps（JSON 数组）或 reset_apps=true
-- 新建定时：POST /jiying/api/cron/add  name,cron,command
-- 查看执行结果：GET /jiying/api/executions?limit=50
 - 排障：GET /jiying/api/logs?tail=200&day=YYYYMMDD
+`)
+	}
+	if master {
+		b.WriteString(`- Agent 配置：GET/POST /jiying/api/agent/config
+- API Key 管理（仅浏览器会话）：/jiying/api/keys、/keys/rotate、/keys/delete
+`)
+	}
+	b.WriteString(`
+六、插件
+- 支持 .js（JS 运行时）与 .py（Python）
+- 文件头注释块声明元数据，每行 Key: Value，常用：Title、Class、Service、Apps、Description、Author、Version、Rule、Cron、Priority、Admin、Icon、Config、Network
+- Apps 声明默认应用范围，例如 [apps: app-id-1, app-id-2]；* 或省略表示全部应用
+- 控制台手动设置应用范围后写入 apps_locked=true，重装或重扫保留；需要回到清单声明时传 reset_apps=true
+- Config 声明可配置项，控制台会生成表单；密钥字段不会回显
+- Network 默认允许；[network: false] 的 Python 插件在无网络命名空间中执行，看不到外部地址
+`)
+	if ops {
+		b.WriteString(`- 安装：POST /jiying/api/script/install  name,code；高风险代码需同时传 confirm=true
+- 调试：POST /jiying/api/script/run  name,args；配置：/script/config、/script/config/save
+`)
+	}
+	b.WriteString(`- 插件在独立工作目录执行，只读插件目录通过 JIYING_PLUGIN_DIR 暴露；只安装可信来源
 
-六、定时任务
-表达式支持 5 段（分 时 日 月 周）或 6 段（秒 分 时 日 月 周），也支持 @daily 等描述符。
+七、定时任务
+- 查看列表：GET /jiying/api/crons
+`)
+	if ops {
+		b.WriteString(`表达式支持 5 段（分 时 日 月 周）或 6 段（秒 分 时 日 月 周），也支持 @daily 等描述符。
 示例：
   */30 * * * * *   每 30 秒
   0 */5 * * * *    每 5 分钟
@@ -414,22 +560,15 @@ command 推荐写成功能 JSON：
   {"type":"feature","feature":"状态","args":"","conversation_id":"<可选>"}
 chat_id 可选，用于把结果发回指定会话。
 新建后默认启用；停用、删除、立即执行分别用 /cron/toggle、/cron/delete、/cron/run。
-
-七、插件
-- 支持 .js（JS 运行时）与 .py（Python）
-- 文件头注释块声明元数据，每行 Key: Value，常用：Title、Class、Service、Apps、Description、Author、Version、Rule、Cron、Priority、Admin、Icon、Config
-- Apps 声明默认应用范围，例如 [apps: app-id-1, app-id-2]；* 或省略表示全部应用
-- 控制台手动设置应用范围后写入 apps_locked=true，重装或重扫保留；需要回到清单声明时传 reset_apps=true
-- Config 声明可配置项，控制台会生成表单；密钥字段不会回显
-- 安装：POST /jiying/api/script/install  name,code（code 为完整源码）
-- 调试：POST /jiying/api/script/run  name,args；配置：/script/config、/script/config/save
-- 插件以服务进程权限运行，只安装可信来源
-
+`)
+	}
+	b.WriteString(`
 八、安全边界
 - 不要尝试读取或转储密钥、密码、Cookie
 - 不要绕过权限；403 表示当前 scope 不足
-- 不要在未确认时批量发送、删除或停用
-- 日志与审计只读，修改类操作都会记录操作者
 `)
+	if !public {
+		b.WriteString("- 不要在未确认时批量发送、删除或停用\n- 日志与审计只读，修改类操作都会记录操作者\n")
+	}
 	return b.String()
 }

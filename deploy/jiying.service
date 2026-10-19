@@ -1,0 +1,29 @@
+[Unit]
+Description=Relay Jiying Middleware
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jiying
+Group=jiying
+WorkingDirectory=/opt/jiying
+EnvironmentFile=/etc/jiying/jiying.env
+ExecStart=/opt/jiying/jymw
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=15s
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/jiying
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_SETUID CAP_SETGID CAP_SYS_ADMIN
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+
+[Install]
+WantedBy=multi-user.target

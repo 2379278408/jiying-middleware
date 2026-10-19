@@ -2714,7 +2714,11 @@
       var body = codeEl.value;
       if (!nm || !body) { toast("请填写文件名与代码", "err"); return; }
       if (!/\.(js|py)$/i.test(nm)) nm += SCRIPT_EXT[langEl.value];
-      api("/jiying/api/script/install", { method: "POST", form: { name: nm, code: body } }).then(function (r) {
+      var risk = scriptRiskReasons(nm, body);
+      var form = { name: nm, code: body };
+      if (risk.length && !window.confirm("脚本包含：" + risk.join("、") + "。确认安装并允许其以服务权限运行？")) return;
+      if (risk.length) form.confirm = "true";
+      api("/jiying/api/script/install", { method: "POST", form: form }).then(function (r) {
         if (r.code === 200) { closeModal(); toast(r.data || "已安装", "ok"); loadScripts(); }
         else toast(r.msg || "安装失败", "err");
       });
@@ -4188,7 +4192,7 @@
   /* ---------- 插件市场 ---------- */
   function renderMarket() {
     var cont = $("#view-market");
-    cont.innerHTML = '<div class="page-head"><div><h2>插件市场</h2><p>发现、上架与分发包，已安装的插件在「插件」页统一管理</p></div><div class="spacer"></div><button class="btn btn-primary" id="newPlugin">上架插件</button></div>'
+    cont.innerHTML = '<div class="page-head"><div><h2>插件市场</h2><p>发现、上架与分发包，已安装的插件在「插件」页统一管理</p></div><div class="spacer"></div><button class="btn btn-ghost" id="marketPublishers">信任发布者</button><button class="btn btn-primary" id="newPlugin">上架插件</button></div>'
       + '<div class="panel"><div class="panel-body" id="marketList">' + loadingState() + '</div></div>'
       + '<div class="panel mt-16"><div class="panel-head"><h3>插件规范</h3></div><div class="panel-body"><div class="rl-cols">'
       + '<div><b>作用范围</b><p class="muted" style="margin:6px 0 0;font-size:13px">插件归属 <span class="mono">public</span> 或 <span class="mono">master</span>，安装时按应用或个人账号隔离。</p></div>'
@@ -4197,6 +4201,8 @@
       + "</div></div></div>";
     var n = $("#newPlugin");
     if (n) n.addEventListener("click", openPluginModal);
+    var p = $("#marketPublishers");
+    if (p) p.addEventListener("click", openPublisherModal);
     loadMarket();
   }
   function loadMarket() {
@@ -4218,6 +4224,40 @@
            + '<button class="btn btn-outline-danger btn-sm" onclick="Relay.delPlugin(' + jsArg(p.name) + ')">下架</button></div></div>';
       }).join("") + "</div>";
       hydrateIcons();
+    });
+  }
+  function openPublisherModal() {
+    api("/jiying/api/market/publishers").then(function (r) {
+      var list = r.code === 200 && r.data ? r.data : [];
+      var rows = list.length ? list.map(function (p) {
+        return '<div class="list-item"><div class="grow"><div class="name">' + esc(p.name) + '</div>'
+          + '<div class="desc mono" style="word-break:break-all">' + esc(p.public_key) + '</div></div>'
+          + '<div class="actions"><button class="btn btn-outline-danger btn-sm" data-pub="' + esc(p.name) + '">删除</button></div></div>';
+      }).join("") : '<p class="muted">尚未登记外部发布者。本机发布会自动登记 local 公钥。</p>';
+      showModal("信任发布者", '<div class="field"><label>名称</label><input class="input" id="pub_name" placeholder="vendor"></div>'
+        + '<div class="field"><label>Ed25519 公钥（Base64）</label><input class="input mono" id="pub_key" placeholder="32 字节公钥"></div>'
+        + '<div class="panel mt-16"><div class="panel-body"><div class="list">' + rows + "</div></div></div>"
+        + '<p class="muted" style="font-size:12px">公钥登记后不可更换；删除后该发布者已上架插件将无法通过签名校验。</p>',
+        '<button class="btn btn-ghost" onclick="Relay.closeModal()">关闭</button><button class="btn btn-primary" id="pub_save">登记</button>');
+      $("#pub_save").addEventListener("click", function () {
+        var name = $("#pub_name").value.trim(), key = $("#pub_key").value.trim();
+        if (!name || !key) { toast("请填写名称与公钥", "err"); return; }
+        api("/jiying/api/market/publishers", { method: "POST", form: { name: name, public_key: key } }).then(function (res) {
+          if (res.code === 200) { toast("已登记", "ok"); openPublisherModal(); }
+          else toast(res.msg || "登记失败", "err");
+        });
+      });
+      Array.prototype.forEach.call(document.querySelectorAll("[data-pub]"), function (btn) {
+        btn.addEventListener("click", function () {
+          var name = btn.getAttribute("data-pub");
+          confirmDialog("删除发布者", "删除 " + name + " 后，其已上架插件将无法安装，确认？", "删除", function () {
+            api("/jiying/api/market/publishers/delete", { method: "POST", form: { name: name } }).then(function (res) {
+              if (res.code === 200) { toast("已删除", "ok"); openPublisherModal(); }
+              else toast(res.msg || "删除失败", "err");
+            });
+          });
+        });
+      });
     });
   }
   function bindMarketEmptyAdd() {
@@ -4249,10 +4289,31 @@
       });
     });
   }
+  function scriptRiskReasons(name, code) {
+    var lower = String(code || "").toLowerCase();
+    var py = /\.py$/i.test(name || "");
+    var checks = py ? [
+      ["os.system", "执行系统命令"], ["os.popen", "执行系统命令"], ["subprocess", "执行子进程"],
+      ["shutil.rmtree", "删除目录"], ["socket.", "网络连接"], ["requests.", "网络请求"],
+      ["urllib.", "网络请求"], ["httpx.", "网络请求"], ["ftplib", "网络连接"], ["paramiko", "网络连接"],
+      ["eval(", "动态执行代码"], ["exec(", "动态执行代码"]
+    ] : [
+      ["child_process", "执行子进程"], ["require('fs')", "读写文件"], ['require("fs")', "读写文件"],
+      ["readfile", "读写文件"], ["writefile", "读写文件"], ["fetch(", "网络请求"],
+      ["xmlhttprequest", "网络请求"], ["eval(", "动态执行代码"], ["new function", "动态执行代码"]
+    ];
+    var seen = {}, out = [];
+    checks.forEach(function (c) {
+      if (!seen[c[1]] && lower.indexOf(c[0]) >= 0) { seen[c[1]] = 1; out.push(c[1]); }
+    });
+    return out;
+  }
   function installPlugin(name) {
-    api("/jiying/api/market/install", { method: "POST", form: { name: name } }).then(function (r) {
-      if (r.code === 200) { toast(r.data || "已安装", "ok"); loadMarket(); }
-      else toast(r.msg || "安装失败", "err");
+    confirmDialog("安装插件", "插件将以服务进程权限运行，请确认来源可信。是否安装 " + name + " ？", "安装", function () {
+      api("/jiying/api/market/install", { method: "POST", form: { name: name, confirm: "true" } }).then(function (r) {
+        if (r.code === 200) { toast(r.data || "已安装", "ok"); loadMarket(); }
+        else toast(r.msg || "安装失败", "err");
+      });
     });
   }
   function delPlugin(name) {

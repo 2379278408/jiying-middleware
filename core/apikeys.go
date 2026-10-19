@@ -427,5 +427,4 @@ func registerAPIKeysAPI() {
 		RecordAudit(consoleUser(c), "key.delete", target, "", "成功")
 		jiyingJSON(c, "ok")
 	})
-	g.GET("/ai/manifest", aiManifest)
 }
