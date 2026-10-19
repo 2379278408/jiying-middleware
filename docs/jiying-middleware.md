@@ -368,4 +368,5 @@
 - 范围归一：应用 ID 去空、忽略大小写去重；包含 `*` 时统一存为 `["*"]`，空范围表示全部应用。执行与工具契约都按会话归属应用裁剪，未授权应用不会拿到该功能。
 - 插件入口：插件列表与应用范围按钮可直接打开功能详情；脚本行点击进入编辑。功能详情可调整 HTTP 地址、权限范围、调用身份、确认策略与应用范围。
 - 按应用系统提示：Agent 配置新增 `app_systems`，`POST /jiying/api/agent/app-system` 写入或清除单个应用的提示；为空时继承全局系统提示。运行 Agent 时按 `appIDForConversation` 选择提示，并使用同一应用的工具契约。
+- AI 文档同步：`/jiying/ai.txt`、`/jiying/openapi.json` 与 `/jiying/api/ai/manifest` 补充多应用会话归属、`relay_app_*`、`source=app`、任务 `app_id`、`apps_locked`/`reset_apps`、`app_systems`，以及插件清单的 `class/service/apps` 字段；OpenAPI 写接口示例补 `apps` JSON、`app_id`、`reset_apps` 等参数形状。
 - 控制台：连接池应用行新增编辑入口，可查看应用 ID、接入地址并复用已保存密钥；Agent 页新增「按应用覆盖系统提示」选择器。
