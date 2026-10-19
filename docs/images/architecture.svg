@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="820" viewBox="0 0 1600 820" fill="none" role="img" aria-label="Relay 运行架构">
+  <defs>
+    <pattern id="grid2" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" stroke="#161c1e" stroke-width="1"/>
+    </pattern>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0 0L8 4L0 8V0Z" fill="#a2570f"/>
+    </marker>
+  </defs>
+
+  <rect width="1600" height="820" fill="#0c0f10"/>
+  <rect width="1600" height="820" fill="url(#grid2)"/>
+
+  <text x="96" y="86" fill="#e8a45c" font-family="'IBM Plex Mono',ui-monospace,monospace" font-size="15" letter-spacing="4">RELAY / ARCHITECTURE</text>
+  <text x="96" y="136" fill="#f4f6f5" font-family="'IBM Plex Sans','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif" font-size="38" font-weight="700">消息进来，任务出去</text>
+  <text x="96" y="174" fill="#8b9794" font-family="'IBM Plex Sans','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif" font-size="18">即应与 Relay 之间的数据面，以及控制台覆盖的控制面</text>
+
+  <g font-family="'IBM Plex Mono',ui-monospace,monospace">
+    <g transform="translate(96 214)">
+      <rect width="250" height="238" fill="#121719" stroke="#2a3335"/>
+      <rect width="250" height="3" fill="#5f6a66"/>
+      <text x="22" y="38" fill="#5f6a66" font-size="13" letter-spacing="2">01 / SOURCE</text>
+      <text x="22" y="76" fill="#f0f3f1" font-size="22" font-weight="600">即应</text>
+      <text x="22" y="112" fill="#9aa5a1" font-size="14">应用通道</text>
+      <text x="22" y="136" fill="#9aa5a1" font-size="14">账号通道</text>
+      <text x="22" y="178" fill="#5f6a66" font-size="12">WebSocket · HTTP</text>
+      <text x="22" y="202" fill="#5f6a66" font-size="12">事件 cursor 去重</text>
+    </g>
+
+    <g transform="translate(386 214)">
+      <rect width="250" height="238" fill="#121719" stroke="#2a3335"/>
+      <rect width="250" height="3" fill="#d9a441"/>
+      <text x="22" y="38" fill="#d9a441" font-size="13" letter-spacing="2">02 / INGRESS</text>
+      <text x="22" y="76" fill="#f0f3f1" font-size="22" font-weight="600">接入与归一</text>
+      <text x="22" y="112" fill="#9aa5a1" font-size="14">消息、事件、Webhook</text>
+      <text x="22" y="136" fill="#9aa5a1" font-size="14">确认、重放、幂等</text>
+      <text x="22" y="178" fill="#5f6a66" font-size="12">统一消息模型</text>
+      <text x="22" y="202" fill="#5f6a66" font-size="12">会话与发送身份</text>
+    </g>
+
+    <g transform="translate(676 214)">
+      <rect width="250" height="238" fill="#121719" stroke="#2a3335"/>
+      <rect width="250" height="3" fill="#b8762a"/>
+      <text x="22" y="38" fill="#b8762a" font-size="13" letter-spacing="2">03 / QUEUE</text>
+      <text x="22" y="76" fill="#f0f3f1" font-size="22" font-weight="600">任务队列</text>
+      <text x="22" y="112" fill="#9aa5a1" font-size="14">聊天 / 定时 / Webhook</text>
+      <text x="22" y="136" fill="#9aa5a1" font-size="14">确认卡片 · 超时 · 重试</text>
+      <text x="22" y="178" fill="#5f6a66" font-size="12">单机持久化</text>
+      <text x="22" y="202" fill="#5f6a66" font-size="12">失败自动停用</text>
+    </g>
+
+    <g transform="translate(966 214)">
+      <rect width="250" height="238" fill="#121719" stroke="#2a3335"/>
+      <rect width="250" height="3" fill="#8c5a1e"/>
+      <text x="22" y="38" fill="#8c5a1e" font-size="13" letter-spacing="2">04 / EXECUTE</text>
+      <text x="22" y="76" fill="#f0f3f1" font-size="22" font-weight="600">执行器</text>
+      <text x="22" y="112" fill="#9aa5a1" font-size="14">内置 / HTTP / 脚本</text>
+      <text x="22" y="136" fill="#9aa5a1" font-size="14">JavaScript · Python</text>
+      <text x="22" y="178" fill="#5f6a66" font-size="12">插件应用范围</text>
+      <text x="22" y="202" fill="#5f6a66" font-size="12">配置 schema · 试跑</text>
+    </g>
+
+    <g transform="translate(1256 214)">
+      <rect width="250" height="238" fill="#121719" stroke="#2a3335"/>
+      <rect width="250" height="3" fill="#5e6b52"/>
+      <text x="22" y="38" fill="#8b9794" font-size="13" letter-spacing="2">05 / OUTPUT</text>
+      <text x="22" y="76" fill="#f0f3f1" font-size="22" font-weight="600">回发与记录</text>
+      <text x="22" y="112" fill="#9aa5a1" font-size="14">文本 · 图片 · 文件</text>
+      <text x="22" y="136" fill="#9aa5a1" font-size="14">执行账本 · 审计</text>
+      <text x="22" y="178" fill="#5f6a66" font-size="12">SEND: 多段结果</text>
+      <text x="22" y="202" fill="#5f6a66" font-size="12">成功/失败可追踪</text>
+    </g>
+  </g>
+
+  <g stroke="#a2570f" stroke-width="1.5" marker-end="url(#arrow)">
+    <path d="M346 333h32"/>
+    <path d="M636 333h32"/>
+    <path d="M926 333h32"/>
+    <path d="M1216 333h32"/>
+  </g>
+
+  <path d="M221 452V500" stroke="#a2570f" stroke-width="1.5" stroke-dasharray="5 5"/>
+  <path d="M801 452V500" stroke="#a2570f" stroke-width="1.5" stroke-dasharray="5 5"/>
+  <path d="M1381 452V500" stroke="#a2570f" stroke-width="1.5" stroke-dasharray="5 5"/>
+
+  <g font-family="'IBM Plex Sans','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif">
+    <rect x="96" y="500" width="1410" height="218" fill="#0f1415" stroke="#2a3335"/>
+    <text x="122" y="540" fill="#e8a45c" font-family="'IBM Plex Mono',ui-monospace,monospace" font-size="13" letter-spacing="3">CONTROL PLANE</text>
+    <text x="122" y="576" fill="#f0f3f1" font-size="22" font-weight="600">Relay 控制台</text>
+    <text x="122" y="602" fill="#8b9794" font-size="15">连接、配置、排障与权限，全部在这里完成</text>
+
+    <g transform="translate(520 528)">
+      <rect width="214" height="76" fill="#121719" stroke="#242c2e"/>
+      <text x="18" y="30" fill="#d8dfdc" font-size="16" font-weight="600">连接池</text>
+      <text x="18" y="54" fill="#8b9794" font-size="13" font-family="'IBM Plex Mono',ui-monospace,monospace">应用 / 账号 / 资料</text>
+    </g>
+    <g transform="translate(754 528)">
+      <rect width="214" height="76" fill="#121719" stroke="#242c2e"/>
+      <text x="18" y="30" fill="#d8dfdc" font-size="16" font-weight="600">功能与插件</text>
+      <text x="18" y="54" fill="#8b9794" font-size="13" font-family="'IBM Plex Mono',ui-monospace,monospace">安装 / 配置 / 试跑</text>
+    </g>
+    <g transform="translate(988 528)">
+      <rect width="214" height="76" fill="#121719" stroke="#242c2e"/>
+      <text x="18" y="30" fill="#d8dfdc" font-size="16" font-weight="600">定时与任务</text>
+      <text x="18" y="54" fill="#8b9794" font-size="13" font-family="'IBM Plex Mono',ui-monospace,monospace">cron / 队列 / 重试</text>
+    </g>
+    <g transform="translate(1222 528)">
+      <rect width="214" height="76" fill="#121719" stroke="#242c2e"/>
+      <text x="18" y="30" fill="#d8dfdc" font-size="16" font-weight="600">AI 接入</text>
+      <text x="18" y="54" fill="#8b9794" font-size="13" font-family="'IBM Plex Mono',ui-monospace,monospace">Key / OpenAPI / 审计</text>
+    </g>
+
+    <text x="122" y="654" fill="#5f6a66" font-size="13" font-family="'IBM Plex Mono',ui-monospace,monospace">readonly → ops → master</text>
+    <text x="122" y="680" fill="#5f6a66" font-size="13" font-family="'IBM Plex Mono',ui-monospace,monospace">API Key 与浏览器会话共用同一套角色模型</text>
+  </g>
+
+  <text x="96" y="786" fill="#5f6a66" font-family="'IBM Plex Mono',ui-monospace,monospace" font-size="12" letter-spacing="2">SINGLE BINARY · EMBEDDED CONSOLE · OPENAPI 3.0</text>
+</svg>

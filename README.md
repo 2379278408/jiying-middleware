@@ -2,6 +2,8 @@
 
 即应（Jiying）应用的中间件与控制台。中间件负责认人、排队、执行任务，并把结果发回原会话；控制台提供连接管理、功能与插件、定时任务、消息发送、AI 接入和审计。
 
+![Relay 即应中间件](docs/images/relay-banner.svg)
+
 ## 能力
 
 - 应用通道与账号通道双身份接入，事件按 cursor 去重、确认与重放。
@@ -9,6 +11,29 @@
 - 内置 / HTTP / 脚本三类功能，插件支持 `[config: ...]` 配置 schema。
 - 控制台：会话、消息发送、媒体上传、功能、插件、技能、定时、执行记录、审计。
 - API Key（readonly / ops / master）、公开 AI 文档与 OpenAPI、角色分级。
+
+## 界面
+
+登录入口。应用通道与账号通道未就绪时，控制台会直接给出修复项。
+
+![登录控制台](docs/images/login.png)
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/console-overview.png" alt="工作台"></td>
+    <td width="50%"><img src="docs/images/plugins.png" alt="插件管理"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/ai-access.png" alt="AI 接入"></td>
+    <td><img src="docs/images/features.png" alt="功能管理"></td>
+  </tr>
+</table>
+
+## 运行架构
+
+即应的事件进入接入层，归一后写入统一任务队列，由执行器调用内置、HTTP 或脚本功能，结果回发会话并写入执行账本。控制台覆盖连接、插件、定时、AI Key 与审计。
+
+![Relay 运行架构](docs/images/architecture.svg)
 
 ## 环境要求
 

@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="560" viewBox="0 0 1600 560" fill="none" role="img" aria-label="Relay 即应中间件">
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" stroke="#1b2224" stroke-width="1"/>
+    </pattern>
+    <linearGradient id="fade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#0c0f10" stop-opacity="0"/>
+      <stop offset=".55" stop-color="#0c0f10" stop-opacity=".2"/>
+      <stop offset="1" stop-color="#0c0f10" stop-opacity=".95"/>
+    </linearGradient>
+    <linearGradient id="amber" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f2b97c"/>
+      <stop offset="1" stop-color="#a2570f"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1600" height="560" fill="#0c0f10"/>
+  <rect width="1600" height="560" fill="url(#grid)"/>
+  <rect width="1600" height="560" fill="url(#fade)"/>
+
+  <g opacity=".55">
+    <circle cx="1320" cy="250" r="170" stroke="#2a2118" stroke-width="1"/>
+    <circle cx="1320" cy="250" r="230" stroke="#242c2e" stroke-width="1"/>
+    <circle cx="1320" cy="250" r="300" stroke="#1b2224" stroke-width="1"/>
+  </g>
+  <g stroke="url(#amber)" stroke-width="2" opacity=".9">
+    <path d="M1190 250h90"/>
+    <path d="M1280 220v60"/>
+    <path d="M1200 190l70 60-70 60"/>
+  </g>
+  <g fill="#e8a45c" opacity=".9">
+    <rect x="1160" y="246" width="8" height="8"/>
+    <rect x="1400" y="156" width="6" height="6"/>
+    <rect x="1470" y="336" width="6" height="6"/>
+  </g>
+
+  <g transform="translate(96 88)">
+    <rect width="72" height="72" rx="17" fill="#FBFAF7" stroke="#E5E0D6"/>
+    <g transform="translate(0 0) scale(0.140625)" stroke="#191B1E" stroke-width="34" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <path d="M208 184 L208 330"/>
+      <path d="M208 184 A48 48 0 0 1 208 280"/>
+      <path d="M208 280 L300 332"/>
+    </g>
+  </g>
+
+  <text x="190" y="114" fill="#f3e3cf" font-family="'IBM Plex Sans','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif" font-size="25" font-weight="600" letter-spacing="6">RELAY</text>
+  <text x="190" y="145" fill="#8b9794" font-family="'IBM Plex Sans','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif" font-size="16" letter-spacing="2">即应接入与任务调度中间件</text>
+
+  <text x="96" y="250" fill="#e8a45c" font-family="'IBM Plex Mono',ui-monospace,monospace" font-size="16" letter-spacing="4">JIYING / CONTROL PLANE</text>
+  <text x="96" y="322" fill="#f4f6f5" font-family="'IBM Plex Sans','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif" font-size="54" font-weight="700">把即应接进你的工作流</text>
+  <text x="96" y="372" fill="#aab5b1" font-family="'IBM Plex Sans','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif" font-size="22">应用与账号双通道接入 · 统一任务队列 · 功能与插件 · AI API</text>
+
+  <g font-family="'IBM Plex Mono',ui-monospace,monospace" font-size="15">
+    <g transform="translate(96 434)">
+      <rect width="170" height="40" fill="#121719" stroke="#2a3335"/>
+      <text x="20" y="26" fill="#d8dfdc">双通道接入</text>
+    </g>
+    <g transform="translate(282 434)">
+      <rect width="170" height="40" fill="#121719" stroke="#2a3335"/>
+      <text x="20" y="26" fill="#d8dfdc">幂等与重试</text>
+    </g>
+    <g transform="translate(468 434)">
+      <rect width="170" height="40" fill="#121719" stroke="#2a3335"/>
+      <text x="20" y="26" fill="#d8dfdc">插件运行时</text>
+    </g>
+    <g transform="translate(654 434)">
+      <rect width="170" height="40" fill="#121719" stroke="#2a3335"/>
+      <text x="20" y="26" fill="#d8dfdc">分级 API Key</text>
+    </g>
+  </g>
+
+  <rect x="96" y="512" width="1408" height="1" fill="#242c2e"/>
+  <text x="96" y="540" fill="#5f6a66" font-family="'IBM Plex Mono',ui-monospace,monospace" font-size="13" letter-spacing="2">GO 1.25 · SINGLE BINARY · OPENAPI 3.0 · READONLY / OPS / MASTER</text>
+</svg>
