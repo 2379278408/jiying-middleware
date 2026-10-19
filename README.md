@@ -139,13 +139,26 @@ Relay 补齐这一层执行面：
 
 ### 1. 环境要求
 
-- Go 1.25 或更新版本
+- Linux amd64（发布包）或 Go 1.25 或更新版本（源码编译）
 - 可访问的即应服务（应用身份或账号身份）
 - 生产环境建议准备反向代理与 HTTPS 证书
 
 如果还没有即应服务，可以参考[即应部署文档](https://jiying.docs.baizhi.cloud/)启动一套，或先在[在线体验](https://app.jiying.chat/)了解产品形态。
 
-### 2. 编译与启动
+### 2. 使用发布包
+
+前往 [Releases](https://github.com/2379278408/jiying-middleware/releases/latest) 下载最新的 `jiying-middleware-*-linux-amd64.tar.gz`：
+
+```bash
+mkdir relay
+tar -xzf jiying-middleware-*-linux-amd64.tar.gz -C relay
+cd relay
+JIYING_DATA=./data ./jymw
+```
+
+发布包已包含 `views2/assets`，解压即可运行，默认监听 `0.0.0.0:8080`。
+
+### 3. 从源码编译
 
 ```bash
 # 编译
@@ -169,7 +182,7 @@ JIYING_RES=/opt/jiying JIYING_DATA=/var/lib/jiying JIYING_PORT=8080 ./jymw
 
 端口优先级为控制台配置 `port` > 环境变量 `JIYING_PORT` > 默认 `8080`；监听 `443` 时启用 TLS，需要在控制台配置 `certFile` 与 `keyFile`。其余端口按 HTTP 启动，生产环境建议由反向代理终止 TLS。
 
-### 3. 接入即应
+### 4. 接入即应
 
 在即应管理端创建应用，取得应用 ID 与连接密钥，然后启动 Relay：
 
@@ -177,14 +190,14 @@ JIYING_RES=/opt/jiying JIYING_DATA=/var/lib/jiying JIYING_PORT=8080 ./jymw
 export JIYING_WS_URL='wss://<host>/api/app/ws'
 export JIYING_APP_ID='<应用 ID>'
 export JIYING_APP_SECRET='<应用连接密钥>'
-./dist/jymw
+./jymw
 ```
 
-也可以启动后登录控制台，在「接入系统」或「连接池」中填写应用地址、应用 ID 与密钥。账号通道使用邮箱密码或验证码登录，两者可以同时接入。
+源码构建时将 `./jymw` 换成 `./dist/jymw`。也可以启动后登录控制台，在「接入系统」或「连接池」中填写应用地址、应用 ID 与密钥。账号通道使用邮箱密码或验证码登录，两者可以同时接入。
 
 首次启动会生成管理员引导口令，写入 `<数据目录>/admin-initial-password.txt`；首次登录成功后该文件自动删除。需要固定口令时设置 `JIYING_ADMIN_PASSWORD`。
 
-### 4. Docker
+### 5. Docker
 
 ```bash
 # 构建镜像
@@ -200,7 +213,7 @@ docker run -d --name jymw --restart unless-stopped \
 
 镜像内已安装 Python、`prlimit`、`unshare` 与 CA 证书。脚本沙箱依赖内核允许非特权用户命名空间；受限内核上会直接失败关闭。
 
-### 5. 生产部署
+### 6. 生产部署
 
 单实例部署、反向代理、备份恢复、告警与多实例边界见 `docs/production.md`。
 
@@ -321,6 +334,10 @@ go test ./...
 ```bash
 go test -race -count=1 ./core
 ```
+
+## 参与贡献
+
+开发环境、测试命令与提交约定见 `CONTRIBUTING.md`。安全问题请不要公开提交 issue，按 `SECURITY.md` 私下报告。
 
 ## 许可证
 
