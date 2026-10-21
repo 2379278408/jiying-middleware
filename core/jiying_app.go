@@ -846,8 +846,76 @@ func (c *JiyingClient) processEvent(ctx context.Context, env jiyingEnvelope) {
 	}
 }
 
+// pollInbound 轮询群内其他应用发来的 @ 消息。
+// 即应只把人类消息推给应用连接，应用间消息不会触发 WS 事件，
+// 因此用轻量轮询补齐这条链路，让应用之间的 @ 也能被唤醒与回执。
+func (c *JiyingClient) pollInbound(ctx context.Context) {
+	t := time.NewTicker(12 * time.Second)
+	defer t.Stop()
+	lastSeq := map[string]int64{}
+	inited := map[string]bool{}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		for convID, owner := range KnownConvApps() {
+			if owner != c.cfg.AppID {
+				continue
+			}
+			msgs, err := c.RecentMessages(ctx, convID, 10)
+			if err != nil {
+				GetMyLog().Warn("轮询会话失败 conv=%s: %v", convID, err)
+				continue
+			}
+			if len(msgs) == 0 {
+				continue
+			}
+			maxSeq := int64(0)
+			for _, m := range msgs {
+				if m.Seq > maxSeq {
+					maxSeq = m.Seq
+				}
+			}
+			if !inited[convID] {
+				// 首次只记水位，不回放历史消息。
+				lastSeq[convID] = maxSeq
+				inited[convID] = true
+				continue
+			}
+			for _, m := range msgs {
+				if m.Seq <= lastSeq[convID] {
+					continue
+				}
+				lastSeq[convID] = m.Seq
+				if m.Sender.Type != "app" || m.Sender.ID == c.cfg.AppID {
+					continue
+				}
+				text := m.plainText()
+				if !strings.Contains(text, "{(@app/"+c.cfg.AppID+")}") {
+					continue
+				}
+				s := &JiyingSender{
+					client: c, UserID: m.Sender.ID, ChatID: convID,
+					MsgID: m.ID, Seq: m.Seq, Text: text,
+					SenderType: m.Sender.Type, ConvType: "group",
+				}
+				if !allowAppReplyBudget(convID) {
+					GetMyLog().Info("应用间对话达到上限 conv=%s", convID)
+					continue
+				}
+				if err := enqueueSender(ctx, s); err != nil {
+					GetMyLog().Warn("轮询入队失败 conv=%s: %v", convID, err)
+				}
+			}
+		}
+	}
+}
+
 func (c *JiyingClient) Run(ctx context.Context) error {
 	c.loadAcks()
+	go c.pollInbound(ctx)
 	backoff := time.Second
 	for {
 		if ctx.Err() != nil {

@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"strings"
+	"sync"
 	"time"
 
 	"jiying/middleware/utils"
@@ -59,28 +60,89 @@ func HandleMessage(sender Sender) bool {
 	return false
 }
 
+// appReplyBudgetPerConv 限制单会话应用间自动回复总条数，防止无限对刷消耗 token。
+const appReplyBudgetPerConv = 40
+
+var appReplyBudget = struct {
+	sync.Mutex
+	m map[string]int
+}{m: map[string]int{}}
+
+// allowAppReplyBudget 为每个会话发放有限的应用间回复配额。
+func allowAppReplyBudget(convID string) bool {
+	appReplyBudget.Lock()
+	defer appReplyBudget.Unlock()
+	if appReplyBudget.m[convID] >= appReplyBudgetPerConv {
+		return false
+	}
+	appReplyBudget.m[convID]++
+	return true
+}
+
 // agentWakePrompt applies the conversation wake policy after command matching:
-// private app conversations accept ordinary text, while groups require an
-// explicit mention of the connected app.
+// private conversations accept ordinary text, while groups require an explicit
+// mention of the connected app. Messages sent by other apps are accepted too,
+// but only through the cooldown limiter above.
 func agentWakePrompt(sender Sender) (string, bool) {
 	js, ok := sender.(*JiyingSender)
-	if !ok || js == nil || js.SenderType == "app" {
+	if !ok || js == nil {
 		return "", false
+	}
+	appSender := js.SenderType == "app"
+	if appSender {
+		fromApp := strings.TrimSpace(js.UserID)
+		toApp := senderAppID(js)
+		// 应用不能唤醒自己；来源缺失时不放行，避免协议异常导致回环。
+		if fromApp == "" || (toApp != "" && fromApp == toApp) {
+			GetMyLog().Info("应用消息未唤醒 conv=%s type=%s from=%s to=%s reason=self_or_empty",
+				js.ChatID, js.SenderType, fromApp, toApp)
+			return "", false
+		}
+		// 按用户要求暂时关闭应用间冷却与每分钟限流，仅保留会话总轮数上限。
+		if !allowAppReplyBudget(js.ChatID) {
+			GetMyLog().Info("应用间对话达到上限 conv=%s from=%s", js.ChatID, fromApp)
+			return "", false
+		}
 	}
 	prompt := utils.TrimHiddenCharacter(js.GetMsg())
 	if prompt == "" {
+		GetMyLog().Info("消息未唤醒 conv=%s type=%s reason=empty", js.ChatID, js.SenderType)
 		return "", false
 	}
 	if !js.IsGroup() {
+		if appSender {
+			GetMyLog().Info("应用消息唤醒 conv=%s from=%s", js.ChatID, js.UserID)
+		}
 		return prompt, true
 	}
 	appID := senderAppID(js)
-	mention := "{(@app/" + appID + ")}"
-	if appID == "" || !strings.Contains(prompt, mention) {
+	if appID == "" {
+		GetMyLog().Info("消息未唤醒 conv=%s type=%s reason=no_app", js.ChatID, js.SenderType)
 		return "", false
 	}
+	mention := "{(@app/" + appID + ")}"
+	if !strings.Contains(prompt, mention) {
+		if !appSender {
+			GetMyLog().Info("群消息未唤醒 conv=%s reason=no_mention", js.ChatID)
+			return "", false
+		}
+		// 应用之间允许不带结构化 mention 的文本唤醒（如 "@嘟嘟 ..."），
+		// 会话总轮数上限负责截断回环。
+		if strings.TrimSpace(prompt) == "" {
+			return "", false
+		}
+		GetMyLog().Info("应用消息唤醒 conv=%s from=%s", js.ChatID, js.UserID)
+		return prompt, true
+	}
 	prompt = strings.TrimSpace(strings.ReplaceAll(prompt, mention, ""))
-	return prompt, prompt != ""
+	if prompt == "" {
+		// 只 @ 不带正文时也要唤醒；否则群聊里单独 @ 应用会被静默忽略。
+		prompt = "对方@了你，请简短回应"
+	}
+	if appSender {
+		GetMyLog().Info("应用消息唤醒 conv=%s from=%s", js.ChatID, js.UserID)
+	}
+	return prompt, true
 }
 
 // senderAppID 优先取消息来源连接的应用；缺失时回退会话归属与默认应用。
@@ -114,7 +176,7 @@ func dispatchAgentReply(sender *JiyingSender, prompt string) {
 			}
 			finishSender(sender)
 		}()
-		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
 		defer cancel()
 		out, err := RunAgent(ctx, sender.ChatID, sender.UserID, prompt, sender.Seq)
 		if err != nil {
@@ -123,11 +185,20 @@ func dispatchAgentReply(sender *JiyingSender, prompt string) {
 			_ = sender.Reply("Agent 执行失败，请稍后重试。")
 			return
 		}
+		if strings.TrimSpace(out) == "" {
+			// 模型偶尔只回工具调用、正文为空；补一句兜底，避免用户看到"已回复但空白"。
+			out = "我在，但这轮没生成有效回复，你再说一次？"
+		}
 		GetMyLog().Info("Agent 自动回复成功 conv=%s user=%s 提示=%d字 回复=%d字 耗时=%s",
 			sender.ChatID, sender.UserID, len([]rune(prompt)), len([]rune(out)), time.Since(started).Round(time.Millisecond))
+		// 回复应用时带上结构化 mention，让对端应用能被唤醒，形成双向对话。
+		reply := out
+		if sender.SenderType == "app" && strings.TrimSpace(sender.UserID) != "" {
+			reply = "{(@app/" + strings.TrimSpace(sender.UserID) + ")} " + out
+		}
 		// Agent 输出常含标题、列表与表格，优先按 Markdown 渲染；发送失败再回退纯文本。
-		if !sender.ReplyMarkdown(out) {
-			_ = sender.Reply(out)
+		if !sender.ReplyMarkdown(reply) {
+			_ = sender.Reply(reply)
 		}
 	}()
 }
