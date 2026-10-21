@@ -18,7 +18,7 @@
     "chat.app": { zh: "应用", en: "App" },
     "chat.user": { zh: "用户", en: "User" },
     "chat.allApps": { zh: "全部应用", en: "All apps" },
-    "chat.unassigned": { zh: "未归属", en: "Unassigned" },
+    "chat.unassigned": { zh: "待识别", en: "Unidentified" },
     "chat.account": { zh: "账号会话", en: "Account session" },
     "chat.appMissing": { zh: "应用未接入", en: "App not connected" },
     "chat.filter.title": { zh: "按应用筛选会话", en: "Filter conversations by app" },
@@ -488,7 +488,8 @@
     "目录": "Folders",
     "列表": "List",
     "全部应用": "All apps",
-    "未归属": "Unassigned",
+    "未归属": "Unidentified",
+    "待识别": "Unidentified",
     "按应用筛选会话": "Filter conversations by app",
     "应用": "App",
     "会话未记录应用归属": "No app assignment",
@@ -2284,11 +2285,20 @@
     paintConvFilter();
     var list = state.convs || [];
     if (!list.length) { box.innerHTML = emptyState("message", "暂无会话", "收到或发起会话后，会在这里列出。"); return; }
+    var nameCounts = {};
+    list.forEach(function (c) {
+      if (!convVisible(c)) return;
+      var peer = c.peer || c.user || c.target || c.contact || {};
+      var base = c.name || c.title || pickDisplayName(peer, "") || c.id;
+      nameCounts[base] = (nameCounts[base] || 0) + 1;
+    });
     var rows = [];
     list.forEach(function (c, i) {
       if (!convVisible(c)) return;
       var peer = c.peer || c.user || c.target || c.contact || {};
       var name = c.name || c.title || pickDisplayName(peer, "") || c.id;
+      // 同名会话追加短 ID，避免侧栏出现无法区分的重复条目。
+      if (nameCounts[name] > 1) name = name + " · " + shortID(c.id);
       var meta = convAppMeta(c);
       var active = state.conv && state.conv.id === c.id;
       var av = pickAvatarURL(c) || (state.app && state.app.avatar_url) || "";
@@ -2321,7 +2331,14 @@
     api("/jiying/api/conversations").then(function (r) {
       if (epoch !== state.chatEpoch) return;
       if (r.code !== 200) { errorState($("#convList"), "message", r.code === 403 ? "权限不足" : "会话加载失败", r.msg || r.message, loadConvs); return; }
-      state.convs = r.data && r.data.conversations ? r.data.conversations : [];
+      var loaded = r.data && r.data.conversations ? r.data.conversations : [];
+      var seenIDs = {};
+      state.convs = loaded.filter(function (c) {
+        var id = String(c && c.id || "");
+        if (!id || seenIDs[id]) return false;
+        seenIDs[id] = true;
+        return true;
+      });
       var want = restoreID || state.chatConvID;
       if (want) {
         var hit = (state.convs || []).filter(function (c) { return String(c.id) === String(want); })[0];

@@ -1,6 +1,9 @@
 package core
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -81,6 +84,8 @@ func TestDispatchNoMatch(t *testing.T) {
 
 func TestAgentWakePrompt(t *testing.T) {
 	const appID = "app-wake-test"
+	setupAgentBucket(t, "agent-wake")
+	resetAppReplyBudgetForTest()
 	appConnPool.mu.Lock()
 	oldItems, oldDefault := appConnPool.items, appConnPool.defaultID
 	appConnPool.items = map[string]*appRuntime{appID: {cfg: AppConn{AppID: appID}}}
@@ -91,6 +96,8 @@ func TestAgentWakePrompt(t *testing.T) {
 		appConnPool.items, appConnPool.defaultID = oldItems, oldDefault
 		appConnPool.mu.Unlock()
 	}()
+	self := &JiyingClient{cfg: JiyingConfig{AppID: appID}}
+	mention := "{(@app/" + appID + ")}"
 
 	tests := []struct {
 		name   string
@@ -111,18 +118,41 @@ func TestAgentWakePrompt(t *testing.T) {
 		},
 		{
 			name:   "group mention",
-			sender: &JiyingSender{ConvType: "group", SenderType: "user", Text: "{(@app/" + appID + ")} 请介绍自己"},
+			sender: &JiyingSender{ConvType: "group", SenderType: "user", Text: mention + " 请介绍自己"},
 			want:   "请介绍自己",
 			ok:     true,
 		},
 		{
 			name:   "group mention only",
-			sender: &JiyingSender{ConvType: "group", SenderType: "user", Text: "{(@app/" + appID + ")}"},
+			sender: &JiyingSender{ConvType: "group", SenderType: "user", Text: mention},
+			want:   "对方@了你，请简短回应",
+			ok:     true,
+		},
+		{
+			name:   "app sender without id",
+			sender: &JiyingSender{ConvType: "app", SenderType: "app", Text: "自动消息"},
 			ok:     false,
 		},
 		{
-			name:   "app sender",
-			sender: &JiyingSender{ConvType: "app", SenderType: "app", Text: "自动消息"},
+			name:   "app private peer",
+			sender: &JiyingSender{client: self, ChatID: "c1", ConvType: "app", SenderType: "app", UserID: "app-peer", Text: "自动消息"},
+			want:   "自动消息",
+			ok:     true,
+		},
+		{
+			name:   "app group mention",
+			sender: &JiyingSender{client: self, ConvType: "group", SenderType: "app", UserID: "app-peer", ChatID: "g1", Text: mention + " 请回复"},
+			want:   "请回复",
+			ok:     true,
+		},
+		{
+			name:   "app group without mention",
+			sender: &JiyingSender{client: self, ConvType: "group", SenderType: "app", UserID: "app-peer", ChatID: "g1", Text: "自动消息"},
+			ok:     false,
+		},
+		{
+			name:   "app cannot wake self",
+			sender: &JiyingSender{client: self, ConvType: "group", SenderType: "app", UserID: appID, ChatID: "g1", Text: mention + " 自问自答"},
 			ok:     false,
 		},
 		{
@@ -138,6 +168,82 @@ func TestAgentWakePrompt(t *testing.T) {
 			got, ok := agentWakePrompt(tt.sender)
 			if ok != tt.ok || got != tt.want {
 				t.Fatalf("agentWakePrompt() = (%q, %v), want (%q, %v)", got, ok, tt.want, tt.ok)
+			}
+		})
+	}
+}
+
+func resetAppReplyBudgetForTest() {
+	appReplyBudget.Lock()
+	appReplyBudget.loaded = false
+	appReplyBudget.bucket = ""
+	appReplyBudget.day = ""
+	appReplyBudget.counts = map[string]int{}
+	appReplyBudget.Unlock()
+}
+
+func TestAppReplyBudgetPersistsAndResets(t *testing.T) {
+	setupAgentBucket(t, "app-reply-budget")
+	resetAppReplyBudgetForTest()
+	for i := 0; i < appReplyBudgetPerConv; i++ {
+		if !allowAppReplyBudget("conv-1") {
+			t.Fatalf("第 %d 条应用回复不应被拒绝", i+1)
+		}
+	}
+	if allowAppReplyBudget("conv-1") {
+		t.Fatal("达到每日上限后应拒绝")
+	}
+	if !allowAppReplyBudget("conv-2") {
+		t.Fatal("不同会话应独立计数")
+	}
+
+	// 模拟进程重启：内存清空后从存储恢复当日计数。
+	resetAppReplyBudgetForTest()
+	if allowAppReplyBudget("conv-1") {
+		t.Fatal("重启后不应重置当日配额")
+	}
+	if !allowAppReplyBudget("conv-2") {
+		t.Fatal("重启后应继续保留其他会话计数")
+	}
+
+	// 跨天自动清零。
+	appReplyBudget.Lock()
+	appReplyBudget.loaded = false
+	appReplyBudget.bucket = ""
+	appReplyBudget.day = ""
+	appReplyBudget.counts = map[string]int{}
+	appReplyBudget.Unlock()
+	raw, err := json.Marshal(appReplyBudgetStore{
+		Day:    time.Now().AddDate(0, 0, -1).Format("2006-01-02"),
+		Counts: map[string]int{"conv-1": appReplyBudgetPerConv},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	BucketApp.Set(appReplyBudgetKey, string(raw))
+	if !allowAppReplyBudget("conv-1") {
+		t.Fatal("跨天后配额应重置")
+	}
+}
+
+func TestAgentFailureMessage(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "timeout", err: context.DeadlineExceeded, want: "Agent 处理超时，请缩短问题或稍后重试。"},
+		{name: "canceled", err: context.Canceled, want: "Agent 执行已取消，请重试。"},
+		{name: "not configured", err: errors.New("Agent 未配置：请设置 USER_LLM_BASE_URL"), want: "Agent 尚未配置，请联系管理员。"},
+		{name: "auth", err: errors.New("模型 HTTP 401"), want: "Agent 模型鉴权失败，请联系管理员。"},
+		{name: "rate limit", err: errors.New("模型 HTTP 429"), want: "Agent 模型限流，请稍后重试。"},
+		{name: "turns", err: errors.New("Agent 超过最大轮次"), want: "Agent 轮次已用尽，请拆分为更小的问题。"},
+		{name: "unknown", err: errors.New("boom"), want: "Agent 执行失败，请稍后重试。"},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := agentFailureMessage(tt.err); got != tt.want {
+				t.Fatalf("agentFailureMessage() = %q, want %q", got, tt.want)
 			}
 		})
 	}

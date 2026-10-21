@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -849,68 +850,134 @@ func (c *JiyingClient) processEvent(ctx context.Context, env jiyingEnvelope) {
 // pollInbound 轮询群内其他应用发来的 @ 消息。
 // 即应只把人类消息推给应用连接，应用间消息不会触发 WS 事件，
 // 因此用轻量轮询补齐这条链路，让应用之间的 @ 也能被唤醒与回执。
+// 轮询以应用自身可见的会话列表为准，不再依赖单值归属映射，
+// 因此同一个群里的多个应用都能各自看到发给自己的 @。
 func (c *JiyingClient) pollInbound(ctx context.Context) {
-	t := time.NewTicker(12 * time.Second)
-	defer t.Stop()
-	lastSeq := map[string]int64{}
-	inited := map[string]bool{}
+	const interval = 12 * time.Second
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	states := map[string]*pollConvState{}
+	since := time.Now().Add(-interval)
+	lastFull := time.Now()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-t.C:
+		case <-ticker.C:
 		}
-		for convID, owner := range KnownConvApps() {
-			if owner != c.cfg.AppID {
+		force := time.Since(lastFull) >= time.Minute
+		if force {
+			lastFull = time.Now()
+		}
+		c.pollInboundOnce(ctx, states, since, force)
+	}
+}
+
+type pollConvState struct {
+	lastActive string
+	lastSeq    int64
+	// followup 在检测到活跃变化后多读一轮，兜住同一时间粒度内的后续消息。
+	followup bool
+}
+
+// pollInboundOnce 刷新会话列表，优先读取活跃时间变化的会话；
+// force 为 true 时补扫全部会话，兜住未更新 last_active_at 的应用间消息。
+func (c *JiyingClient) pollInboundOnce(ctx context.Context, states map[string]*pollConvState, since time.Time, force bool) {
+	if !c.Connected() {
+		return
+	}
+	listCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	convs, err := c.ListConversations(listCtx, "", 100)
+	cancel()
+	if err != nil {
+		GetMyLog().Warn("轮询会话列表失败: %v", err)
+		return
+	}
+	type pollJob struct {
+		conv  JiyingConversation
+		state *pollConvState
+	}
+	var jobs []pollJob
+	for _, conv := range convs {
+		convID := strings.TrimSpace(conv.ID)
+		if convID == "" {
+			continue
+		}
+		conv.ID = convID
+		st := states[convID]
+		if st == nil {
+			st = &pollConvState{lastActive: conv.LastActiveAt}
+			states[convID] = st
+			if !force {
+				// 首次只记会话活跃水位，不回放历史消息。
 				continue
 			}
-			msgs, err := c.RecentMessages(ctx, convID, 10)
-			if err != nil {
-				GetMyLog().Warn("轮询会话失败 conv=%s: %v", convID, err)
-				continue
-			}
-			if len(msgs) == 0 {
-				continue
-			}
-			maxSeq := int64(0)
-			for _, m := range msgs {
-				if m.Seq > maxSeq {
-					maxSeq = m.Seq
-				}
-			}
-			if !inited[convID] {
-				// 首次只记水位，不回放历史消息。
-				lastSeq[convID] = maxSeq
-				inited[convID] = true
-				continue
-			}
-			for _, m := range msgs {
-				if m.Seq <= lastSeq[convID] {
-					continue
-				}
-				lastSeq[convID] = m.Seq
-				if m.Sender.Type != "app" || m.Sender.ID == c.cfg.AppID {
-					continue
-				}
-				text := m.plainText()
-				if !strings.Contains(text, "{(@app/"+c.cfg.AppID+")}") {
-					continue
-				}
-				s := &JiyingSender{
-					client: c, UserID: m.Sender.ID, ChatID: convID,
-					MsgID: m.ID, Seq: m.Seq, Text: text,
-					SenderType: m.Sender.Type, ConvType: "group",
-				}
-				if !allowAppReplyBudget(convID) {
-					GetMyLog().Info("应用间对话达到上限 conv=%s", convID)
-					continue
-				}
-				if err := enqueueSender(ctx, s); err != nil {
-					GetMyLog().Warn("轮询入队失败 conv=%s: %v", convID, err)
-				}
-			}
+		}
+		if !force && !st.followup && st.lastActive != "" && st.lastActive == conv.LastActiveAt {
+			continue
+		}
+		st.followup = true
+		jobs = append(jobs, pollJob{conv: conv, state: st})
+	}
+	if len(jobs) == 0 {
+		return
+	}
+	// 多个活跃会话并行读取，避免一个慢会话拖住整轮轮询。
+	sem := make(chan struct{}, 4)
+	var wg sync.WaitGroup
+	for _, job := range jobs {
+		wg.Add(1)
+		go func(job pollJob) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			c.pollConversation(ctx, job.conv, job.state, since)
+		}(job)
+	}
+	wg.Wait()
+}
+
+// pollConversation 读取单个会话的最近消息，只入队本应用被显式 @ 的新消息。
+func (c *JiyingClient) pollConversation(ctx context.Context, conv JiyingConversation, st *pollConvState, since time.Time) {
+	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	msgs, err := c.RecentMessages(callCtx, conv.ID, 50)
+	if err != nil {
+		GetMyLog().Warn("轮询会话失败 conv=%s: %v", conv.ID, err)
+		return
+	}
+	sort.Slice(msgs, func(i, j int) bool { return msgs[i].Seq < msgs[j].Seq })
+	mention := "{(@app/" + c.cfg.AppID + ")}"
+	for _, m := range msgs {
+		if m.Seq <= st.lastSeq {
+			continue
+		}
+		st.lastSeq = m.Seq
+		if m.Sender.Type != "app" || m.Sender.ID == c.cfg.AppID {
+			continue
+		}
+		text := m.plainText()
+		if !strings.Contains(text, mention) {
+			continue
+		}
+		if created, err := time.Parse(time.RFC3339, m.CreatedAt); err == nil && created.Before(since) {
+			continue
+		}
+		convType := strings.TrimSpace(conv.Type)
+		if convType == "" {
+			convType = "group"
+		}
+		s := &JiyingSender{
+			client: c, UserID: m.Sender.ID, ChatID: conv.ID,
+			MsgID: m.ID, Seq: m.Seq, ConvType: convType, Text: text,
+			SenderType: m.Sender.Type, ConvName: conv.Name,
+		}
+		if err := enqueueSender(ctx, s); err != nil {
+			GetMyLog().Warn("轮询入队失败 conv=%s: %v", conv.ID, err)
 		}
 	}
+	st.lastActive = conv.LastActiveAt
+	st.followup = false
 }
 
 func (c *JiyingClient) Run(ctx context.Context) error {

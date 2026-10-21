@@ -69,13 +69,18 @@ var dingTalk = &dingTalkConnector{seen: map[string]time.Time{}}
 
 func loadDingTalkConfig() DingTalkConfig {
 	cfg := DingTalkConfig{Bin: "dws"}
+	raw := ""
 	if BucketApp != nil {
-		if raw := BucketApp.GetString(dingTalkConfigKey); raw != "" {
-			var stored DingTalkConfig
-			if json.Unmarshal([]byte(raw), &stored) == nil {
-				cfg = stored
-			}
+		raw = BucketApp.GetString(dingTalkConfigKey)
+	}
+	if raw != "" {
+		var stored DingTalkConfig
+		if json.Unmarshal([]byte(raw), &stored) == nil {
+			cfg = stored
 		}
+	} else {
+		// 新部署默认按会话分话题，避免所有通知挤在应用单聊；用户可显式关闭。
+		cfg.TopicMode = true
 	}
 	cfg.Bin = strings.TrimSpace(cfg.Bin)
 	if cfg.Bin == "" {
@@ -468,7 +473,11 @@ func (d *dingTalkConnector) ingestEvent(ev DingTalkEvent) {
 func (d *dingTalkConnector) pushEvent(ev DingTalkEvent, cfg DingTalkConfig) {
 	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
 	defer cancel()
-	if ev.Reason != "dm" && dingTalkMuted(ctx, ev.ConversationID) {
+	if ev.Reason == "dm" {
+		if dingTalkDirectMuted(ctx, ev.ConversationID) {
+			return
+		}
+	} else if dingTalkMuted(ctx, ev.ConversationID) {
 		return
 	}
 	var err error

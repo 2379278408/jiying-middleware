@@ -205,6 +205,64 @@ func dingTalkMuted(ctx context.Context, convID string) bool {
 	return true
 }
 
+// dingTalkDirectMuted 查询单聊免打扰状态；单聊没有群设置接口，改为从最近会话列表读取。
+// 只读第一页以控制输出体积；查不到会话或查询失败时按未免打扰处理，避免误吞私聊消息。
+func dingTalkDirectMuted(ctx context.Context, convID string) bool {
+	convID = strings.TrimSpace(convID)
+	if convID == "" {
+		return false
+	}
+	key := "direct:" + convID
+	dingTalkNameMu.Lock()
+	cached, ok := dingTalkMute[key]
+	dingTalkNameMu.Unlock()
+	if ok && time.Since(cached.at) < 10*time.Minute {
+		return cached.muted
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	if payload, err := runDwsData(checkCtx, "chat", "+conversation-list", "--limit", "100"); err == nil {
+		if value, known := dingTalkNotificationOffFromPayload(payload, convID); known {
+			dingTalkNameMu.Lock()
+			dingTalkMute[key] = dingTalkCachedMute{muted: value, at: time.Now()}
+			dingTalkNameMu.Unlock()
+			return value
+		}
+	}
+	return false
+}
+
+// dingTalkNotificationOffFromPayload 从会话列表响应中递归查找指定会话的免打扰开关。
+func dingTalkNotificationOffFromPayload(payload any, convID string) (bool, bool) {
+	switch value := payload.(type) {
+	case []any:
+		for _, child := range value {
+			if muted, ok := dingTalkNotificationOffFromPayload(child, convID); ok {
+				return muted, true
+			}
+		}
+	case map[string]any:
+		if id, _ := value["openConversationId"].(string); id == convID {
+			if off, ok := value["notificationOff"]; ok {
+				switch v := off.(type) {
+				case bool:
+					return v, true
+				case float64:
+					return v == 1, true
+				case string:
+					return strings.TrimSpace(v) == "1", true
+				}
+			}
+		}
+		for _, child := range value {
+			if muted, ok := dingTalkNotificationOffFromPayload(child, convID); ok {
+				return muted, true
+			}
+		}
+	}
+	return false, false
+}
+
 func dingTalkMutedFromPayload(payload any, convID string) (bool, bool) {
 	var settings []any
 	var walk func(any)
