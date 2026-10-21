@@ -1,6 +1,8 @@
 package core
 
 import (
+	"context"
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -46,6 +48,36 @@ func TestMsgStatsPersistAcrossReload(t *testing.T) {
 	resetMsgStatsForTest()
 	if in, out := jiyingMsgCounts(); in != 1 || out != 2 {
 		t.Fatalf("counts not restored after reload: in=%d out=%d", in, out)
+	}
+}
+
+func TestOutboundTransportsCountOnce(t *testing.T) {
+	setupMsgStatsBucket(t, "msgstats-outbound-transports")
+	client, _ := rpcTestClient(t, func(method string, _ json.RawMessage) (bool, string, json.RawMessage) {
+		return true, "", json.RawMessage(`{"message":{"id":"m-1"}}`)
+	})
+
+	if _, err := client.SendMessage(rpcCtx(t), "conv-1", "", map[string]any{"type": "text", "content": "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.SendText(rpcCtx(t), "conv-1", "", "hi"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.SendChoice(rpcCtx(t), "conv-1", "选一个", []map[string]string{{"id": "a", "label": "A"}, {"id": "b", "label": "B"}}); err != nil {
+		t.Fatal(err)
+	}
+	SetUserSession("user@example.com", "tok")
+	defer SetUserSession("", "")
+	oldSend := sendUserCall
+	defer func() { sendUserCall = oldSend }()
+	sendUserCall = func(ctx context.Context, method, path string, body any) ([]byte, error) {
+		return []byte(`{"data":{"message":{"id":"m-user"}}}`), nil
+	}
+	if _, err := SendTextAsUser(context.Background(), "conv-user", "", "hi"); err != nil {
+		t.Fatal(err)
+	}
+	if in, out := jiyingMsgCounts(); in != 0 || out != 4 {
+		t.Fatalf("each successful transport must count once: in=%d out=%d", in, out)
 	}
 }
 

@@ -61,6 +61,9 @@ func handleMsgLoop() {
 
 // handleSender 串行处理一条内部消息，并在业务完成后触发可靠事件的确认。
 func handleSender(s Sender) {
+	if _, ok := s.(*JiyingSender); ok {
+		jiyingCountInbound()
+	}
 	if handled, ok := dispatchMiddleware(s, s.GetMsg()); handled {
 		if !ok {
 			GetMyLog().Warn("中间件处理失败")

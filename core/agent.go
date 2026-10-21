@@ -934,6 +934,10 @@ func runAgentTool(ctx context.Context, feature, rawArgs, userID, convID string) 
 	}
 	appID := appIDForConversation(convID)
 	if strings.HasPrefix(feature, "dingtalk:") {
+		if !dingTalkToolAllowed(userID, appID) {
+			RecordAuditApp(appID, userID, "dingtalk.tool", strings.TrimPrefix(feature, "dingtalk:"), rawArgs, "拒绝: 无权限或应用未绑定")
+			return "FAILED: 无权限使用钉钉工具"
+		}
 		out := runDingTalkTool(strings.TrimPrefix(feature, "dingtalk:"), rawArgs)
 		result := "成功"
 		if strings.HasPrefix(out, "FAILED:") {

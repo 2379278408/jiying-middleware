@@ -75,6 +75,7 @@ func (c *JiyingClient) SendTo(ctx context.Context, target rpcTarget, replyTo str
 		} `json:"message"`
 	}
 	_ = json.Unmarshal(raw, &resp)
+	jiyingCountOutbound()
 	return resp.Message.ID, nil
 }
 

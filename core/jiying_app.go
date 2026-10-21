@@ -362,7 +362,11 @@ func (c *JiyingClient) SendText(ctx context.Context, conversationID, replyTo, te
 		body["reply_to_message_id"] = replyTo
 	}
 	_, err := c.Call(ctx, "message.send", body)
-	return err
+	if err != nil {
+		return err
+	}
+	jiyingCountOutbound()
+	return nil
 }
 
 // SendStatus 向一对一会话中的在线用户同步临时状态；尽力投递，失败不影响业务。
@@ -491,6 +495,7 @@ func (c *JiyingClient) SendChoice(ctx context.Context, conversationID, content s
 		} `json:"message"`
 	}
 	_ = json.Unmarshal(raw, &resp)
+	jiyingCountOutbound()
 	return resp.Message.ID, nil
 }
 
@@ -772,7 +777,6 @@ func (c *JiyingClient) dispatchEvent(ctx context.Context, env jiyingEnvelope) (b
 		if p.Message.Body.isMedia() && p.Message.Body.FileID != "" {
 			recordMediaCtx(p.Conversation.ID, p.Message.ID, []string{p.Message.Body.FileID})
 		}
-		jiyingCountInbound()
 		s := &JiyingSender{
 			client: c, UserID: p.Sender.ID, ChatID: p.Conversation.ID,
 			MsgID: p.Message.ID, Seq: p.Message.Seq, ConvType: p.Conversation.Type, Text: text,

@@ -1192,6 +1192,29 @@ func mergedConversationList(ctx context.Context) (json.RawMessage, error) {
 	if accountErr != nil && len(list) == 0 && len(sources) == 0 {
 		return nil, accountErr
 	}
+	// 账号列表是判断「账号会话」的唯一可靠来源：有创建应用则锁定该应用，
+	// 否则登记为账号会话，允许工具回退默认应用；应用通道已登记的会话保持原归属。
+	// 账号会话批量落盘，避免首次加载时逐条重写整份映射。
+	accountIDs := make([]string, 0, len(index))
+	for _, conv := range index {
+		id, _ := conv["id"].(string)
+		if id == "" {
+			continue
+		}
+		if _, _, _, known := ConvAppOwner(id); known {
+			continue
+		}
+		createdBy := ""
+		if v, ok := conv["created_by_app_id"].(string); ok {
+			createdBy = strings.TrimSpace(v)
+		}
+		if createdBy != "" {
+			rememberConvApp(id, createdBy)
+			continue
+		}
+		accountIDs = append(accountIDs, id)
+	}
+	rememberAccountConvs(accountIDs)
 	if !userLoggedIn() && len(list) == 0 && len(sources) == 0 {
 		return nil, fmt.Errorf("账号未登录且没有在线应用")
 	}
@@ -1239,11 +1262,15 @@ func annotateConversations(data json.RawMessage) json.RawMessage {
 		appID, appName, online, known := ConvAppOwner(id)
 		if !known {
 			conv["relay_app_known"] = false
+			if IsAccountConversation(id) {
+				conv["relay_account"] = true
+			}
 			continue
 		}
 		conv["relay_app_known"] = true
 		conv["relay_app_id"] = appID
 		conv["relay_app_online"] = online
+		conv["relay_app_configured"] = appConnExists(appID)
 		if appName != "" {
 			conv["relay_app_name"] = appName
 		}
@@ -1363,10 +1390,27 @@ func jiyingAPISendUnified(c *gin.Context) {
 	if dryRun {
 		RecordAudit(consoleUser(c), "message.dry_run", convID, result.Identity, summary)
 	} else {
-		jiyingCountOutbound()
 		RecordAudit(consoleUser(c), "message.send", convID, result.Identity, summary)
 	}
 	jiyingJSON(c, result)
+}
+
+// conversationSendable 判断会话是否有可用发送通道：账号会话可用账号身份，
+// 其余会话必须有归属应用通道。用于旧发送接口在发起前失败关闭。
+func conversationSendable(conversationID string) bool {
+	if IsAccountConversation(conversationID) && userLoggedIn() {
+		return true
+	}
+	return clientForConv(conversationID) != nil
+}
+
+// sendTextToConversation 按会话类型选择账号或应用通道发送文本。
+func sendTextToConversation(ctx context.Context, conversationID, replyTo, text string) error {
+	if IsAccountConversation(conversationID) && userLoggedIn() {
+		_, err := SendTextAsUser(ctx, conversationID, replyTo, text)
+		return err
+	}
+	return SendTextToConv(ctx, conversationID, replyTo, text)
 }
 
 func jiyingAPISend(c *gin.Context) {
@@ -1376,17 +1420,16 @@ func jiyingAPISend(c *gin.Context) {
 		jiyingErr(c, "缺少会话或内容")
 		return
 	}
-	if clientForConv(convID) == nil {
+	if !conversationSendable(convID) {
 		jiyingErr(c, "即应未连接")
 		return
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
 	defer cancel()
-	if err := SendTextToConv(ctx, convID, "", text); err != nil {
+	if err := sendTextToConversation(ctx, convID, "", text); err != nil {
 		jiyingErr(c, err.Error())
 		return
 	}
-	jiyingCountOutbound()
 	jiyingJSON(c, "ok")
 }
 
@@ -1397,7 +1440,7 @@ func jiyingAPISendMedia(c *gin.Context, action string, message map[string]any) {
 		jiyingErr(c, "缺少会话")
 		return
 	}
-	if clientForConv(convID) == nil {
+	if !conversationSendable(convID) {
 		jiyingErr(c, "即应未连接")
 		return
 	}
@@ -1408,7 +1451,6 @@ func jiyingAPISendMedia(c *gin.Context, action string, message map[string]any) {
 		jiyingErr(c, err.Error())
 		return
 	}
-	jiyingCountOutbound()
 	RecordAudit(consoleUser(c), action, convID, "", "成功")
 	jiyingJSON(c, "ok")
 }
@@ -1420,7 +1462,7 @@ func jiyingAPISendResolvedMedia(c *gin.Context, action string, build func(ctx co
 		jiyingErr(c, "缺少会话")
 		return
 	}
-	if clientForConv(convID) == nil {
+	if !conversationSendable(convID) {
 		jiyingErr(c, "即应未连接")
 		return
 	}
@@ -1437,7 +1479,6 @@ func jiyingAPISendResolvedMedia(c *gin.Context, action string, build func(ctx co
 		jiyingErr(c, err.Error())
 		return
 	}
-	jiyingCountOutbound()
 	RecordAudit(consoleUser(c), action, convID, "", "成功")
 	jiyingJSON(c, "ok")
 }

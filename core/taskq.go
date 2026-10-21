@@ -229,14 +229,31 @@ func (q *taskQueue) next() *Task {
 	return nil
 }
 
+// taskRoute 解析任务执行所需的应用，并报告是否需要把归属写回会话映射。
+// 账号会话可以回退默认应用执行，但不能因此被改写成应用归属。
+func taskRoute(t *Task) (appID string, remember bool) {
+	if t == nil {
+		return "", false
+	}
+	appID = strings.TrimSpace(t.AppID)
+	if appID == "" {
+		appID = appIDForConversation(t.ConversationID)
+	}
+	if appID == "" || t.ConversationID == "" {
+		return appID, false
+	}
+	return appID, !IsAccountConversation(t.ConversationID)
+}
+
 func (q *taskQueue) run(t *Task) {
 	started := time.Now()
-	if t.AppID != "" && t.ConversationID != "" {
-		rememberConvApp(t.ConversationID, t.AppID)
+	appID, remember := taskRoute(t)
+	if remember {
+		rememberConvApp(t.ConversationID, appID)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), taskRunTimeout)
 	result, err := safeExecute(func() (string, error) {
-		return executeFeatureForApp(ctx, t.Feature, t.Args, t.UserID, t.ConversationID, t.AppID)
+		return executeFeatureForApp(ctx, t.Feature, t.Args, t.UserID, t.ConversationID, appID)
 	})
 	cancel()
 	// 功能输出可能包含脚本回显的凭据；任务详情与审计统一使用脱敏后的文本。

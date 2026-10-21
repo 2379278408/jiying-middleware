@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -124,5 +125,52 @@ func TestChoiceOptionsFromJS(t *testing.T) {
 	}
 	if opts[1]["id"] != "no" || opts[1]["label"] != "no" {
 		t.Fatalf("label should fall back to id: %#v", opts[1])
+	}
+}
+
+func TestAccountConversationMediaUsesAccountIdentity(t *testing.T) {
+	setupAppPoolBucket(t, "media-account-channel")
+	SetUserSession("user@example.com", "tok")
+	defer SetUserSession("", "")
+	old := sendUserCall
+	defer func() { sendUserCall = old }()
+	var gotPath string
+	var gotBody map[string]any
+	sendUserCall = func(ctx context.Context, method, path string, body any) ([]byte, error) {
+		gotPath = path
+		raw, _ := json.Marshal(body)
+		_ = json.Unmarshal(raw, &gotBody)
+		return []byte(`{"data":{"message":{"id":"m-media"}}}`), nil
+	}
+	const conv = "47f5c179-5d06-42fd-8a06-736866d190e0"
+	rememberAccountConv(conv)
+	id, err := SendMediaToConv(context.Background(), conv, "", ImageMessage("https://cdn.example.com/a.png", "", ""))
+	if err != nil || id != "m-media" {
+		t.Fatalf("账号媒体发送失败: %q %v", id, err)
+	}
+	if !strings.HasSuffix(gotPath, "/messages") {
+		t.Fatalf("请求路径错误: %s", gotPath)
+	}
+	body, _ := gotBody["body"].(map[string]any)
+	if body["type"] != "image" || body["content"] != "https://cdn.example.com/a.png" {
+		t.Fatalf("图片消息体错误: %+v", gotBody)
+	}
+}
+
+func TestAccountConversationSendableWithoutApp(t *testing.T) {
+	setupAppPoolBucket(t, "media-account-sendable")
+	SetUserSession("user@example.com", "tok")
+	defer SetUserSession("", "")
+	const conv = "47f5c179-5d06-42fd-8a06-736866d190e0"
+	if conversationSendable(conv) {
+		t.Fatal("unknown conversation without app must stay closed")
+	}
+	rememberAccountConv(conv)
+	if !conversationSendable(conv) {
+		t.Fatal("account conversation should send with account identity")
+	}
+	SetUserSession("", "")
+	if conversationSendable(conv) {
+		t.Fatal("account conversation must require login")
 	}
 }

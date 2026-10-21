@@ -16,6 +16,11 @@ func resetAppPoolState() {
 	appConnPool.convOrder = nil
 	appConnPool.convBucket = ""
 	appConnPool.convLoaded = false
+	appConnPool.accountConv = map[string]bool{}
+	appConnPool.accountOrder = nil
+	appConnPool.accountScope = ""
+	appConnPool.accountBucket = ""
+	appConnPool.accountLoaded = false
 	appConnPool.defaultID = ""
 	activeJiying = nil
 	appConnPool.mu.Unlock()
@@ -32,11 +37,15 @@ func setupAppPoolBucket(t *testing.T, name string) {
 	BucketApp = b
 	BucketApp.Delete(apppoolKey)
 	BucketApp.Delete(convAppsKey)
+	BucketApp.Delete(convAccountsKey)
+	BucketApp.Delete(activeAccountEmailKey)
 	BucketApp.Delete("relay_conn")
 	resetAppPoolState()
 	t.Cleanup(func() {
 		BucketApp.Delete(apppoolKey)
 		BucketApp.Delete(convAppsKey)
+		BucketApp.Delete(convAccountsKey)
+		BucketApp.Delete(activeAccountEmailKey)
 		BucketApp.Delete("relay_conn")
 		resetAppPoolState()
 	})
@@ -87,8 +96,21 @@ func TestClientForConvRoutesByRememberedApp(t *testing.T) {
 	if got := clientForConv("conv-b"); got != b {
 		t.Fatal("conversation must route to its own app client")
 	}
+	if got := clientForConv("conv-unknown"); got != nil {
+		t.Fatal("unknown conversation must fail closed when multiple apps are configured")
+	}
+}
+
+func TestSingleAppKeepsLegacyUnknownFallback(t *testing.T) {
+	setupAppPoolBucket(t, "apppool-single-legacy")
+	a := NewJiyingClient(JiyingConfig{AppID: "app-a"}, nil)
+	appConnPool.mu.Lock()
+	appConnPool.items["app-a"] = &appRuntime{cfg: AppConn{AppID: "app-a"}, client: a}
+	appConnPool.defaultID = "app-a"
+	appConnPool.syncDefaultLocked()
+	appConnPool.mu.Unlock()
 	if got := clientForConv("conv-unknown"); got != a {
-		t.Fatal("unknown conversation must fall back to default app")
+		t.Fatal("single-app deployment may keep the legacy default fallback")
 	}
 }
 
@@ -184,6 +206,11 @@ func TestConvAppOwnershipPersistsAndFailsClosed(t *testing.T) {
 	appConnPool.convOrder = nil
 	appConnPool.convBucket = ""
 	appConnPool.convLoaded = false
+	appConnPool.accountConv = map[string]bool{}
+	appConnPool.accountOrder = nil
+	appConnPool.accountScope = ""
+	appConnPool.accountBucket = ""
+	appConnPool.accountLoaded = false
 	appConnPool.items["app-a"] = &appRuntime{cfg: AppConn{AppID: "app-a"}, client: a}
 	appConnPool.items["app-b"] = &appRuntime{cfg: AppConn{AppID: "app-b"}, client: b}
 	appConnPool.mu.Unlock()
@@ -252,6 +279,73 @@ func TestAnnotateConversationsAddsAppOwnership(t *testing.T) {
 	}
 }
 
+func TestAccountConversationFallsBackToDefaultApp(t *testing.T) {
+	setupAppPoolBucket(t, "apppool-account")
+	a := NewJiyingClient(JiyingConfig{AppID: "app-a"}, nil)
+	appConnPool.mu.Lock()
+	appConnPool.items["app-a"] = &appRuntime{cfg: AppConn{AppID: "app-a"}, client: a}
+	appConnPool.defaultID = "app-a"
+	appConnPool.syncDefaultLocked()
+	appConnPool.mu.Unlock()
+
+	rememberAccountConv("conv-account")
+	if !IsAccountConversation("conv-account") {
+		t.Fatal("account conversation must be recorded")
+	}
+	if got := appIDForConversation("conv-account"); got != "app-a" {
+		t.Fatalf("account conversation should fall back to default app, got %q", got)
+	}
+	if got := clientForConv("conv-account"); got != a {
+		t.Fatal("account conversation should use default client")
+	}
+
+	// 上游明确带创建应用的会话仍锁定该应用，不因账号可见而改写归属。
+	rememberConvApp("conv-external", "app-external")
+	if got := appIDForConversation("conv-external"); got != "app-external" {
+		t.Fatalf("external app conversation must keep its owner, got %q", got)
+	}
+	if got := appIDForConversation("conv-unknown"); got != "" {
+		t.Fatalf("unknown cross-app conversation must stay closed, got %q", got)
+	}
+
+	// 进程重启后账号会话标记仍需恢复。
+	appConnPool.mu.Lock()
+	appConnPool.accountConv = map[string]bool{}
+	appConnPool.accountOrder = nil
+	appConnPool.accountScope = ""
+	appConnPool.accountBucket = ""
+	appConnPool.accountLoaded = false
+	appConnPool.mu.Unlock()
+	if got := appIDForConversation("conv-account"); got != "app-a" {
+		t.Fatalf("account marker must survive reload, got %q", got)
+	}
+}
+
+func TestAnnotateConversationsDistinguishesAccountAndMissingApp(t *testing.T) {
+	setupAppPoolBucket(t, "apppool-annotate-states")
+	rememberAccountConv("conv-account")
+	rememberConvApp("conv-missing", "app-missing")
+
+	in := []byte(`{"conversations":[{"id":"conv-account","name":"账号"},{"id":"conv-missing","name":"外部"},{"id":"conv-none","name":"未知"}],"total":3}`)
+	out := annotateConversations(in)
+	var root struct {
+		Conversations []map[string]any `json:"conversations"`
+	}
+	if err := json.Unmarshal(out, &root); err != nil {
+		t.Fatal(err)
+	}
+	account, missing, unknown := root.Conversations[0], root.Conversations[1], root.Conversations[2]
+	if account["relay_account"] != true || account["relay_app_known"] != false {
+		t.Fatalf("account conversation mismatch: %+v", account)
+	}
+	if missing["relay_app_known"] != true || missing["relay_app_configured"] != false || missing["relay_app_online"] != false {
+		t.Fatalf("missing app conversation mismatch: %+v", missing)
+	}
+	if unknown["relay_account"] != nil || unknown["relay_app_known"] != false {
+		t.Fatalf("unknown conversation must stay unassigned: %+v", unknown)
+	}
+}
+
 func TestEnqueueTaskCapturesConversationApp(t *testing.T) {
 	setupAppPoolBucket(t, "apppool-task")
 	c := NewJiyingClient(JiyingConfig{AppID: "app-a"}, nil)
@@ -269,5 +363,70 @@ func TestEnqueueTaskCapturesConversationApp(t *testing.T) {
 	defer DeleteTask(task.ID)
 	if task.AppID != "app-a" {
 		t.Fatalf("task must capture conversation app, got %q", task.AppID)
+	}
+}
+
+func TestAccountConversationTaskUsesDefaultWithoutClaimingOwnership(t *testing.T) {
+	setupAppPoolBucket(t, "apppool-account-task")
+	a := NewJiyingClient(JiyingConfig{AppID: "app-a"}, nil)
+	appConnPool.mu.Lock()
+	appConnPool.items["app-a"] = &appRuntime{cfg: AppConn{AppID: "app-a"}, client: a}
+	appConnPool.defaultID = "app-a"
+	appConnPool.syncDefaultLocked()
+	appConnPool.mu.Unlock()
+	rememberAccountConv("conv-account-task")
+
+	appID, remember := taskRoute(&Task{ConversationID: "conv-account-task"})
+	if appID != "app-a" || remember {
+		t.Fatalf("account task must use default app without claiming ownership: app=%q remember=%v", appID, remember)
+	}
+	// Agent 工具会把解析后的默认应用写进任务；执行时仍不能改写账号会话归属。
+	appID, remember = taskRoute(&Task{ConversationID: "conv-account-task", AppID: "app-a"})
+	if appID != "app-a" || remember {
+		t.Fatalf("prefilled account task must not claim ownership: app=%q remember=%v", appID, remember)
+	}
+	if _, _, _, known := ConvAppOwner("conv-account-task"); known {
+		t.Fatal("account conversation must stay outside app ownership")
+	}
+	appID, remember = taskRoute(&Task{ConversationID: "conv-app-task", AppID: "app-a"})
+	if appID != "app-a" || !remember {
+		t.Fatalf("app task must keep ownership: app=%q remember=%v", appID, remember)
+	}
+	appID, _ = taskRoute(&Task{ConversationID: "conv-unknown-task"})
+	if appID != "" {
+		t.Fatalf("unknown cross-app task must stay closed, got %q", appID)
+	}
+}
+
+func TestAccountConversationMarkersAreScopedToActiveAccount(t *testing.T) {
+	setupAppPoolBucket(t, "apppool-account-scope")
+	a := NewJiyingClient(JiyingConfig{AppID: "app-a"}, nil)
+	appConnPool.mu.Lock()
+	appConnPool.items["app-a"] = &appRuntime{cfg: AppConn{AppID: "app-a"}, client: a}
+	appConnPool.defaultID = "app-a"
+	appConnPool.syncDefaultLocked()
+	appConnPool.mu.Unlock()
+
+	BucketApp.Set(activeAccountEmailKey, "a@example.com")
+	rememberAccountConv("conv-account-a")
+	if !IsAccountConversation("conv-account-a") {
+		t.Fatal("account A conversation must be visible for account A")
+	}
+
+	BucketApp.Set(activeAccountEmailKey, "b@example.com")
+	if IsAccountConversation("conv-account-a") {
+		t.Fatal("account A conversation must not stay marked for account B")
+	}
+	if got := appIDForConversation("conv-account-a"); got != "" {
+		t.Fatalf("cross-account conversation must stay closed, got %q", got)
+	}
+	rememberAccountConv("conv-account-b")
+	if !IsAccountConversation("conv-account-b") {
+		t.Fatal("account B conversation must be visible for account B")
+	}
+
+	BucketApp.Set(activeAccountEmailKey, "a@example.com")
+	if IsAccountConversation("conv-account-b") {
+		t.Fatal("account B conversation must not leak back to account A")
 	}
 }

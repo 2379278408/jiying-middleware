@@ -19,6 +19,8 @@
     "chat.user": { zh: "用户", en: "User" },
     "chat.allApps": { zh: "全部应用", en: "All apps" },
     "chat.unassigned": { zh: "未归属", en: "Unassigned" },
+    "chat.account": { zh: "账号会话", en: "Account session" },
+    "chat.appMissing": { zh: "应用未接入", en: "App not connected" },
     "chat.filter.title": { zh: "按应用筛选会话", en: "Filter conversations by app" },
     "chat.noAssignment": { zh: "会话未记录应用归属", en: "No app assignment" },
     "chat.appOffline": { zh: "应用通道离线", en: "app channel offline" },
@@ -2210,24 +2212,43 @@
     var cached = state.appNames[id] || {};
     var name = c.relay_app_name || known.name || cached.name || shortID(id);
     var avatar = known.avatar_url || cached.avatar || "";
-    return { id: id, name: name, avatar: avatar, online: c.relay_app_online !== false && known.online !== false };
+    return { id: id, name: name, avatar: avatar, online: c.relay_app_online !== false && known.online !== false, configured: c.relay_app_configured !== false };
+  }
+  function convAccount(c) {
+    return !!c && c.relay_account === true && !convAppMeta(c);
+  }
+  function convOwnLabel(c) {
+    var meta = convAppMeta(c);
+    if (meta) {
+      if (meta.configured === false) return meta.name + " · " + t("chat.appMissing");
+      return meta.name + (meta.online ? "" : " · " + t("chat.appOffline"));
+    }
+    return convAccount(c) ? t("chat.account") : t("chat.unassigned");
   }
   function convVisible(c) {
     var f = state.convFilter;
     if (!f) return true;
     var meta = convAppMeta(c);
-    if (f === "__none__") return !meta;
+    if (f === "__none__") return !meta && !convAccount(c);
+    if (f === "__account__") return !meta && convAccount(c);
     return !!meta && meta.id === f;
   }
   function paintConvFilter() {
     var sel = $("#convAppFilter");
     if (!sel) return;
     var counts = {};
+    var missing = {};
     var unowned = 0;
+    var account = 0;
     (state.convs || []).forEach(function (c) {
       var meta = convAppMeta(c);
-      if (!meta) unowned += 1;
-      else counts[meta.id] = (counts[meta.id] || 0) + 1;
+      if (!meta) {
+        if (convAccount(c)) account += 1;
+        else unowned += 1;
+      } else {
+        counts[meta.id] = (counts[meta.id] || 0) + 1;
+        if (meta.configured === false) missing[meta.id] = meta.name;
+      }
     });
     var seen = {};
     var html = '<option value="">' + esc(t("chat.allApps")) + "</option>";
@@ -2240,12 +2261,14 @@
     });
     Object.keys(counts).forEach(function (id) {
       if (seen[id]) return;
-      html += '<option value="' + esc(id) + '">' + esc(shortID(id)) + " (" + counts[id] + ")</option>";
+      var label = missing[id] ? missing[id] + " · " + t("chat.appMissing") : shortID(id);
+      html += '<option value="' + esc(id) + '">' + esc(label) + " (" + counts[id] + ")</option>";
     });
+    if (account) html += '<option value="__account__">' + esc(t("chat.account")) + " (" + account + ")</option>";
     html += '<option value="__none__">' + esc(t("chat.unassigned")) + " (" + unowned + ")</option>";
     sel.innerHTML = html;
     var want = state.convFilter;
-    if (want && want !== "__none__" && !seen[want]) {
+    if (want && want !== "__none__" && want !== "__account__" && !seen[want]) {
       var extra = counts[want] ? want : "";
       if (!extra) { state.convFilter = ""; want = ""; }
     }
@@ -2269,10 +2292,22 @@
       var meta = convAppMeta(c);
       var active = state.conv && state.conv.id === c.id;
       var av = pickAvatarURL(c) || (state.app && state.app.avatar_url) || "";
-      var appLine = meta
-        ? '<span class="conv-app-line" title="' + esc(t("chat.app") + "：" + meta.name) + '">' + avatarHTML(meta.avatar, meta.name, "conv-app-av") + '<span class="conv-app-name">' + esc(meta.name) + (meta.online ? "" : " · " + esc(t("chat.appOffline"))) + "</span></span>"
-        : '<span class="conv-app-line conv-app-none" title="' + esc(t("chat.noAssignment")) + '">' + esc(t("chat.unassigned")) + "</span>";
-      rows.push('<button type="button" class="conv-item' + (active ? " active" : "") + '" data-conv-index="' + i + '" title="' + esc(name + (meta ? " · " + meta.name : "")) + '">' + avatarHTML(av, name, "conv-avatar") + '<span class="conv-main"><span class="cname">' + esc(name) + "</span>" + appLine + "</span></button>");
+      var own = convOwnLabel(c);
+      var sameName = !!meta && meta.configured !== false && String(meta.name || "").trim() === String(name || "").trim();
+      var appLine = "";
+      if (meta && meta.configured === false) {
+        appLine = '<span class="conv-app-line conv-app-none" title="' + esc(t("chat.appMissing")) + '">' + esc(own) + "</span>";
+      } else if (meta && !sameName) {
+        appLine = '<span class="conv-app-line" title="' + esc(t("chat.app") + "：" + own) + '">' + avatarHTML(meta.avatar, meta.name, "conv-app-av") + '<span class="conv-app-name">' + esc(own) + "</span></span>";
+      } else if (meta && !meta.online) {
+        appLine = '<span class="conv-app-line conv-app-none" title="' + esc(t("chat.appOffline")) + '">' + esc(t("chat.appOffline")) + "</span>";
+      } else if (!meta && convAccount(c)) {
+        appLine = '<span class="conv-app-line conv-app-account" title="' + esc(t("chat.account")) + '">' + esc(t("chat.account")) + "</span>";
+      } else if (!meta) {
+        appLine = '<span class="conv-app-line conv-app-none" title="' + esc(t("chat.noAssignment")) + '">' + esc(t("chat.unassigned")) + "</span>";
+      }
+      var tip = name + (own && own !== name && !sameName ? " · " + own : "");
+      rows.push('<button type="button" class="conv-item' + (active ? " active" : "") + '" data-conv-index="' + i + '" title="' + esc(tip) + '">' + avatarHTML(av, name, "conv-avatar") + '<span class="conv-main"><span class="cname">' + esc(name) + "</span>" + appLine + "</span></button>");
     });
     if (!rows.length) { box.innerHTML = emptyState("message", t("chat.filter.empty"), ""); return; }
     box.innerHTML = rows.join("");
@@ -2310,8 +2345,9 @@
     $$(".conv-item").forEach(function (item) {
       item.classList.toggle("active", Number(item.getAttribute("data-conv-index")) === i);
     });
-    var meta = convAppMeta(c);
-    $("#chatTitle").textContent = (c.name || "会话") + " · " + (meta ? meta.name : t("chat.unassigned"));
+    var titleName = c.name || "会话";
+    var own = convOwnLabel(c);
+    $("#chatTitle").textContent = own && own !== titleName ? titleName + " · " + own : titleName;
     loadChat();
     loadChatCapabilities();
     startChatTimer();

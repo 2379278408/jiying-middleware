@@ -149,20 +149,20 @@ func newClientMessageID() string {
 	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
 }
 
-// SendTextAsUser 以当前账号身份向上游会话发送文本，返回服务端消息 ID。
-func SendTextAsUser(ctx context.Context, conversationID, replyTo, text string) (string, error) {
+// SendMessageAsUser 以当前账号身份向上游会话发送任意消息体，返回服务端消息 ID。
+func SendMessageAsUser(ctx context.Context, conversationID, replyTo string, message map[string]any) (string, error) {
 	if !validConversationID(conversationID) {
 		return "", fmt.Errorf("会话 ID 不合法")
 	}
-	if strings.TrimSpace(text) == "" {
-		return "", fmt.Errorf("内容为空")
+	if len(message) == 0 {
+		return "", fmt.Errorf("消息体为空")
 	}
 	if !userLoggedIn() {
 		return "", errAccountNotLoggedIn
 	}
 	body := map[string]any{
 		"client_message_id": newClientMessageID(),
-		"body":              map[string]any{"type": "text", "content": text},
+		"body":              message,
 	}
 	if replyTo != "" {
 		body["reply_to_message_id"] = replyTo
@@ -175,6 +175,7 @@ func SendTextAsUser(ctx context.Context, conversationID, replyTo, text string) (
 		}
 		return "", err
 	}
+	jiyingCountOutbound()
 	var parsed struct {
 		Data struct {
 			Message struct {
@@ -184,6 +185,14 @@ func SendTextAsUser(ctx context.Context, conversationID, replyTo, text string) (
 	}
 	_ = json.Unmarshal(raw, &parsed)
 	return parsed.Data.Message.ID, nil
+}
+
+// SendTextAsUser 以当前账号身份向上游会话发送文本，返回服务端消息 ID。
+func SendTextAsUser(ctx context.Context, conversationID, replyTo, text string) (string, error) {
+	if strings.TrimSpace(text) == "" {
+		return "", fmt.Errorf("内容为空")
+	}
+	return SendMessageAsUser(ctx, conversationID, replyTo, map[string]any{"type": "text", "content": text})
 }
 
 // SendMessage 按指定或自动身份发送文本，dry-run 只做校验与身份解析。

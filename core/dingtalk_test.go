@@ -155,3 +155,31 @@ func TestRecordAuditAppField(t *testing.T) {
 		t.Fatalf("审计应带应用归属: %s", raw)
 	}
 }
+
+func TestDingTalkToolsBoundToSingleApp(t *testing.T) {
+	setupAppPoolBucket(t, "dingtalk-tool-binding")
+	dingTalk.mu.Lock()
+	oldCfg := dingTalk.cfg
+	dingTalk.mu.Unlock()
+	t.Cleanup(func() {
+		dingTalk.mu.Lock()
+		dingTalk.cfg = oldCfg
+		dingTalk.mu.Unlock()
+	})
+	if err := saveDingTalkConfig(DingTalkConfig{Enabled: true, PushAppID: "app-a"}); err != nil {
+		t.Fatal(err)
+	}
+	BucketApp.Set(appRolesKey, `{"app-a":{"ops-a":"ops"},"app-b":{"ops-b":"ops"}}`)
+	if dingTalkToolAppID() != "app-a" {
+		t.Fatalf("dingtalk tools must bind to push app, got %q", dingTalkToolAppID())
+	}
+	if !dingTalkToolAllowed("ops-a", "app-a") {
+		t.Fatal("ops of bound app should use dingtalk tools")
+	}
+	if dingTalkToolAllowed("ops-b", "app-b") {
+		t.Fatal("ops of another app must not use the shared dingtalk login")
+	}
+	if dingTalkToolAllowed("nobody", "app-a") {
+		t.Fatal("readonly user must not use dingtalk tools")
+	}
+}

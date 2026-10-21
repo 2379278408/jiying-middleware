@@ -228,7 +228,7 @@ dws auth login
 
 无图形界面时使用 `dws auth login --device`。组织未开启 CLI 权限时，需要管理员在钉钉开发者平台授权同名账号。
 
-连接器默认执行 `dws event consume user_im_message_receive_o2o_all user_im_message_receive_at user_im_message_receive_group_all --flatten -f ndjson -y`，事件只保留摘要，默认仅展示在面板。开启自动推送后，事件可以全部发到指定即应会话，也可以开启「按钉钉会话分话题」：每个钉钉群或私聊复用一个即应话题，群消息带发送人，图片会下载后作为即应图片消息发入话题，群里免打扰的会话不推送。在该话题里回复文字会直接转发回对应钉钉会话，不经过 Agent；该操作同样要求应用内 ops 及以上角色。Agent 的钉钉工具只对相应应用内 ops 及以上角色开放。
+连接器默认执行 `dws event consume user_im_message_receive_o2o_all user_im_message_receive_at user_im_message_receive_group_all --flatten -f ndjson -y`，事件只保留摘要，默认仅展示在面板。开启自动推送后，事件可以全部发到指定即应会话，也可以开启「按钉钉会话分话题」：每个钉钉群或私聊复用一个即应话题，群消息带发送人，图片会下载后作为即应图片消息发入话题，群里免打扰的会话不推送。在该话题里回复文字会直接转发回对应钉钉会话，不经过 Agent；该操作同样要求应用内 ops 及以上角色。Agent 的钉钉工具绑定单一应用：优先使用推送应用 `push_app_id`，未设置时绑定默认应用，只对该应用内 ops 及以上角色开放。连接器共用宿主机钉钉登录，多个应用不会共享工具权限。
 
 官方 `dws` 二进制依赖 glibc。当前 Alpine 运行镜像内不能直接运行官方二进制，生产环境可选两种部署形态：Relay 直接运行在宿主机并安装 `dws`；或改用 Debian slim 运行镜像并在镜像内安装 `dws`。只把 `dws` 挂载进 Alpine 容器无法解决动态链接库缺失。容器部署时还需要持久化 `dws` 的登录态目录，否则重建容器后要重新授权。
 

@@ -20,8 +20,12 @@ func (c *JiyingClient) SendMessage(ctx context.Context, conversationID, replyTo 
 	return c.SendTo(ctx, convTarget("conversation", conversationID), replyTo, message)
 }
 
-// SendMediaToConv 按会话归属应用通道发送媒体消息。
+// SendMediaToConv 按会话归属发送媒体消息。
+// 账号会话优先用当前账号身份，避免把媒体误发到默认应用；应用归属会话仍走应用通道。
 func SendMediaToConv(ctx context.Context, conversationID, replyTo string, message map[string]any) (string, error) {
+	if IsAccountConversation(conversationID) && userLoggedIn() {
+		return SendMessageAsUser(ctx, conversationID, replyTo, message)
+	}
 	c := clientForConv(conversationID)
 	if c == nil {
 		return "", errJiyingNotConnected

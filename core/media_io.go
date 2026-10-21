@@ -161,6 +161,14 @@ func accountReadTemporaryURL(ctx context.Context, fileID string) (string, error)
 // appReadTemporaryURL 优先用应用通道申请临时文件读取地址；应用通道需要会话与消息上下文授权，
 // 无法提供会话/消息上下文或调用失败时回退账号身份。
 func appReadTemporaryURL(ctx context.Context, convID, msgID, fileID string) (string, error) {
+	// 账号会话没有创建应用，优先用账号身份解析，避免借默认应用读取其他租户的文件。
+	if convID != "" && userLoggedIn() && IsAccountConversation(convID) {
+		if url, err := accountReadTemporaryURL(ctx, fileID); err == nil {
+			return url, nil
+		} else {
+			GetMyLog().Warn("账号通道读取临时文件失败，回退应用身份: %v", err)
+		}
+	}
 	if convID != "" && msgID != "" {
 		c := clientForConv(convID)
 		if c != nil {

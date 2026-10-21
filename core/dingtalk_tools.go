@@ -13,10 +13,29 @@ import (
 	"time"
 )
 
+// dingTalkToolAppID 返回允许使用钉钉工具的应用。
+// 连接器共用宿主机钉钉登录，必须绑定单一应用；未配置推送应用时绑定默认应用。
+func dingTalkToolAppID() string {
+	cfg := loadDingTalkConfig()
+	if appID := strings.TrimSpace(cfg.PushAppID); appID != "" {
+		return appID
+	}
+	return strings.TrimSpace(CurrentAppConfig().AppID)
+}
+
+// dingTalkToolAllowed 校验用户与应用是否有权使用共享的钉钉连接器。
+func dingTalkToolAllowed(userID, appID string) bool {
+	bound := dingTalkToolAppID()
+	if bound == "" || !strings.EqualFold(strings.TrimSpace(appID), bound) {
+		return false
+	}
+	return HasRoleForApp(userID, appID, RoleOps)
+}
+
 // dingTalkToolContracts 返回连接器启用时暴露给模型的钉钉工具。
-// 钉钉工具会以宿主账号发消息，只向该应用内达到 ops 的用户开放。
+// 钉钉工具会以宿主账号发消息，只向绑定应用内达到 ops 的用户开放。
 func dingTalkToolContracts(userID, appID string) []ToolContract {
-	if !dingTalkActive() || !HasRoleForApp(userID, appID, RoleOps) {
+	if !dingTalkActive() || !dingTalkToolAllowed(userID, appID) {
 		return nil
 	}
 	schema := func(props map[string]any, required ...string) map[string]any {
