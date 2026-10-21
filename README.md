@@ -1,8 +1,8 @@
 # Relay · 即应中间件
 
 [![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev/)
-[![CI](https://github.com/2379278408/jiying-middleware/actions/workflows/ci.yml/badge.svg?branch=260924-fix-audit-hardening)](https://github.com/2379278408/jiying-middleware/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/2379278408/jiying-middleware)](https://github.com/2379278408/jiying-middleware/releases/latest)
+[![CI](https://github.com/goalup/jiying-middleware/actions/workflows/ci.yml/badge.svg?branch=260924-fix-audit-hardening)](https://github.com/goalup/jiying-middleware/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/goalup/jiying-middleware)](https://github.com/goalup/jiying-middleware/releases/latest)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](https://www.gnu.org/licenses/agpl-3.0.html)
 
 把即应接进团队的工作流。
@@ -147,7 +147,7 @@ Relay 补齐这一层执行面：
 
 ### 2. 使用发布包
 
-前往 [Releases](https://github.com/2379278408/jiying-middleware/releases/latest) 下载最新的 `jiying-middleware-*-linux-amd64.tar.gz`：
+前往 [Releases](https://github.com/goalup/jiying-middleware/releases/latest) 下载最新的 `jiying-middleware-*-linux-amd64.tar.gz`：
 
 ```bash
 mkdir relay
