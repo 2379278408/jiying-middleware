@@ -586,6 +586,7 @@ func cleanupRemovedApp(appID string, convIDs []string) {
 		ccs.save(cmd)
 	}
 	ccs.Unlock()
+	removeDingTalkTopicsForApp(appID)
 }
 
 // SetDefaultAppConn 将指定应用排到连接池首位并作为新会话默认出口。

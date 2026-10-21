@@ -36,6 +36,7 @@ func dingTalkAPIConfig(c *gin.Context) {
 	cfg := loadDingTalkConfig()
 	cfg.Enabled = c.PostForm("enabled") == "true" || c.PostForm("enabled") == "1"
 	cfg.AutoPush = c.PostForm("auto_push") == "true" || c.PostForm("auto_push") == "1"
+	cfg.TopicMode = c.PostForm("topic_mode") == "true" || c.PostForm("topic_mode") == "1"
 	if v := strings.TrimSpace(c.PostForm("bin")); v != "" {
 		cfg.Bin = v
 	}

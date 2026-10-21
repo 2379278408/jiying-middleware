@@ -4318,7 +4318,7 @@
     if (toggle) { toggle.textContent = cfg.enabled ? "停止" : "启动"; toggle.className = "btn " + (cfg.enabled ? "btn-outline-danger" : "btn-primary"); }
     var rows = '<div class="kv"><span class="k">状态</span><span class="v">' + badge + (st.pid ? ' <span class="muted mono">PID ' + Number(st.pid) + "</span>" : "") + "</span></div>"
       + '<div class="kv"><span class="k">dws</span><span class="v">' + (st.bin_found ? '<span class="badge badge-ok">已找到</span>' : '<span class="badge badge-err">未找到</span>') + ' <span class="mono">' + esc(cfg.bin || "dws") + "</span></span></div>"
-      + '<div class="kv"><span class="k">自动推送</span><span class="v">' + (cfg.auto_push ? "已开启" : "未开启") + (cfg.push_conversation_id ? ' · <span class="mono">' + esc(cfg.push_conversation_id) + "</span>" : "") + "</span></div>"
+      + '<div class="kv"><span class="k">自动推送</span><span class="v">' + (cfg.auto_push ? (cfg.topic_mode ? "已开启 · 按会话分话题" : "已开启 · 推送到指定会话") : "未开启") + (cfg.push_conversation_id ? ' · <span class="mono">' + esc(cfg.push_conversation_id) + "</span>" : "") + "</span></div>"
       + (st.started_at ? '<div class="kv"><span class="k">启动时间</span><span class="v mono">' + esc(fmtTime(st.started_at)) + "</span></div>" : "")
       + (st.retry_at ? '<div class="kv"><span class="k">下次重连</span><span class="v mono">' + esc(fmtTime(st.retry_at)) + "</span></div>" : "")
       + (st.last_error ? '<div class="kv"><span class="k">最近错误</span><span class="v" style="color:var(--danger,#d9534f)">' + esc(st.last_error) + "</span></div>" : "")
@@ -4345,6 +4345,7 @@
     showModal("钉钉连接器配置",
       '<div class="field"><label>dws 可执行文件</label><input class="input mono" id="dt_bin" value="' + esc(cfg.bin || "dws") + '"><div class="hint">可填绝对路径，例如 /usr/local/bin/dws。</div></div>'
       + '<div class="field"><label><input type="checkbox" id="dt_auto"' + (cfg.auto_push ? " checked" : "") + '"> 自动推送事件</label><div class="hint">开启后把钉钉事件推送到下方应用会话。</div></div>'
+      + '<div class="field"><label><input type="checkbox" id="dt_topic"' + (cfg.topic_mode ? " checked" : "") + '"> 按钉钉会话分话题</label><div class="hint">每个钉钉群/私聊复用一个即应话题；在话题里回复会直接转发回钉钉。关闭时全部推送到下方会话。</div></div>'
       + '<div class="field"><label>推送应用 ID</label><input class="input mono" id="dt_app" list="dt_apps" value="' + esc(cfg.push_app_id || "") + '"><datalist id="dt_apps">' + apps + "</datalist></div>"
       + '<div class="field"><label>推送会话 ID</label><input class="input mono" id="dt_conv" value="' + esc(cfg.push_conversation_id || "") + '"><div class="hint">即应中的目标会话 ID；留空则只在面板展示事件。</div></div>',
       '<button class="btn btn-ghost" onclick="Relay.closeModal()">取消</button><button class="btn btn-primary" id="dt_save">保存</button>');
@@ -4353,6 +4354,7 @@
         enabled: cfg.enabled ? "true" : "false",
         bin: $("#dt_bin").value.trim(),
         auto_push: $("#dt_auto").checked ? "true" : "false",
+        topic_mode: $("#dt_topic").checked ? "true" : "false",
         push_app_id: $("#dt_app").value.trim(),
         push_conversation_id: $("#dt_conv").value.trim()
       };

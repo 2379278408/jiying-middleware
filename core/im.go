@@ -68,6 +68,10 @@ func handleSender(s Sender) {
 		finishSender(s)
 		return
 	}
+	if relayDingTalkTopicReply(s) {
+		finishSender(s)
+		return
+	}
 	if dispatchMessage(s) {
 		// 命令在独立 goroutine 中执行，完成后由 HandleMessage 触发确认。
 		return

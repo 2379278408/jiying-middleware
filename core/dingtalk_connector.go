@@ -14,9 +14,12 @@ import (
 
 // DingTalkConfig 是钉钉连接器配置；认证信息由本机 dws 持有，面板不保存任何钉钉密钥。
 type DingTalkConfig struct {
-	Enabled            bool   `json:"enabled"`
-	Bin                string `json:"bin"`
-	AutoPush           bool   `json:"auto_push"`
+	Enabled bool   `json:"enabled"`
+	Bin     string `json:"bin"`
+	// AutoPush 控制是否把命中的钉钉事件推送到即应。
+	AutoPush bool `json:"auto_push"`
+	// TopicMode 为 true 时按钉钉会话复用即应话题，避免所有通知挤在应用单聊。
+	TopicMode          bool   `json:"topic_mode"`
 	PushAppID          string `json:"push_app_id"`
 	PushConversationID string `json:"push_conversation_id"`
 }
@@ -30,16 +33,18 @@ const (
 
 // DingTalkEvent 是钉钉事件订阅的可展示摘要。
 type DingTalkEvent struct {
-	ID             string `json:"id"`
-	Type           string `json:"type"`
-	Reason         string `json:"reason"`
-	ConversationID string `json:"conversation_id,omitempty"`
-	Sender         string `json:"sender,omitempty"`
-	Content        string `json:"content,omitempty"`
-	Time           string `json:"time,omitempty"`
-	ReceivedAt     string `json:"received_at"`
-	AtAll          bool   `json:"at_all"`
-	Raw            string `json:"raw,omitempty"`
+	ID               string `json:"id"`
+	Type             string `json:"type"`
+	Reason           string `json:"reason"`
+	ConversationID   string `json:"conversation_id,omitempty"`
+	ConversationName string `json:"conversation_name,omitempty"`
+	Sender           string `json:"sender,omitempty"`
+	SenderOpenID     string `json:"sender_open_dingtalk_id,omitempty"`
+	Content          string `json:"content,omitempty"`
+	Time             string `json:"time,omitempty"`
+	ReceivedAt       string `json:"received_at"`
+	AtAll            bool   `json:"at_all"`
+	Raw              string `json:"raw,omitempty"`
 }
 
 type dingTalkConnector struct {
@@ -347,15 +352,17 @@ func parseDingTalkEvent(raw []byte) (DingTalkEvent, bool) {
 		return DingTalkEvent{}, false
 	}
 	ev := DingTalkEvent{
-		Type:           strAny(obj, "type"),
-		ConversationID: firstAny(obj, "conversation_id", "conversationId", "open_conversation_id", "openConversationId"),
-		Sender:         firstAny(obj, "sender", "sender_name", "senderName", "from"),
-		Content:        firstAny(obj, "content", "text", "message"),
-		ID:             firstAny(obj, "message_id", "msg_id", "id"),
-		Time:           firstAny(obj, "create_time", "event_time", "timestamp"),
-		AtAll:          isDingTalkAtAll(obj),
-		ReceivedAt:     time.Now().Format(time.RFC3339),
-		Raw:            truncateText(string(raw), 4000),
+		Type:             strAny(obj, "type"),
+		ConversationID:   firstAny(obj, "conversation_id", "conversationId", "open_conversation_id", "openConversationId"),
+		ConversationName: firstAny(obj, "conversation_name", "conversationName", "chat_name", "chatName"),
+		Sender:           firstAny(obj, "sender", "sender_name", "senderName", "from"),
+		SenderOpenID:     firstAny(obj, "sender_open_dingtalk_id", "senderOpenDingTalkId", "open_dingtalk_id", "openDingTalkId"),
+		Content:          firstAny(obj, "content", "text", "message"),
+		ID:               firstAny(obj, "message_id", "msg_id", "id"),
+		Time:             firstAny(obj, "create_time", "event_time", "timestamp"),
+		AtAll:            isDingTalkAtAll(obj),
+		ReceivedAt:       time.Now().Format(time.RFC3339),
+		Raw:              truncateText(string(raw), 4000),
 	}
 	ev.Reason = classifyDingTalkEvent(ev.Type, ev.AtAll)
 	if ev.Reason == "" {
@@ -450,22 +457,40 @@ func (d *dingTalkConnector) ingestEvent(ev DingTalkEvent) {
 	if len(d.events) > dingTalkEventKeep {
 		d.events = d.events[len(d.events)-dingTalkEventKeep:]
 	}
-	autoPush := d.cfg.AutoPush
-	appID := d.cfg.PushAppID
-	convID := d.cfg.PushConversationID
+	cfg := d.cfg
 	d.mu.Unlock()
-	if autoPush && appID != "" && convID != "" {
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			defer cancel()
-			text := formatDingTalkPush(ev)
-			if err := SendTextToConvVia(ctx, appID, convID, "", text); err != nil {
-				d.mu.Lock()
-				d.lastError = truncateText("自动推送失败: "+err.Error(), 300)
-				d.mu.Unlock()
-				GetMyLog().Warn("钉钉事件自动推送失败: %v", err)
-			}
-		}()
+	if cfg.AutoPush && cfg.PushAppID != "" && cfg.PushConversationID != "" {
+		go d.pushEvent(ev, cfg)
+	}
+}
+
+// pushEvent 把一条事件推送到即应；话题模式按钉钉会话复用话题，失败时回退到父会话。
+func (d *dingTalkConnector) pushEvent(ev DingTalkEvent, cfg DingTalkConfig) {
+	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
+	defer cancel()
+	if ev.Reason != "dm" && dingTalkMuted(ctx, ev.ConversationID) {
+		return
+	}
+	var err error
+	if cfg.TopicMode {
+		err = d.pushEventToTopic(ctx, cfg, ev)
+	} else {
+		err = SendTextToConvVia(ctx, cfg.PushAppID, cfg.PushConversationID, "", formatDingTalkPush(ev))
+	}
+	if err == nil {
+		return
+	}
+	d.mu.Lock()
+	d.lastError = truncateText("自动推送失败: "+err.Error(), 300)
+	d.mu.Unlock()
+	GetMyLog().Warn("钉钉事件自动推送失败: %v", err)
+	if cfg.TopicMode {
+		fallback := formatDingTalkPush(ev)
+		if sendErr := SendTextToConvVia(ctx, cfg.PushAppID, cfg.PushConversationID, "", fallback); sendErr == nil {
+			d.mu.Lock()
+			d.lastError = truncateText("话题推送失败，已回退父会话: "+err.Error(), 300)
+			d.mu.Unlock()
+		}
 	}
 }
 
