@@ -126,7 +126,7 @@ func TestBuildToolContractsForAppFiltersByScope(t *testing.T) {
 	if err := UpsertFeature(Feature{Name: "范围工具-甲", Kind: "http", Target: "https://example.com/a", Scope: "public", Identity: "app", Enabled: true, Apps: []string{"app-a"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := UpsertFeature(Feature{Name: "范围工具-全体", Kind: "http", Target: "https://example.com/b", Scope: "public", Identity: "app", Enabled: true}); err != nil {
+	if err := UpsertFeature(Feature{Name: "范围工具-全体", Kind: "http", Target: "https://example.com/b", Scope: "public", Identity: "app", Enabled: true, Apps: []string{"*"}}); err != nil {
 		t.Fatal(err)
 	}
 	names := func(appID string) map[string]bool {

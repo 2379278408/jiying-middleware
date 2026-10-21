@@ -18,6 +18,7 @@ type CronCmd struct {
 	Command      string   `json:"command"`
 	Cron         string   `json:"cron"`
 	Owner        string   `json:"owner"`
+	AppID        string   `json:"app_id,omitempty"`
 	Type         []string `json:"type"`
 	Log          string   `json:"log"`
 	Status       bool     `json:"status"`
@@ -457,6 +458,7 @@ func AddCronCmdFrom(fields map[string]interface{}, actor, role string) *CronCmd 
 		Type:      []string{"web"},
 		Owner:     actor,
 		OwnerRole: role,
+		AppID:     strings.TrimSpace(strField(fields, "app_id")),
 	}
 	if v, ok := fields["status"].(bool); ok {
 		cmd.Status = v
@@ -517,6 +519,9 @@ func UpdateCronCmd(id string, fields map[string]interface{}, actor, role string)
 		}
 		if v, ok := fields["type"].([]interface{}); ok {
 			p.Type = strSlice(v)
+		}
+		if v := strings.TrimSpace(strField(fields, "app_id")); v != "" {
+			p.AppID = v
 		}
 		p.UpdateOn = time.Now().Format("2006-01-02 15:04:05")
 		ccs.rescheduleLocked(p)

@@ -16,6 +16,7 @@ import (
 type AuditEntry struct {
 	Time   string `json:"time"`
 	Actor  string `json:"actor"`
+	AppID  string `json:"app_id,omitempty"`
 	Action string `json:"action"`
 	Target string `json:"target"`
 	Detail string `json:"detail"`
@@ -105,9 +106,15 @@ func auditURL(raw string) string {
 
 // RecordAudit 落审计日志；失败只记警告，不影响主流程。
 func RecordAudit(actor, action, target, detail, result string) {
+	RecordAuditApp("", actor, action, target, detail, result)
+}
+
+// RecordAuditApp 在审计记录中附带应用归属，便于按应用过滤与追溯越权尝试。
+func RecordAuditApp(appID, actor, action, target, detail, result string) {
 	entry := AuditEntry{
 		Time:   time.Now().Format(time.RFC3339),
 		Actor:  sanitizeLogText(strings.TrimSpace(actor)),
+		AppID:  sanitizeLogText(strings.TrimSpace(appID)),
 		Action: sanitizeLogText(strings.TrimSpace(action)),
 		Target: sanitizeLogText(strings.TrimSpace(target)),
 		Detail: sanitizeLogText(truncateRunes(strings.TrimSpace(detail), 200)),

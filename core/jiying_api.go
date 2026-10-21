@@ -1341,12 +1341,18 @@ func jiyingAPISendUnified(c *gin.Context) {
 	text := strings.TrimSpace(c.PostForm("text"))
 	identity := strings.TrimSpace(c.PostForm("identity"))
 	dryRun := c.PostForm("dry_run") == "true" || c.PostForm("dry_run") == "1"
+	appID := strings.TrimSpace(c.PostForm("app_id"))
+	if appID != "" && !requestHasRole(c, RoleMaster) {
+		jiyingErr(c, "指定应用发送需要主控权限")
+		return
+	}
 	result, err := SendMessage(c.Request.Context(), SendOptions{
 		ConversationID: convID,
 		Text:           text,
 		Identity:       identity,
 		ReplyTo:        strings.TrimSpace(c.PostForm("reply_to")),
 		DryRun:         dryRun,
+		AppID:          appID,
 	})
 	if err != nil {
 		RecordAudit(consoleUser(c), "message.send", convID, identity, "失败: "+err.Error())

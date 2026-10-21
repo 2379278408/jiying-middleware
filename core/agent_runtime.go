@@ -92,11 +92,11 @@ func BuildToolContractsForApp(userID, appID string) []ToolContract {
 		return items[i].Name < items[j].Name
 	})
 	out := make([]ToolContract, 0, len(items))
-	for i, f := range items {
-		if f == nil || !f.Enabled || !featureAllowedFor(userID, f) || !featureAllowedForApp(f, appID) {
+	for _, f := range items {
+		if f == nil || !f.Enabled || !featureAllowedFor(userID, f, appID) || !featureAllowedForApp(f, appID) {
 			continue
 		}
-		out = append(out, buildToolContract(agentToolName(i), f))
+		out = append(out, buildToolContract(agentToolName(f.Name), f))
 	}
 	return out
 }

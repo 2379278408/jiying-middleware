@@ -27,6 +27,7 @@
     "chat.filter.empty": { zh: "该筛选下暂无会话", en: "No conversations match this filter" },
     "nav.connect": { zh: "接入系统", en: "Connect" },
     "nav.pool": { zh: "连接池", en: "Connection pool" },
+    "nav.dingtalk": { zh: "钉钉连接器", en: "DingTalk connector" },
     "nav.roles": { zh: "权限管理", en: "Access control" },
     "nav.ai": { zh: "AI 接入", en: "AI access" },
     "nav.scripts": { zh: "插件", en: "Plugins" },
@@ -1062,6 +1063,7 @@
     { id: "chat", name: "nav.chat", ik: "message", group: "nav.group.access" },
     { id: "connect", name: "nav.connect", ik: "link", group: "nav.group.access" },
     { id: "pool", name: "nav.pool", ik: "layers", group: "nav.group.access" },
+    { id: "dingtalk", name: "nav.dingtalk", ik: "chat-dots", group: "nav.group.access", minRole: "ops" },
     { id: "roles", name: "nav.roles", ik: "users", group: "nav.group.access" },
     { id: "ai", name: "nav.ai", ik: "key", group: "nav.group.access" },
     { id: "scripts", name: "nav.scripts", ik: "puzzle", group: "nav.group.run" },
@@ -1602,7 +1604,7 @@
   }
 
   var PAGE_CODE = {
-    home: "OVERVIEW / 01", connect: "ACCESS / 02", chat: "MESSAGES / 03", pool: "POOL / 04",
+    home: "OVERVIEW / 01", connect: "ACCESS / 02", chat: "MESSAGES / 03", pool: "POOL / 04", dingtalk: "DINGTALK / 04B",
     roles: "ROLES / 05", scripts: "PLUGINS / 06", market: "MARKET / 07", features: "FEATURES / 08",
     agent: "AGENT / 09", cron: "SCHEDULE / 10", executions: "RUNS / 11", tasks: "TASKS / 12",
     audit: "AUDIT / 13", observe: "METRICS / 14", logs: "LOGS / 15"
@@ -4094,6 +4096,7 @@
       + '<div class="panel"><div class="panel-head"><h3>应用通道</h3></div><div class="panel-body" id="poolApps">' + loadingState() + '</div></div>'
        + '<div class="panel"><div class="panel-head"><h3>个人账号</h3></div><div class="panel-body" id="poolAccountProfile"></div><div class="panel-head pool-account-list-head"><h3>已授权账号</h3></div><div class="panel-body" id="poolAccountList"></div></div>'
       + "</div>"
+      + (roleAllowed("ops") ? '<div class="panel mt-16"><div class="panel-head"><h3>应用矩阵</h3><div class="spacer"></div><button class="btn btn-ghost btn-sm" id="poolMatrixRefresh">刷新</button></div><div class="panel-body" id="poolMatrix">' + loadingState() + '</div></div>' : "")
       + '<div class="panel mt-16"><div class="panel-head"><h3>接入指引</h3></div><div class="panel-body"><div class="rl-cols">'
       + '<div><b>1. 准备应用</b><p class="muted" style="margin:6px 0 0;font-size:13px">在 MagicChat 创建应用，取得应用 ID 与应用密钥。</p></div>'
       + '<div><b>2. 接入通道</b><p class="muted" style="margin:6px 0 0;font-size:13px">填写 WebSocket 地址、应用 ID 与密钥，保存后即建立通道。</p></div>'
@@ -4101,6 +4104,8 @@
       + "</div></div></div>";
     var n = $("#newApp");
     if (n) n.addEventListener("click", openAppModal);
+    var mr = $("#poolMatrixRefresh");
+    if (mr) mr.addEventListener("click", loadPoolMatrix);
     loadPool();
   }
   function loadPool() {
@@ -4112,6 +4117,7 @@
       ensureAppProfiles(apps);
       renderPoolAccount(r.data.account || {});
       renderPoolAccounts(r.data.accounts || []);
+      if ($("#poolMatrix")) loadPoolMatrix();
     }).catch(function () { errorState($("#poolApps"), "link", "连接池状态加载失败", "网络异常，请检查服务状态。", loadPool); });
   }
   // 应用资料由服务端异步缓存；刚连接时按需补拉一次，成功后重绘。
@@ -4142,10 +4148,12 @@
       var avatar = a.avatar_url || extra.avatar_url || "";
       var desc = a.description || extra.description || a.ws_url || "";
       var short = shortID(id);
+      var offline = !a.online && (a.last_error || a.retry_at);
       return '<div class="list-item"><span class="dot ' + (a.online ? "on" : "off") + '"></span>' + avatarHTML(avatar, name || short, "pool-avatar")
         + '<div class="grow"><div class="name" title="' + esc(id) + '">' + esc(name || short || "(未命名)") + (a.is_default ? ' <span class="badge badge-ok">默认</span>' : "") + (a.conversation_count ? ' <span class="badge">' + Number(a.conversation_count) + " 会话</span>" : "") + "</div>"
-        + '<div class="desc mono" title="' + esc(a.ws_url || "") + '">' + esc(desc || "-") + "</div></div>"
-        + '<div class="actions"><button class="btn btn-ghost btn-sm" onclick="Relay.editApp(' + jsArg(id) + ')">编辑</button>' + (a.is_default ? "" : '<button class="btn btn-ghost btn-sm" onclick="Relay.defaultApp(' + jsArg(id) + ')">设为默认</button>') + '<button class="btn btn-outline-danger btn-sm" onclick="Relay.delApp(' + jsArg(id) + ')">移除</button></div></div>';
+        + '<div class="desc mono" title="' + esc(a.ws_url || "") + '">' + esc(desc || "-") + "</div>"
+        + (offline ? '<div class="desc" style="color:var(--danger,#d9534f)">' + esc(a.last_error || "通道离线") + (a.retry_at ? " · 下次重连 " + esc(fmtTime(a.retry_at)) : "") + "</div>" : "")
+        + '</div><div class="actions"><button class="btn btn-ghost btn-sm" onclick="Relay.showAppMatrix(' + jsArg(id) + ')">矩阵</button><button class="btn btn-ghost btn-sm" onclick="Relay.editApp(' + jsArg(id) + ')">编辑</button>' + (a.is_default ? "" : '<button class="btn btn-ghost btn-sm" onclick="Relay.defaultApp(' + jsArg(id) + ')">设为默认</button>') + '<button class="btn btn-outline-danger btn-sm" onclick="Relay.delApp(' + jsArg(id) + ')">移除</button></div></div>';
     }).join("");
   }
   function bindPoolEmptyAdd() {
@@ -4225,6 +4233,151 @@
     api("/jiying/api/connections/app/default", { method: "POST", form: { app_id: appID } }).then(function (r) {
       if (r.code === 200) { toast("默认应用已切换", "ok"); loadPool(); }
       else toast(r.msg || "切换失败", "err");
+    });
+  }
+
+  function loadPoolMatrix() {
+    var box = $("#poolMatrix");
+    if (!box) return;
+    api("/jiying/api/connections/app/matrix", { silent: true }).then(function (r) {
+      if (r.code !== 200) { box.innerHTML = '<div class="muted">应用矩阵加载失败：' + esc(r.msg || r.message || "权限不足") + "</div>"; return; }
+      state.appMatrix = r.data.apps || [];
+      renderPoolMatrix(state.appMatrix);
+    }).catch(function () { box.innerHTML = '<div class="muted">应用矩阵加载失败，请检查网络。</div>'; });
+  }
+  function renderPoolMatrix(rows) {
+    var box = $("#poolMatrix");
+    if (!box) return;
+    if (!rows || !rows.length) { box.innerHTML = emptyState("grid", "暂无应用矩阵", "接入应用后可查看功能、角色、会话与定时的隔离情况。"); return; }
+    box.innerHTML = '<div class="table-wrap"><table class="table align-middle"><thead><tr><th>应用</th><th class="nowrap">状态</th><th class="nowrap">模型</th><th class="nowrap">功能</th><th class="nowrap">会话</th><th class="nowrap">定时</th><th class="nowrap">角色</th></tr></thead><tbody>'
+      + rows.map(function (a) {
+        var roles = a.roles ? Object.keys(a.roles).length : 0;
+        return '<tr><td><button class="btn btn-ghost btn-sm" onclick="Relay.showAppMatrix(' + jsArg(a.app_id) + ')">' + esc(a.name || shortID(a.app_id)) + '</button>' + (a.is_default ? ' <span class="badge badge-ok">默认</span>' : "") + '</td>'
+          + '<td>' + (a.online ? '<span class="badge badge-ok">在线</span>' : '<span class="badge badge-err">离线</span>') + '</td>'
+          + '<td class="mono clip" title="' + esc(a.model || "") + '">' + esc(a.model || "-") + '</td>'
+          + '<td>' + Number((a.features || []).length) + '</td><td>' + Number(a.conversation_count || 0) + '</td><td>' + Number(a.schedules || 0) + '</td><td>' + (a.roles ? Number(roles) + " 条覆盖" : "继承全局") + '</td></tr>';
+      }).join("") + "</tbody></table></div>";
+  }
+  function showAppMatrix(appID) {
+    var rows = state.appMatrix || [];
+    var a = rows.filter(function (x) { return String(x.app_id || "") === String(appID); })[0];
+    if (!a) { toast("应用矩阵尚未加载", "err"); return; }
+    var features = (a.features || []).map(function (n) { return '<span class="badge">' + esc(n) + "</span>"; }).join(" ") || '<span class="muted">无可见功能</span>';
+    var roles = "";
+    if (a.roles) {
+      roles = Object.keys(a.roles).sort().map(function (u) { return '<div class="kv"><span class="k">' + esc(u) + '</span><span class="v"><span class="badge">' + esc(a.roles[u]) + "</span></span></div>"; }).join("") || '<span class="muted">无应用级角色覆盖</span>';
+    } else {
+      roles = '<span class="muted">仅主控可见</span>';
+    }
+    showModal("应用矩阵 · " + (a.name || shortID(a.app_id)),
+      '<div class="kv"><span class="k">应用 ID</span><span class="v mono">' + esc(a.app_id) + "</span></div>"
+      + '<div class="kv"><span class="k">通道</span><span class="v">' + (a.online ? "在线" : "离线" + (a.last_error ? " · " + esc(a.last_error) : "")) + "</span></div>"
+      + '<div class="kv"><span class="k">模型</span><span class="v mono">' + esc(a.model || "-") + "</span></div>"
+      + '<div class="kv"><span class="k">会话 / 定时</span><span class="v">' + Number(a.conversation_count || 0) + " / " + Number(a.schedules || 0) + "</span></div>"
+      + '<div class="field" style="margin-top:12px"><label>可见功能</label><div>' + features + "</div></div>"
+      + '<div class="field"><label>应用级角色</label><div>' + roles + "</div></div>",
+      '<button class="btn btn-ghost" onclick="Relay.closeModal()">关闭</button>');
+  }
+
+  /* ---------- 钉钉连接器 ---------- */
+  function renderDingTalk() {
+    var cont = $("#view-dingtalk");
+    var master = roleAllowed("master");
+    var actions = master ? '<button class="btn btn-ghost" id="dtProbe">检查登录</button><button class="btn btn-ghost" id="dtConfig">配置</button><button class="btn btn-primary" id="dtToggle">启动</button>' : "";
+    cont.innerHTML = '<div class="page-head"><div style="display:flex;align-items:center;gap:12px"><img src="/assets/dingtalk.svg" alt="钉钉" width="40" height="40" style="border-radius:10px"><div><h2>钉钉连接器</h2><p>把钉钉私聊、@我与群提醒接入 Relay，并让 Agent 通过 dws 操作钉钉</p></div></div><div class="spacer"></div>' + actions + '</div>'
+      + '<div class="grid grid-2"><div class="panel"><div class="panel-head"><h3>连接状态</h3></div><div class="panel-body" id="dtStatus">' + loadingState() + '</div></div>'
+      + '<div class="panel"><div class="panel-head"><h3>运行说明</h3></div><div class="panel-body"><div class="rl-cols">'
+      + '<div><b>1. 安装 dws</b><p class="muted" style="margin:6px 0 0;font-size:13px">在宿主机安装 dingtalk-workspace-cli，并执行 dws auth login 授权接收通知的账号。</p></div>'
+      + '<div><b>2. 订阅事件</b><p class="muted" style="margin:6px 0 0;font-size:13px">连接器会常驻执行 event consume，解析私聊、@我 与 @所有人 事件。</p></div>'
+      + '<div><b>3. 受控推送</b><p class="muted" style="margin:6px 0 0;font-size:13px">可把事件自动推送到指定应用会话；Agent 仅在连接器启用时获得钉钉工具。</p></div>'
+      + "</div></div></div></div>"
+      + '<div class="panel mt-16"><div class="panel-head"><h3>最近事件</h3><div class="spacer"></div><button class="btn btn-ghost btn-sm" id="dtRefresh">刷新</button></div><div class="panel-body" id="dtEvents">' + loadingState() + '</div></div>';
+    var cfgBtn = $("#dtConfig");
+    var toggleBtn = $("#dtToggle");
+    var probeBtn = $("#dtProbe");
+    if (cfgBtn) cfgBtn.addEventListener("click", openDingTalkConfig);
+    if (toggleBtn) toggleBtn.addEventListener("click", toggleDingTalk);
+    if (probeBtn) probeBtn.addEventListener("click", probeDingTalk);
+    $("#dtRefresh").addEventListener("click", loadDingTalk);
+    loadDingTalk();
+  }
+  function loadDingTalk() {
+    api("/jiying/api/dingtalk/status").then(function (r) {
+      if (r.code !== 200) { errorState($("#dtStatus"), "chat-dots", "状态加载失败", r.msg || "请稍后重试。", loadDingTalk); return; }
+      renderDingTalkStatus(r.data || {});
+    }).catch(function () { errorState($("#dtStatus"), "chat-dots", "状态加载失败", "网络异常，请检查服务状态。", loadDingTalk); });
+    api("/jiying/api/dingtalk/events?limit=50", { silent: true }).then(function (r) {
+      if (r.code === 200) renderDingTalkEvents((r.data && r.data.events) || []);
+    }).catch(function () { });
+  }
+  function renderDingTalkStatus(st) {
+    state.dingtalk = st;
+    var cfg = st.config || {};
+    var badge = st.running ? '<span class="badge badge-ok">运行中</span>' : '<span class="badge badge-err">已停止</span>';
+    var toggle = $("#dtToggle");
+    if (toggle) { toggle.textContent = cfg.enabled ? "停止" : "启动"; toggle.className = "btn " + (cfg.enabled ? "btn-outline-danger" : "btn-primary"); }
+    var rows = '<div class="kv"><span class="k">状态</span><span class="v">' + badge + (st.pid ? ' <span class="muted mono">PID ' + Number(st.pid) + "</span>" : "") + "</span></div>"
+      + '<div class="kv"><span class="k">dws</span><span class="v">' + (st.bin_found ? '<span class="badge badge-ok">已找到</span>' : '<span class="badge badge-err">未找到</span>') + ' <span class="mono">' + esc(cfg.bin || "dws") + "</span></span></div>"
+      + '<div class="kv"><span class="k">自动推送</span><span class="v">' + (cfg.auto_push ? "已开启" : "未开启") + (cfg.push_conversation_id ? ' · <span class="mono">' + esc(cfg.push_conversation_id) + "</span>" : "") + "</span></div>"
+      + (st.started_at ? '<div class="kv"><span class="k">启动时间</span><span class="v mono">' + esc(fmtTime(st.started_at)) + "</span></div>" : "")
+      + (st.retry_at ? '<div class="kv"><span class="k">下次重连</span><span class="v mono">' + esc(fmtTime(st.retry_at)) + "</span></div>" : "")
+      + (st.last_error ? '<div class="kv"><span class="k">最近错误</span><span class="v" style="color:var(--danger,#d9534f)">' + esc(st.last_error) + "</span></div>" : "")
+      + (st.stderr ? '<div class="kv"><span class="k">dws 输出</span><span class="v mono clip" title="' + esc(st.stderr) + '">' + esc(st.stderr) + "</span></div>" : "");
+    var box = $("#dtStatus");
+    if (box) box.innerHTML = rows;
+  }
+  function renderDingTalkEvents(events) {
+    var box = $("#dtEvents");
+    if (!box) return;
+    if (!events || !events.length) { box.innerHTML = emptyState("inbox", "暂无钉钉事件", "连接器运行后，私聊、@我 与 @所有人 事件会显示在这里。"); return; }
+    var reasonMap = { "dm": "私聊", "mention": "@我", "at-all": "@所有人" };
+    box.innerHTML = events.slice().reverse().map(function (e) {
+      var badge = e.reason === "at-all" ? "badge-err" : (e.reason === "mention" ? "badge-warn" : "badge-ok");
+      return '<div class="list-item"><div class="grow"><div class="name">' + esc(e.sender || "未知发送人") + ' <span class="badge ' + badge + '">' + esc(reasonMap[e.reason] || e.reason || "事件") + '</span> <span class="muted mono">' + esc(e.conversation_id || "") + "</span></div>"
+        + '<div class="desc">' + esc((e.content || "").slice(0, 300)) + "</div>"
+        + '<div class="desc muted mono">' + esc(fmtTime(e.received_at)) + (e.time ? " · " + esc(e.time) : "") + "</div></div></div>";
+    }).join("");
+  }
+  function openDingTalkConfig() {
+    var st = state.dingtalk || {};
+    var cfg = st.config || {};
+    var apps = (state.apps || []).map(function (a) { return '<option value="' + esc(a.app_id) + '">' + esc(a.name || a.app_id) + "</option>"; }).join("");
+    showModal("钉钉连接器配置",
+      '<div class="field"><label>dws 可执行文件</label><input class="input mono" id="dt_bin" value="' + esc(cfg.bin || "dws") + '"><div class="hint">可填绝对路径，例如 /usr/local/bin/dws。</div></div>'
+      + '<div class="field"><label><input type="checkbox" id="dt_auto"' + (cfg.auto_push ? " checked" : "") + '"> 自动推送事件</label><div class="hint">开启后把钉钉事件推送到下方应用会话。</div></div>'
+      + '<div class="field"><label>推送应用 ID</label><input class="input mono" id="dt_app" list="dt_apps" value="' + esc(cfg.push_app_id || "") + '"><datalist id="dt_apps">' + apps + "</datalist></div>"
+      + '<div class="field"><label>推送会话 ID</label><input class="input mono" id="dt_conv" value="' + esc(cfg.push_conversation_id || "") + '"><div class="hint">即应中的目标会话 ID；留空则只在面板展示事件。</div></div>',
+      '<button class="btn btn-ghost" onclick="Relay.closeModal()">取消</button><button class="btn btn-primary" id="dt_save">保存</button>');
+    $("#dt_save").addEventListener("click", function () {
+      var form = {
+        enabled: cfg.enabled ? "true" : "false",
+        bin: $("#dt_bin").value.trim(),
+        auto_push: $("#dt_auto").checked ? "true" : "false",
+        push_app_id: $("#dt_app").value.trim(),
+        push_conversation_id: $("#dt_conv").value.trim()
+      };
+      api("/jiying/api/dingtalk/config", { method: "POST", form: form }).then(function (r) {
+        if (r.code === 200) { closeModal(); toast("钉钉配置已保存", "ok"); loadDingTalk(); }
+        else toast(r.msg || r.message || "保存失败", "err");
+      });
+    });
+  }
+  function toggleDingTalk() {
+    var cfg = (state.dingtalk || {}).config || {};
+    var url = cfg.enabled ? "/jiying/api/dingtalk/stop" : "/jiying/api/dingtalk/start";
+    api(url, { method: "POST" }).then(function (r) {
+      if (r.code === 200) { toast(cfg.enabled ? "连接器已停止" : "连接器已启动", "ok"); loadDingTalk(); }
+      else toast(r.msg || r.message || "操作失败", "err");
+    });
+  }
+  function probeDingTalk() {
+    api("/jiying/api/dingtalk/probe", { method: "POST" }).then(function (r) {
+      if (r.code === 200) {
+        var text = (r.data && r.data.auth) || "{}";
+        showModal("dws 登录状态", '<pre class="mono" style="white-space:pre-wrap;max-height:50vh;overflow:auto">' + esc(text) + "</pre>", '<button class="btn btn-ghost" onclick="Relay.closeModal()">关闭</button>');
+      } else {
+        toast(r.msg || r.message || "dws 检查失败", "err");
+      }
     });
   }
 
@@ -4371,7 +4524,7 @@
       + '<input class="input" id="auditFilter" placeholder="筛选操作者 / 动作 / 目标 / 详情" style="width:240px">'
       + '<button class="btn btn-sm" id="auditExport">导出</button>'
       + '<button class="btn btn-ghost btn-sm" onclick="Relay.loadAudit()">刷新</button></div>'
-      + '<div class="panel"><div class="table-wrap"><table class="table align-middle"><thead><tr><th class="nowrap" style="width:150px">时间</th><th class="nowrap" style="width:110px">操作者</th><th class="nowrap" style="width:130px">动作</th><th style="width:150px">目标</th><th>详情</th><th class="nowrap" style="width:130px">结果</th></tr></thead><tbody id="auditList"><tr><td colspan="6">' + loadingState() + '</td></tr></tbody></table></div></div>'
+      + '<div class="panel"><div class="table-wrap"><table class="table align-middle"><thead><tr><th class="nowrap" style="width:150px">时间</th><th class="nowrap" style="width:110px">操作者</th><th class="nowrap" style="width:120px">应用</th><th class="nowrap" style="width:130px">动作</th><th style="width:150px">目标</th><th>详情</th><th class="nowrap" style="width:130px">结果</th></tr></thead><tbody id="auditList"><tr><td colspan="7">' + loadingState() + '</td></tr></tbody></table></div></div>'
       + '<div class="muted" id="auditMeta" style="margin-top:8px;font-size:12px"></div>';
     $("#auditFilter").addEventListener("input", paintAudit);
     $("#auditExport").addEventListener("click", exportAudit);
@@ -4384,7 +4537,7 @@
       if (r.code !== 200) {
         state.auditRows = [];
         state.auditErr = r.msg || r.message || "请稍后重试。";
-        tableError(box, 6, "shield", r.code === 403 ? "权限不足" : "审计日志加载失败", state.auditErr, function () { state.auditErr = ""; loadAudit(); });
+        tableError(box, 7, "shield", r.code === 403 ? "权限不足" : "审计日志加载失败", state.auditErr, function () { state.auditErr = ""; loadAudit(); });
         setAuditMeta(0, 0);
         return;
       }
@@ -4397,7 +4550,7 @@
       if (!box) return;
       state.auditRows = [];
       state.auditErr = "网络异常，请稍后重试。";
-      tableError(box, 6, "shield", "审计日志加载失败", state.auditErr, function () { state.auditErr = ""; loadAudit(); });
+      tableError(box, 7, "shield", "审计日志加载失败", state.auditErr, function () { state.auditErr = ""; loadAudit(); });
       setAuditMeta(0, 0);
     });
   }
@@ -4406,7 +4559,7 @@
     var kw = (($("#auditFilter") || {}).value || "").trim().toLowerCase();
     if (!kw) return rows;
     return rows.filter(function (a) {
-      return [a.actor, a.action, a.target, a.detail, a.result].some(function (v) { return String(v || "").toLowerCase().indexOf(kw) >= 0; });
+      return [a.app_id, a.actor, a.action, a.target, a.detail, a.result].some(function (v) { return String(v || "").toLowerCase().indexOf(kw) >= 0; });
     });
   }
   function paintAudit() {
@@ -4414,22 +4567,22 @@
     if (!box) return;
     if (state.auditErr) return;
     var rows = state.auditRows || [];
-    if (!rows.length) { box.innerHTML = '<tr><td colspan="6">' + emptyState("shield", "暂无审计记录", "敏感操作（接入、插件、角色等）会在这里留痕。") + "</td></tr>"; setAuditMeta(0, 0); return; }
+    if (!rows.length) { box.innerHTML = '<tr><td colspan="7">' + emptyState("shield", "暂无审计记录", "敏感操作（接入、插件、角色等）会在这里留痕。") + "</td></tr>"; setAuditMeta(0, 0); return; }
     var kw = (($("#auditFilter") || {}).value || "").trim().toLowerCase();
     var shown = filteredAudit(rows);
     box.innerHTML = shown.map(function (a) {
       var ok = auditOK(a.result);
-      return '<tr><td class="mono nowrap">' + esc(fmtTime(a.time)) + '</td><td class="nowrap">' + esc(a.actor) + '</td><td class="mono nowrap">' + esc(a.action) + '</td><td class="mono clip" title="' + esc(a.target) + '">' + esc(a.target) + '</td><td>' + esc(a.detail) + '</td><td class="nowrap">' + (ok ? '<span class="badge badge-ok">成功</span>' : '<span class="badge badge-err">失败</span>') + ' <button class="btn btn-ghost btn-sm" title="在运行日志中查找" onclick="Relay.searchLogs(' + jsArg(a.action) + ')"><i class="bi bi-search"></i></button></td></tr>';
-    }).join("") || '<tr><td colspan="6"><div class="empty">没有匹配「' + esc(kw) + '」的记录</div></td></tr>';
+      return '<tr><td class="mono nowrap">' + esc(fmtTime(a.time)) + '</td><td class="nowrap">' + esc(a.actor) + '</td><td class="mono nowrap">' + esc(a.app_id || "-") + '</td><td class="mono nowrap">' + esc(a.action) + '</td><td class="mono clip" title="' + esc(a.target) + '">' + esc(a.target) + '</td><td>' + esc(a.detail) + '</td><td class="nowrap">' + (ok ? '<span class="badge badge-ok">成功</span>' : '<span class="badge badge-err">失败</span>') + ' <button class="btn btn-ghost btn-sm" title="在运行日志中查找" onclick="Relay.searchLogs(' + jsArg(a.action) + ')"><i class="bi bi-search"></i></button></td></tr>';
+    }).join("") || '<tr><td colspan="7"><div class="empty">没有匹配「' + esc(kw) + '」的记录</div></td></tr>';
     setAuditMeta(shown.length, rows.length);
   }
   // 导出当前筛选结果为 CSV，带 BOM 以兼容 Excel 的中文显示。
   function exportAudit() {
     var rows = filteredAudit(state.auditRows || []);
     if (!rows.length) { toast("暂无审计记录可导出", "err"); return; }
-    var head = ["时间", "操作者", "动作", "目标", "详情", "结果"];
+    var head = ["时间", "操作者", "应用", "动作", "目标", "详情", "结果"];
     var lines = [head].concat(rows.map(function (a) {
-      return [fmtTime(a.time), a.actor, a.action, a.target, a.detail, a.result];
+      return [fmtTime(a.time), a.actor, a.app_id || "", a.action, a.target, a.detail, a.result];
     })).map(function (cells) {
       return cells.map(function (v) {
         var s = String(v == null ? "" : v);
@@ -4848,6 +5001,7 @@
     home: renderHome,
     connect: renderConnect,
     pool: renderPool,
+    dingtalk: renderDingTalk,
     chat: renderChat,
     scripts: renderScripts,
     features: renderFeatures,
@@ -5107,6 +5261,8 @@
     delTask: delTask,
     renderConnStatus: renderConnStatus,
     selectAccount: selectAccount,
+    showAppMatrix: showAppMatrix,
+    renderDingTalk: renderDingTalk,
     removeMaster: removeMaster,
     deleteRole: deleteRole,
     loadPool: loadPool,

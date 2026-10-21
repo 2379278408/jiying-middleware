@@ -213,7 +213,26 @@ docker run -d --name jymw --restart unless-stopped \
 
 镜像内已安装 Python、`prlimit`、`unshare` 与 CA 证书。脚本沙箱依赖内核允许非特权用户命名空间；受限内核上会直接失败关闭。
 
-### 6. 生产部署
+### 6. 可选：钉钉连接器
+
+Relay 可以把钉钉私聊、@我 与 @所有人 提醒接入面板，并让 Agent 通过本机 `dws` 查询、搜索、发送和引用回复钉钉消息。认证始终由 `dws` 持有，面板不保存钉钉密钥。
+
+```bash
+# 安装并登录钉钉工作区 CLI（官方仓库 DingTalk-Real-AI/dingtalk-workspace-cli）
+npm install -g dingtalk-workspace-cli --registry=https://registry.npmmirror.com
+dws --version
+dws auth login
+
+# 启动 Relay 后在控制台「钉钉连接器」页填写 dws 路径并启动
+```
+
+无图形界面时使用 `dws auth login --device`。组织未开启 CLI 权限时，需要管理员在钉钉开发者平台授权同名账号。
+
+连接器默认执行 `dws event consume user_im_message_receive_o2o_all user_im_message_receive_at user_im_message_receive_group_all --flatten -f ndjson -y`，事件只保留摘要，默认仅展示在面板。开启自动推送后，事件会发送到指定的即应应用会话；Agent 的钉钉工具只对相应应用内 ops 及以上角色开放。
+
+官方 `dws` 二进制依赖 glibc。当前 Alpine 运行镜像内不能直接运行官方二进制，生产环境可选两种部署形态：Relay 直接运行在宿主机并安装 `dws`；或改用 Debian slim 运行镜像并在镜像内安装 `dws`。只把 `dws` 挂载进 Alpine 容器无法解决动态链接库缺失。容器部署时还需要持久化 `dws` 的登录态目录，否则重建容器后要重新授权。
+
+### 7. 生产部署
 
 单实例部署、反向代理、备份恢复、告警与多实例边界见 `docs/production.md`。
 

@@ -62,7 +62,7 @@ func TestBuildAgentToolsFiltersByPermission(t *testing.T) {
 		if !ok {
 			t.Fatalf("indexed feature %q not found", name)
 		}
-		if !featureAllowedFor("user-normal", f) {
+		if !featureAllowedFor("user-normal", f, "") {
 			t.Fatalf("feature %q leaked into normal user tool list", name)
 		}
 	}
@@ -85,13 +85,17 @@ func TestAgentHistoryCap(t *testing.T) {
 
 func TestRunAgentToolLoop(t *testing.T) {
 	setupAgentBucket(t, "agent-loop")
+	const feature = "循环测试工具"
+	if err := UpsertFeature(Feature{Name: feature, Kind: "builtin", Target: "help", Scope: "public", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
 	var calls int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := atomic.AddInt32(&calls, 1)
 		w.Header().Set("Content-Type", "application/json")
 		if n == 1 {
 			// 第一轮：模型请求调用第一个工具。
-			toolName := agentToolName(0)
+			toolName := agentToolName(feature)
 			_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"` + toolName + `","arguments":"{\"args\":\"\"}"}}]}}]}`))
 			return
 		}

@@ -200,7 +200,9 @@ func applyAppConns(list []AppConn) {
 		if ok && rt.cfg == next {
 			continue
 		}
-		rt.cancel()
+		if rt.cancel != nil {
+			rt.cancel()
+		}
 		delete(appConnPool.items, id)
 	}
 	// 启动新增或变更的连接。
@@ -246,7 +248,9 @@ func stopAppPool() {
 	appConnPool.mu.Lock()
 	defer appConnPool.mu.Unlock()
 	for id, rt := range appConnPool.items {
-		rt.cancel()
+		if rt.cancel != nil {
+			rt.cancel()
+		}
 		delete(appConnPool.items, id)
 	}
 	activeJiying = nil
@@ -298,12 +302,16 @@ func ConvAppOwner(conversationID string) (appID, name string, online, known bool
 	return appID, rt.profile.Name, rt.client.Connected(), true
 }
 
-// appIDForConversation 返回会话所属应用；未记录归属时回退默认应用。
+// appIDForConversation 返回会话所属应用；未记录归属时返回空字符串。
+// 调用方必须显式处理未知归属，禁止回退默认应用，避免跨应用越权。
 func appIDForConversation(conversationID string) string {
+	if conversationID == "" {
+		return strings.TrimSpace(CurrentAppConfig().AppID)
+	}
 	if appID, _, _, known := ConvAppOwner(conversationID); known && appID != "" {
 		return appID
 	}
-	return strings.TrimSpace(CurrentAppConfig().AppID)
+	return ""
 }
 
 // clientForConv 返回处理该会话的客户端：已知归属但通道缺失时失败关闭，避免误发到默认应用。
@@ -391,6 +399,10 @@ type AppPoolItem struct {
 	AvatarURL   string `json:"avatar_url,omitempty"`
 	// Conversations 是该应用当前记录的会话归属数量，便于控制台区分活跃应用。
 	Conversations int `json:"conversation_count"`
+	// LastError 是最近一次连接失败原因；在线时为空。
+	LastError string `json:"last_error,omitempty"`
+	// RetryAt 是下一次重连时间；在线或未计划时为空。
+	RetryAt string `json:"retry_at,omitempty"`
 }
 
 // AppPoolSnapshot 返回当前所有应用通道状态，密钥仅以掩码呈现。
@@ -404,7 +416,7 @@ func AppPoolSnapshot() []AppPoolItem {
 	}
 	out := make([]AppPoolItem, 0, len(appConnPool.items))
 	for id, rt := range appConnPool.items {
-		out = append(out, AppPoolItem{
+		item := AppPoolItem{
 			AppID:         id,
 			WSURL:         maskURL(rt.cfg.WSURL),
 			Online:        rt.client.Connected(),
@@ -413,7 +425,14 @@ func AppPoolSnapshot() []AppPoolItem {
 			Description:   rt.profile.Description,
 			AvatarURL:     rt.profile.Avatar,
 			Conversations: convCount[id],
-		})
+		}
+		if !item.Online {
+			item.LastError = truncateText(rt.client.LastError(), 200)
+			if at := rt.client.RetryAt(); !at.IsZero() {
+				item.RetryAt = at.Format(time.RFC3339)
+			}
+		}
+		out = append(out, item)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].IsDefault != out[j].IsDefault {
@@ -422,6 +441,18 @@ func AppPoolSnapshot() []AppPoolItem {
 		return out[i].AppID < out[j].AppID
 	})
 	return out
+}
+
+// appConnExists 报告连接池中是否存在指定应用。
+func appConnExists(appID string) bool {
+	appID = strings.TrimSpace(appID)
+	if appID == "" {
+		return false
+	}
+	appConnPool.mu.Lock()
+	defer appConnPool.mu.Unlock()
+	_, ok := appConnPool.items[appID]
+	return ok
 }
 
 // DefaultAppConn 返回默认应用连接配置；连接池为空时返回零值。
@@ -464,7 +495,6 @@ func RemoveAppConn(appID string) error {
 		return fmt.Errorf("缺少应用 ID")
 	}
 	poolMu.Lock()
-	defer poolMu.Unlock()
 	list := loadAppConns()
 	kept := list[:0]
 	found := false
@@ -476,10 +506,86 @@ func RemoveAppConn(appID string) error {
 		kept = append(kept, c)
 	}
 	if !found {
+		poolMu.Unlock()
 		return fmt.Errorf("应用不存在")
 	}
+	appConnPool.ensureConvAppsLocked()
+	removedConvs := make([]string, 0)
+	for convID, owner := range appConnPool.convApp {
+		if owner == appID {
+			removedConvs = append(removedConvs, convID)
+		}
+	}
 	applyAppConns(kept)
+	poolMu.Unlock()
+	cleanupRemovedApp(appID, removedConvs)
 	return nil
+}
+
+// cleanupRemovedApp 清理被删除应用的残留引用，避免配置、历史与任务继续指向失效应用。
+func cleanupRemovedApp(appID string, convIDs []string) {
+	if strings.TrimSpace(appID) == "" {
+		return
+	}
+	for _, convID := range convIDs {
+		deleteAgentHistory(convID)
+	}
+	cfg := LoadAgentConfig()
+	changed := false
+	if _, ok := cfg.AppSystems[appID]; ok {
+		delete(cfg.AppSystems, appID)
+		changed = true
+	}
+	if _, ok := cfg.AppOverrides[appID]; ok {
+		delete(cfg.AppOverrides, appID)
+		changed = true
+	}
+	if changed {
+		SaveAgentConfig(cfg)
+	}
+	rolesMu.Lock()
+	appRoles := loadAppRoles()
+	if _, ok := appRoles[appID]; ok {
+		delete(appRoles, appID)
+		saveAppRoles(appRoles)
+	}
+	rolesMu.Unlock()
+	features.mu.Lock()
+	for _, f := range features.items {
+		if f == nil || len(f.Apps) == 0 {
+			continue
+		}
+		kept := make([]string, 0, len(f.Apps))
+		for _, id := range f.Apps {
+			if !strings.EqualFold(id, appID) {
+				kept = append(kept, id)
+			}
+		}
+		if len(kept) == len(f.Apps) {
+			continue
+		}
+		f.Apps = kept
+		f.AppsLocked = true
+		if len(kept) == 0 {
+			f.Enabled = false
+		}
+	}
+	features.saveLocked()
+	features.mu.Unlock()
+	ccs.Lock()
+	for _, cmd := range ccs.Pts {
+		if cmd == nil || !strings.EqualFold(cmd.AppID, appID) || !cmd.Status {
+			continue
+		}
+		cmd.Status = false
+		cmd.LastError = "所属应用已删除，任务已暂停"
+		if ccs.cronSched != nil && cmd.CronEntityId > 0 {
+			ccs.cronSched.Remove(cmd.CronEntityId)
+			cmd.CronEntityId = 0
+		}
+		ccs.save(cmd)
+	}
+	ccs.Unlock()
 }
 
 // SetDefaultAppConn 将指定应用排到连接池首位并作为新会话默认出口。

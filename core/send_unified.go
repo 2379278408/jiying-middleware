@@ -25,6 +25,8 @@ type SendOptions struct {
 	Identity       string // auto | user | app
 	ReplyTo        string
 	DryRun         bool
+	// AppID 允许主控为尚未记录归属的会话显式指定应用通道。
+	AppID string
 }
 
 // SendResult 回传实际使用的身份与发送结果，dry-run 时不产生副作用。
@@ -88,8 +90,24 @@ func conversationCapabilities(conversationID string) ConversationCapabilities {
 	}
 }
 
-func resolveSendIdentity(conversationID, identity string) (string, error) {
+func resolveSendIdentity(conversationID, identity, explicitAppID string) (string, error) {
 	identity = strings.ToLower(strings.TrimSpace(identity))
+	explicitAppID = strings.TrimSpace(explicitAppID)
+	if explicitAppID != "" {
+		if !appConnExists(explicitAppID) {
+			return "", fmt.Errorf("指定的应用不存在")
+		}
+		if owner, _, _, known := ConvAppOwner(conversationID); known && owner != "" && !strings.EqualFold(owner, explicitAppID) {
+			return "", fmt.Errorf("会话归属应用与指定应用不一致")
+		}
+		if !appOnline(explicitAppID) {
+			return "", fmt.Errorf("指定的应用通道离线")
+		}
+		if identity == "user" {
+			return "", fmt.Errorf("指定应用时只能以应用身份发送")
+		}
+		return "app", nil
+	}
 	if identity == "" || identity == "auto" {
 		cap := conversationCapabilities(conversationID)
 		if cap.CanSendAsApp {
@@ -178,7 +196,7 @@ func SendMessage(ctx context.Context, opts SendOptions) (SendResult, error) {
 	if text == "" {
 		return SendResult{}, fmt.Errorf("内容为空")
 	}
-	identity, err := resolveSendIdentity(convID, opts.Identity)
+	identity, err := resolveSendIdentity(convID, opts.Identity, opts.AppID)
 	if err != nil {
 		return SendResult{}, err
 	}
@@ -206,9 +224,27 @@ func SendMessage(ctx context.Context, opts SendOptions) (SendResult, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	if err := SendTextToConv(ctx, convID, out.ReplyTo, text); err != nil {
-		return out, err
+	var errSend error
+	if appID := strings.TrimSpace(opts.AppID); appID != "" {
+		errSend = SendTextToConvVia(ctx, appID, convID, out.ReplyTo, text)
+	} else {
+		errSend = SendTextToConv(ctx, convID, out.ReplyTo, text)
+	}
+	if errSend != nil {
+		return out, errSend
 	}
 	out.Sent = true
 	return out, nil
+}
+
+// appOnline 报告指定应用通道是否在线。
+func appOnline(appID string) bool {
+	appID = strings.TrimSpace(appID)
+	if appID == "" {
+		return false
+	}
+	appConnPool.mu.Lock()
+	defer appConnPool.mu.Unlock()
+	rt, ok := appConnPool.items[appID]
+	return ok && rt != nil && rt.client.Connected()
 }

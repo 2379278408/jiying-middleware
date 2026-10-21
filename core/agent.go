@@ -3,6 +3,8 @@ package core
 import (
 	"bytes"
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -34,6 +36,17 @@ type AgentConfig struct {
 	MaxTools int `json:"max_tools"`
 	// AppSystems 按应用覆盖系统提示；未配置或为空时使用全局 System。
 	AppSystems map[string]string `json:"app_systems,omitempty"`
+	// Temperature 是采样温度；0 表示不显式传给上游。
+	Temperature float64 `json:"temperature,omitempty"`
+	// AppOverrides 按应用覆盖模型、轮次与温度，未配置的字段继承全局值。
+	AppOverrides map[string]AppAgentOverride `json:"app_overrides,omitempty"`
+}
+
+// AppAgentOverride 描述单个应用对 Agent 运行参数的覆盖。
+type AppAgentOverride struct {
+	Model       string  `json:"model,omitempty"`
+	MaxTurns    int     `json:"max_turns,omitempty"`
+	Temperature float64 `json:"temperature,omitempty"`
 }
 
 const agentConfigKey = "agent_config"
@@ -113,6 +126,18 @@ func LoadAgentConfig() AgentConfig {
 						}
 					}
 				}
+				cfg.Temperature = normalizeTemperature(stored.Temperature)
+				if len(stored.AppOverrides) > 0 {
+					cfg.AppOverrides = make(map[string]AppAgentOverride, len(stored.AppOverrides))
+					for id, ov := range stored.AppOverrides {
+						if id = strings.TrimSpace(id); id != "" {
+							ov.Model = strings.TrimSpace(ov.Model)
+							ov.MaxTurns = clampInt(ov.MaxTurns, 0, agentMaxTurns)
+							ov.Temperature = normalizeTemperature(ov.Temperature)
+							cfg.AppOverrides[id] = ov
+						}
+					}
+				}
 				// 已保存的配置是权威来源，允许管理员清空后备模型列表。
 				cfg.Fallback = stored.Fallback
 				if stored.MaxTurns > 0 {
@@ -156,6 +181,65 @@ func SaveAgentConfig(cfg AgentConfig) {
 
 func (c AgentConfig) ready() bool {
 	return c.Enabled && c.BaseURL != "" && c.APIKey != "" && c.Model != ""
+}
+
+func normalizeTemperature(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 2 {
+		return 2
+	}
+	return v
+}
+
+// ForApp 返回应用级运行参数：模型、轮次与温度按应用覆盖，其余字段继承全局。
+func (c AgentConfig) ForApp(appID string) AgentConfig {
+	appID = strings.TrimSpace(appID)
+	if appID == "" || len(c.AppOverrides) == 0 {
+		return c
+	}
+	ov, ok := c.AppOverrides[appID]
+	if !ok {
+		return c
+	}
+	if ov.Model != "" {
+		c.Model = ov.Model
+	}
+	if ov.MaxTurns > 0 {
+		c.MaxTurns = clampInt(ov.MaxTurns, agentMinTurns, agentMaxTurns)
+	}
+	if ov.Temperature > 0 {
+		c.Temperature = ov.Temperature
+	}
+	return c
+}
+
+// SetAppOverride 写入或清除应用级运行参数；空值表示恢复继承全局配置。
+func SetAppOverride(appID string, ov AppAgentOverride) error {
+	appID = strings.TrimSpace(appID)
+	if appID == "" {
+		return fmt.Errorf("缺少应用 ID")
+	}
+	ov.Model = strings.TrimSpace(ov.Model)
+	if len(ov.Model) > 200 {
+		return fmt.Errorf("模型名过长")
+	}
+	ov.MaxTurns = clampInt(ov.MaxTurns, 0, agentMaxTurns)
+	ov.Temperature = normalizeTemperature(ov.Temperature)
+	cfg := LoadAgentConfig()
+	if ov.Model == "" && ov.MaxTurns == 0 && ov.Temperature == 0 {
+		if cfg.AppOverrides != nil {
+			delete(cfg.AppOverrides, appID)
+		}
+	} else {
+		if cfg.AppOverrides == nil {
+			cfg.AppOverrides = map[string]AppAgentOverride{}
+		}
+		cfg.AppOverrides[appID] = ov
+	}
+	SaveAgentConfig(cfg)
+	return nil
 }
 
 // SystemForApp 返回指定应用的系统提示；未配置应用级提示时回退全局提示。
@@ -240,7 +324,11 @@ type agentTool struct {
 	Feature string
 }
 
-func agentToolName(i int) string { return fmt.Sprintf("tool_%d", i) }
+// agentToolName 用功能名哈希生成稳定工具名，避免增删插件导致编号漂移。
+func agentToolName(feature string) string {
+	sum := sha1.Sum([]byte(strings.TrimSpace(feature)))
+	return "tool_" + hex.EncodeToString(sum[:5])
+}
 
 // buildAgentTools 为已启用且当前用户有权执行的功能生成工具定义与反查表。
 func buildAgentTools(userID string) ([]map[string]any, map[string]string, []agentTool) {
@@ -252,7 +340,9 @@ func buildAgentToolsForApp(userID, appID string) ([]map[string]any, map[string]s
 	defs := make([]map[string]any, 0)
 	index := map[string]string{}
 	names := make([]agentTool, 0)
-	for _, c := range BuildToolContractsForApp(userID, appID) {
+	contracts := BuildToolContractsForApp(userID, appID)
+	contracts = append(contracts, dingTalkToolContracts(userID, appID)...)
+	for _, c := range contracts {
 		index[c.Tool] = c.Feature
 		names = append(names, agentTool{Name: c.Tool, Feature: c.Feature})
 		defs = append(defs, map[string]any{
@@ -456,6 +546,9 @@ func evictAgentConvsLocked() {
 	}
 }
 
+// deleteAgentHistory 清除指定会话的内存与落盘历史，供应用删除级联清理。
+func deleteAgentHistory(convID string) { resetAgentHistory(convID) }
+
 func resetAgentHistory(convID string) {
 	if convID == "" {
 		return
@@ -632,6 +725,7 @@ func RunAgent(ctx context.Context, convID, userID, prompt string, seq int64) (st
 		return "", fmt.Errorf("输入过长，最多 %d 字符", agentMaxPromptRunes)
 	}
 	appID := appIDForConversation(convID)
+	cfg = cfg.ForApp(appID)
 	defs, index, _ := buildAgentToolsForApp(userID, appID)
 	runtime := newAgentRuntime(cfg)
 	msgs := []chatMessage{}
@@ -838,6 +932,16 @@ func runAgentTool(ctx context.Context, feature, rawArgs, userID, convID string) 
 	if feature == "" {
 		return "FAILED: 未知工具"
 	}
+	appID := appIDForConversation(convID)
+	if strings.HasPrefix(feature, "dingtalk:") {
+		out := runDingTalkTool(strings.TrimPrefix(feature, "dingtalk:"), rawArgs)
+		result := "成功"
+		if strings.HasPrefix(out, "FAILED:") {
+			result = "失败: " + strings.TrimPrefix(out, "FAILED: ")
+		}
+		RecordAuditApp(appID, userID, "dingtalk.tool", strings.TrimPrefix(feature, "dingtalk:"), rawArgs, result)
+		return out
+	}
 	params := []string{}
 	if fn := functionByTitle(feature); fn != nil {
 		params = fn.Params
@@ -848,17 +952,18 @@ func runAgentTool(ctx context.Context, feature, rawArgs, userID, convID string) 
 		Args:           args,
 		UserID:         userID,
 		ConversationID: convID,
+		AppID:          appID,
 		Silent:         true,
 	})
 	if err != nil {
-		RecordAudit(userID, "agent.tool", feature, args, "拒绝: "+err.Error())
+		RecordAuditApp(appID, userID, "agent.tool", feature, args, "拒绝: "+err.Error())
 		return "FAILED: 执行被拒绝: " + err.Error()
 	}
 	// 等待窗口覆盖任务执行上限，并随 Agent 上下文取消，避免任务超时后
 	// 把仍在 running 的快照误判为成功结果。
 	done := WaitForTaskDoneContext(ctx, t.ID, taskRunTimeout+10*time.Second)
 	if done == nil {
-		RecordAudit(userID, "agent.tool", feature, args, "执行超时")
+		RecordAuditApp(appID, userID, "agent.tool", feature, args, "执行超时")
 		return "FAILED: 执行超时\n工具执行超时，请如实告知用户，不要编造结果。"
 	}
 	if done.Status != taskDone {
@@ -866,15 +971,18 @@ func runAgentTool(ctx context.Context, feature, rawArgs, userID, convID string) 
 		if reason == "" {
 			reason = done.Status
 		}
-		RecordAudit(userID, "agent.tool", feature, args, "失败: "+redactSecretText(reason))
+		RecordAuditApp(appID, userID, "agent.tool", feature, args, "失败: "+redactSecretText(reason))
 		return "FAILED: " + redactSecretText(reason) + "\n工具执行失败，请如实告知用户，不要编造结果。"
 	}
-	RecordAudit(userID, "agent.tool", feature, args, "成功")
+	RecordAuditApp(appID, userID, "agent.tool", feature, args, "成功")
 	return redactSecretText(done.Result)
 }
 
 func callChat(ctx context.Context, cfg AgentConfig, model string, msgs []chatMessage, tools []map[string]any, toolChoice string) (*chatResponse, error) {
 	body := map[string]any{"model": model, "messages": msgs}
+	if cfg.Temperature > 0 {
+		body["temperature"] = cfg.Temperature
+	}
 	if len(tools) > 0 {
 		body["tools"] = tools
 		if toolChoice == "" {
@@ -926,6 +1034,8 @@ func registerAgentAPI() {
 			"fallback_models":   cfg.Fallback,
 			"system":            cfg.System,
 			"app_systems":       cfg.AppSystems,
+			"temperature":       cfg.Temperature,
+			"app_overrides":     cfg.AppOverrides,
 			"max_turns":         cfg.MaxTurns,
 			"max_history":       cfg.MaxHistory,
 			"max_context_bytes": cfg.MaxContextBytes,
@@ -948,6 +1058,12 @@ func registerAgentAPI() {
 			cfg.Fallback = parseModelList(raw)
 		}
 		cfg.System = c.PostForm("system")
+		if v := strings.TrimSpace(c.PostForm("temperature")); v != "" {
+			var temp float64
+			if _, err := fmt.Sscan(v, &temp); err == nil {
+				cfg.Temperature = normalizeTemperature(temp)
+			}
+		}
 		if v := strings.TrimSpace(c.PostForm("api_key")); v != "" && v != "****" {
 			cfg.APIKey = v
 		}
@@ -985,6 +1101,23 @@ func registerAgentAPI() {
 			return
 		}
 		RecordAudit(consoleUser(c), "agent.app_system", appID, fmt.Sprintf("%d 字符", len([]rune(strings.TrimSpace(prompt)))), "成功")
+		jiyingJSON(c, "ok")
+	})
+	g.POST("/agent/app-override", requireRole(RoleMaster), func(c *gin.Context) {
+		appID := strings.TrimSpace(c.PostForm("app_id"))
+		var ov AppAgentOverride
+		ov.Model = c.PostForm("model")
+		if v := strings.TrimSpace(c.PostForm("max_turns")); v != "" {
+			fmt.Sscan(v, &ov.MaxTurns)
+		}
+		if v := strings.TrimSpace(c.PostForm("temperature")); v != "" {
+			fmt.Sscan(v, &ov.Temperature)
+		}
+		if err := SetAppOverride(appID, ov); err != nil {
+			jiyingErr(c, err.Error())
+			return
+		}
+		RecordAudit(consoleUser(c), "agent.app_override", appID, fmt.Sprintf("model=%s", ov.Model), "成功")
 		jiyingJSON(c, "ok")
 	})
 	g.GET("/agent/tools", requireRole(RoleOps), func(c *gin.Context) {

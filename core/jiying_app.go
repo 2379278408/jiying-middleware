@@ -112,6 +112,8 @@ type JiyingClient struct {
 	serial       chan struct{}
 	// lastErr 记录最近一次连接失败的原因，供就绪面板与排障读取。
 	lastErr string
+	// retryAt 是下一次重连的计划时间；连接成功后清空。
+	retryAt time.Time
 }
 
 type jiyingSocket interface {
@@ -851,7 +853,9 @@ func (c *JiyingClient) Run(ctx context.Context) error {
 		if err != nil {
 			c.setLastError(err.Error())
 			GetMyLog().Warn("即应连接失败: %v", err)
-			if !sleepCtx(ctx, reconnectBackoff(backoff)) {
+			wait := reconnectBackoff(backoff)
+			c.setRetryAt(time.Now().Add(wait))
+			if !sleepCtx(ctx, wait) {
 				return ctx.Err()
 			}
 			if backoff < 30*time.Second {
@@ -861,6 +865,7 @@ func (c *JiyingClient) Run(ctx context.Context) error {
 		}
 		backoff = time.Second
 		c.setLastError("")
+		c.setRetryAt(time.Time{})
 		c.mu.Lock()
 		c.conn = sock
 		c.mu.Unlock()
@@ -876,7 +881,9 @@ func (c *JiyingClient) Run(ctx context.Context) error {
 			return ctx.Err()
 		}
 		GetMyLog().Warn("即应连接断开: %v", err)
-		if !sleepCtx(ctx, reconnectBackoff(backoff)) {
+		wait := reconnectBackoff(backoff)
+		c.setRetryAt(time.Now().Add(wait))
+		if !sleepCtx(ctx, wait) {
 			return ctx.Err()
 		}
 		if backoff < 30*time.Second {
@@ -1121,6 +1128,7 @@ func initJiying() {
 	initFeatures()
 	registerJiyingCommands()
 	initAppChannelFromConfig()
+	initDingTalkConnector()
 }
 
 func PostJSON(ctx context.Context, url string, body any) ([]byte, error) {
@@ -1180,6 +1188,23 @@ func (c *JiyingClient) setLastError(msg string) {
 	c.mu.Lock()
 	c.lastErr = msg
 	c.mu.Unlock()
+}
+
+// setRetryAt 记录下一次重连时间。
+func (c *JiyingClient) setRetryAt(t time.Time) {
+	c.mu.Lock()
+	c.retryAt = t
+	c.mu.Unlock()
+}
+
+// RetryAt 返回下一次重连时间；无计划时返回零值。
+func (c *JiyingClient) RetryAt() time.Time {
+	if c == nil {
+		return time.Time{}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.retryAt
 }
 
 // LastError 返回最近一次连接失败原因；正常连接时为空串。

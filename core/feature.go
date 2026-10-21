@@ -391,11 +391,14 @@ func ListFeatures() string {
 
 // featureAllowedFor 判断用户是否有权执行功能：主控专属与清单 Admin 标记都要求主控或控制台管理员身份。
 // 执行前校验与 Agent 工具裁剪共用同一套规则，避免模型调用后才被拒绝。
-func featureAllowedFor(userID string, f *Feature) bool {
+func featureAllowedFor(userID string, f *Feature, appID string) bool {
 	if f == nil {
 		return false
 	}
 	if privilegedUser(userID) {
+		return true
+	}
+	if strings.EqualFold(UserRoleForApp(userID, appID), RoleMaster) {
 		return true
 	}
 	if f.Scope == "master" {
@@ -407,13 +410,21 @@ func featureAllowedFor(userID string, f *Feature) bool {
 	return true
 }
 
-// featureAllowedForApp 判断插件是否服务于当前应用；未声明应用白名单表示适用于所有应用。
+// featureAllowedForApp 判断插件是否服务于当前应用。
 // 应用白名单来自插件头部 [apps: app-id-1, app-id-2]，* 表示全部应用。
+// 未声明白名单时默认仅对默认应用可见，避免新装插件自动扩散到所有应用。
 func featureAllowedForApp(f *Feature, appID string) bool {
-	if f == nil || len(f.Apps) == 0 {
-		return true
+	if f == nil {
+		return false
 	}
 	appID = strings.TrimSpace(appID)
+	if len(f.Apps) == 0 {
+		def := strings.TrimSpace(CurrentAppConfig().AppID)
+		if def == "" {
+			return appID == ""
+		}
+		return appID == "" || strings.EqualFold(appID, def)
+	}
 	for _, want := range f.Apps {
 		if want == "*" || strings.EqualFold(want, appID) {
 			return true
@@ -423,6 +434,11 @@ func featureAllowedForApp(f *Feature, appID string) bool {
 }
 
 func executeFeature(ctx context.Context, name, args, userID, chatID string) (string, error) {
+	return executeFeatureForApp(ctx, name, args, userID, chatID, appIDForConversation(chatID))
+}
+
+// executeFeatureForApp 在明确的会话与应用上下文下执行功能，供任务队列保留原始归属。
+func executeFeatureForApp(ctx context.Context, name, args, userID, chatID, appID string) (string, error) {
 	if strings.HasPrefix(name, "cron:") {
 		label := strings.TrimPrefix(name, "cron:")
 		if !cronTaskAllows(label, userID) {
@@ -437,10 +453,14 @@ func executeFeature(ctx context.Context, name, args, userID, chatID string) (str
 	if !ok {
 		return "", fmt.Errorf("功能不可用: %s", name)
 	}
-	if !featureAllowedFor(userID, f) {
+	appID = strings.TrimSpace(appID)
+	if chatID != "" && appID == "" {
+		return "", fmt.Errorf("会话归属未知，拒绝执行")
+	}
+	if !featureAllowedFor(userID, f, appID) {
 		return "", fmt.Errorf("无权限")
 	}
-	if !featureAllowedForApp(f, appIDForConversation(chatID)) {
+	if !featureAllowedForApp(f, appID) {
 		return "", fmt.Errorf("该插件未授权当前应用")
 	}
 	switch f.Kind {

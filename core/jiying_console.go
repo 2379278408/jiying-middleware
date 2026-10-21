@@ -22,6 +22,7 @@ func init() {
 	registerSkillsAPI()
 	registerAgentAPI()
 	registerMarketAPI()
+	registerDingTalkAPI()
 }
 
 func registerJiyingConsole() {

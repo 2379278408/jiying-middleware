@@ -284,9 +284,14 @@ func cmdCronAdd() {
 		command = strings.Join(tokens[2:], " ")
 	}
 	chat := fmt.Sprint(s.GetParentID())
+	appID := ""
+	if js, ok := s.(*JiyingSender); ok {
+		appID = senderAppID(js)
+	}
 	id := ccs.add(&CronCmd{
 		Name: name, Cron: cronSpec, Command: command, Status: true,
 		GroupManager: []string{chat}, OwnerRole: RoleMaster, Owner: "system",
+		AppID: appID,
 	})
 	ReplyCurrent("已增加定时 " + id + " " + name)
 }
@@ -351,7 +356,7 @@ func dispatchMiddleware(sender Sender, msg string) (handled bool, ok bool) {
 	}
 	userID := senderUserID(sender)
 	chatID := fmt.Sprint(sender.GetParentID())
-	if !featureAllowedFor(userID, f) {
+	if !featureAllowedFor(userID, f, appIDForConversation(chatID)) {
 		sender.Reply("无权限")
 		return true, true
 	}

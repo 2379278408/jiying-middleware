@@ -18,12 +18,40 @@ const (
 
 const rolesKey = "jiying_roles"
 
+// appRolesKey 保存应用级角色覆盖；形态为 app_id -> user_id -> role。
+const appRolesKey = "jiying_app_roles"
+
 // consoleAdminID 是控制台引导管理员账号 ID（由 develop/users.ensureAdmin 创建）。
 const consoleAdminID = "admin"
 
 var roleRank = map[string]int{RoleMaster: 3, RoleOps: 2, RoleReadonly: 1}
 
 var rolesMu sync.Mutex
+
+// loadAppRoles 读取应用级角色覆盖表；未配置时返回空表。
+func loadAppRoles() map[string]map[string]string {
+	out := map[string]map[string]string{}
+	if BucketApp == nil {
+		return out
+	}
+	raw := BucketApp.GetString(appRolesKey)
+	if raw == "" {
+		return out
+	}
+	_ = json.Unmarshal([]byte(raw), &out)
+	if out == nil {
+		out = map[string]map[string]string{}
+	}
+	return out
+}
+
+func saveAppRoles(all map[string]map[string]string) {
+	if BucketApp == nil {
+		return
+	}
+	raw, _ := json.Marshal(all)
+	BucketApp.Set(appRolesKey, string(raw))
+}
 
 // loadRoles 读取显式角色表；不在表中的用户默认只读。
 func loadRoles() map[string]string {
@@ -74,6 +102,98 @@ func UserRole(userID string) string {
 		return RoleReadonly
 	}
 	return role
+}
+
+// UserRoleForApp 返回用户在指定应用中的有效角色：显式应用角色优先，否则继承全局角色。
+func UserRoleForApp(userID, appID string) string {
+	userID = strings.TrimSpace(userID)
+	appID = strings.TrimSpace(appID)
+	if userID == "" {
+		return ""
+	}
+	if privilegedUser(userID) {
+		return RoleMaster
+	}
+	if appID != "" {
+		rolesMu.Lock()
+		role := loadAppRoles()[appID][userID]
+		rolesMu.Unlock()
+		if _, ok := roleRank[role]; ok {
+			return role
+		}
+	}
+	return UserRole(userID)
+}
+
+// HasRoleForApp 判断用户在指定应用中是否达到角色等级。
+func HasRoleForApp(userID, appID, min string) bool {
+	need, ok := roleRank[min]
+	if !ok {
+		return false
+	}
+	got, ok := roleRank[UserRoleForApp(userID, appID)]
+	return ok && got >= need
+}
+
+// SetAppUserRole 设置应用级角色；master 仅对已接入应用开放，避免凭空提升权限。
+func SetAppUserRole(appID, userID, role string) error {
+	appID = strings.TrimSpace(appID)
+	userID = strings.TrimSpace(userID)
+	role = strings.TrimSpace(role)
+	if appID == "" || userID == "" {
+		return fmt.Errorf("缺少应用或用户")
+	}
+	if _, ok := roleRank[role]; !ok {
+		return fmt.Errorf("角色只能是 master、ops 或 readonly")
+	}
+	if !appConnExists(appID) {
+		return fmt.Errorf("应用不存在")
+	}
+	rolesMu.Lock()
+	defer rolesMu.Unlock()
+	all := loadAppRoles()
+	if all[appID] == nil {
+		all[appID] = map[string]string{}
+	}
+	all[appID][userID] = role
+	saveAppRoles(all)
+	return nil
+}
+
+// DeleteAppUserRole 移除应用级角色，用户回落到全局角色。
+func DeleteAppUserRole(appID, userID string) error {
+	appID = strings.TrimSpace(appID)
+	userID = strings.TrimSpace(userID)
+	if appID == "" || userID == "" {
+		return fmt.Errorf("缺少应用或用户")
+	}
+	rolesMu.Lock()
+	defer rolesMu.Unlock()
+	all := loadAppRoles()
+	if all[appID] == nil || all[appID][userID] == "" {
+		return fmt.Errorf("应用角色不存在")
+	}
+	delete(all[appID], userID)
+	if len(all[appID]) == 0 {
+		delete(all, appID)
+	}
+	saveAppRoles(all)
+	return nil
+}
+
+// ListAppRoles 返回应用级角色覆盖表的副本。
+func ListAppRoles() map[string]map[string]string {
+	rolesMu.Lock()
+	defer rolesMu.Unlock()
+	all := loadAppRoles()
+	out := make(map[string]map[string]string, len(all))
+	for appID, roles := range all {
+		out[appID] = map[string]string{}
+		for user, role := range roles {
+			out[appID][user] = role
+		}
+	}
+	return out
 }
 
 // HasRole 判断用户是否达到指定角色等级。
@@ -163,6 +283,7 @@ func registerRolesAPI() {
 		// 主人列表属于权限面，只对 master 返回；其他角色仍可读取自身角色用于顶栏展示。
 		if requestHasRole(c, RoleMaster) {
 			data["roles"] = ListUserRoles()
+			data["app_roles"] = ListAppRoles()
 			data["masters"] = ListMasters()
 		}
 		jiyingJSON(c, data)
@@ -194,6 +315,29 @@ func registerRolesAPI() {
 			return
 		}
 		RecordAudit(consoleUser(c), "role.set", user, role, "成功")
+		jiyingJSON(c, "ok")
+	})
+	g.POST("/app-roles", requireRole(RoleMaster), func(c *gin.Context) {
+		appID := strings.TrimSpace(c.PostForm("app_id"))
+		user := strings.TrimSpace(c.PostForm("user"))
+		role := strings.TrimSpace(c.PostForm("role"))
+		if err := SetAppUserRole(appID, user, role); err != nil {
+			RecordAudit(consoleUser(c), "app_role.set", appID+"/"+user, role, "失败: "+err.Error())
+			jiyingErr(c, err.Error())
+			return
+		}
+		RecordAudit(consoleUser(c), "app_role.set", appID+"/"+user, role, "成功")
+		jiyingJSON(c, "ok")
+	})
+	g.POST("/app-roles/delete", requireRole(RoleMaster), func(c *gin.Context) {
+		appID := strings.TrimSpace(c.PostForm("app_id"))
+		user := strings.TrimSpace(c.PostForm("user"))
+		if err := DeleteAppUserRole(appID, user); err != nil {
+			RecordAudit(consoleUser(c), "app_role.delete", appID+"/"+user, "", "失败: "+err.Error())
+			jiyingErr(c, err.Error())
+			return
+		}
+		RecordAudit(consoleUser(c), "app_role.delete", appID+"/"+user, "", "成功")
 		jiyingJSON(c, "ok")
 	})
 	g.POST("/roles/delete", requireRole(RoleMaster), func(c *gin.Context) {

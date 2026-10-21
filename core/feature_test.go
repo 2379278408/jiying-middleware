@@ -4,8 +4,8 @@ import "testing"
 
 func TestFeatureAllowedForApp(t *testing.T) {
 	all := &Feature{Name: "all"}
-	if !featureAllowedForApp(all, "") || !featureAllowedForApp(all, "app-a") {
-		t.Fatal("未声明应用白名单时应适用于所有应用")
+	if !featureAllowedForApp(all, "") || featureAllowedForApp(all, "app-a") {
+		t.Fatal("未声明应用白名单时仅默认应用可见")
 	}
 	one := &Feature{Name: "one", Apps: []string{"app-a"}}
 	if !featureAllowedForApp(one, "app-a") || !featureAllowedForApp(one, "APP-A") {

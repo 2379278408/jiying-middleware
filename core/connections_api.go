@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -30,6 +31,7 @@ func registerConnectionsAPI() {
 	g.POST("/connections/account/delete", requireRole(RoleOps), connectionsAccountDelete)
 	g.POST("/connections/account/profile", connectionsAccountProfile)
 	g.GET("/apps/profile", connectionsAppProfile)
+	g.GET("/connections/app/matrix", requireRole(RoleOps), connectionsAppMatrix)
 }
 
 func connectionsSnapshot(c *gin.Context) {
@@ -175,6 +177,62 @@ func connectionsAppUpsert(c *gin.Context) {
 	}
 	RecordAudit(consoleUser(c), "app.upsert", appID, "", "成功")
 	jiyingJSON(c, "ok")
+}
+
+// AppMatrixItem 汇总单个应用可见的功能、角色、会话与定时任务，供应用矩阵面板展示。
+type AppMatrixItem struct {
+	AppID         string            `json:"app_id"`
+	Name          string            `json:"name,omitempty"`
+	Online        bool              `json:"online"`
+	IsDefault     bool              `json:"is_default"`
+	Model         string            `json:"model,omitempty"`
+	Conversations int               `json:"conversation_count"`
+	Features      []string          `json:"features"`
+	Schedules     int               `json:"schedules"`
+	Roles         map[string]string `json:"roles,omitempty"`
+	LastError     string            `json:"last_error,omitempty"`
+	RetryAt       string            `json:"retry_at,omitempty"`
+}
+
+func connectionsAppMatrix(c *gin.Context) {
+	apps := AppPoolSnapshot()
+	cfg := LoadAgentConfig()
+	cronByApp := map[string]int{}
+	for _, cmd := range CronCmdsSnapshot() {
+		if cmd != nil && cmd.Status && cmd.AppID != "" {
+			cronByApp[cmd.AppID]++
+		}
+	}
+	appRoles := map[string]map[string]string{}
+	if requestHasRole(c, RoleMaster) {
+		appRoles = ListAppRoles()
+	}
+	features := ListFeatureItems()
+	out := make([]AppMatrixItem, 0, len(apps))
+	for _, app := range apps {
+		item := AppMatrixItem{
+			AppID:         app.AppID,
+			Name:          app.Name,
+			Online:        app.Online,
+			IsDefault:     app.IsDefault,
+			Model:         cfg.ForApp(app.AppID).Model,
+			Conversations: app.Conversations,
+			Schedules:     cronByApp[app.AppID],
+			LastError:     app.LastError,
+			RetryAt:       app.RetryAt,
+		}
+		for _, f := range features {
+			if f != nil && f.Enabled && featureAllowedForApp(f, app.AppID) {
+				item.Features = append(item.Features, f.Name)
+			}
+		}
+		sort.Strings(item.Features)
+		if roles, ok := appRoles[app.AppID]; ok {
+			item.Roles = roles
+		}
+		out = append(out, item)
+	}
+	jiyingJSON(c, gin.H{"apps": out, "generated_at": time.Now().Format(time.RFC3339)})
 }
 
 func connectionsAppDelete(c *gin.Context) {

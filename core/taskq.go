@@ -236,7 +236,7 @@ func (q *taskQueue) run(t *Task) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), taskRunTimeout)
 	result, err := safeExecute(func() (string, error) {
-		return executeFeature(ctx, t.Feature, t.Args, t.UserID, t.ConversationID)
+		return executeFeatureForApp(ctx, t.Feature, t.Args, t.UserID, t.ConversationID, t.AppID)
 	})
 	cancel()
 	// 功能输出可能包含脚本回显的凭据；任务详情与审计统一使用脱敏后的文本。
@@ -723,6 +723,7 @@ func enqueueCron(cmd *CronCmd) {
 		Feature:        "cron:" + cmd.Name,
 		Args:           cmd.Command,
 		ConversationID: chat,
+		AppID:          cmd.AppID,
 		UserID:         cronIdentity(cmd),
 	})
 	if err != nil {

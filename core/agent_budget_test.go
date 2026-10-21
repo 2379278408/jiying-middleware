@@ -40,6 +40,10 @@ func TestTrimAgentHistoryDropsOldest(t *testing.T) {
 
 func TestRunAgentStopsAtToolBudget(t *testing.T) {
 	setupAgentBucket(t, "agent-tool-budget")
+	const feature = "预算测试工具"
+	if err := UpsertFeature(Feature{Name: feature, Kind: "builtin", Target: "help", Scope: "public", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
 	var calls int32
 	var secondTools int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -51,7 +55,7 @@ func TestRunAgentStopsAtToolBudget(t *testing.T) {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		w.Header().Set("Content-Type", "application/json")
 		if n == 1 {
-			tool := agentToolName(0)
+			tool := agentToolName(feature)
 			_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","tool_calls":[` +
 				`{"id":"c1","type":"function","function":{"name":"` + tool + `","arguments":"{}"}},` +
 				`{"id":"c2","type":"function","function":{"name":"` + tool + `","arguments":"{}"}}]}}]}`))

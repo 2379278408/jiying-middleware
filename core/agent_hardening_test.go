@@ -92,6 +92,10 @@ func TestRunAgentToolRoutesThroughQueue(t *testing.T) {
 	setupAgentBucket(t, "agent-tool-queue")
 	resetTaskQueue()
 	initTaskQueue()
+	rememberConvApp("conv-tq-1", "app-tq")
+	if err := UpsertFeature(Feature{Name: "帮助", Kind: "builtin", Target: "help", Scope: "public", Enabled: true, Apps: []string{"*"}}); err != nil {
+		t.Fatal(err)
+	}
 	out := runAgentTool(context.Background(), "帮助", `{"args":""}`, "system", "conv-tq-1")
 	if !strings.Contains(out, "帮助") {
 		t.Fatalf("tool should return 帮助 output, got %q", out)
@@ -169,5 +173,39 @@ func TestCompleteWithFallbackPrimarySuccessNoAudit(t *testing.T) {
 	}
 	if _, err := completeWithFallback(context.Background(), nil, call); err == nil {
 		t.Fatal("空模型列表应报错")
+	}
+}
+
+func TestRemoveAppConnCascadesReferences(t *testing.T) {
+	setupAppPoolBucket(t, "apppool-cascade")
+	saveAppConns([]AppConn{{WSURL: "ws://127.0.0.1:1/api/app/ws", AppID: "app-x", AppSecret: "secret-x"}})
+	appConnPool.mu.Lock()
+	appConnPool.items["app-x"] = &appRuntime{cfg: AppConn{AppID: "app-x"}}
+	appConnPool.defaultID = "app-x"
+	appConnPool.mu.Unlock()
+	rememberConvApp("conv-x", "app-x")
+	if err := UpsertFeature(Feature{Name: "级联测试", Kind: "builtin", Target: "help", Scope: "public", Enabled: true, Apps: []string{"app-x"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetAppUserRole("app-x", "user-x", RoleOps); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemoveAppConn("app-x"); err != nil {
+		t.Fatal(err)
+	}
+	if appConnExists("app-x") {
+		t.Fatal("应用连接应已删除")
+	}
+	if got := appIDForConversation("conv-x"); got != "" {
+		t.Fatalf("会话归属应已清理，got %q", got)
+	}
+	features.mu.RLock()
+	f := features.items["级联测试"]
+	features.mu.RUnlock()
+	if f == nil || f.Enabled || len(f.Apps) != 0 {
+		t.Fatalf("功能引用应被清理并停用: %+v", f)
+	}
+	if _, ok := ListAppRoles()["app-x"]; ok {
+		t.Fatal("应用级角色应已清理")
 	}
 }

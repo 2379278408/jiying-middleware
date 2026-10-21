@@ -87,6 +87,18 @@ func SendToConv(ctx context.Context, conversationID string, target rpcTarget, re
 	return c.SendTo(ctx, target, replyTo, message)
 }
 
+// SendTextToConvVia 以显式指定的应用通道向会话发送文本，供主控主动推送使用。
+func SendTextToConvVia(ctx context.Context, appID, conversationID, replyTo, text string) error {
+	if !validConversationID(conversationID) {
+		return fmt.Errorf("会话 ID 不合法")
+	}
+	c := clientForApp(appID)
+	if c == nil {
+		return errJiyingNotConnected
+	}
+	return c.SendText(ctx, conversationID, replyTo, text)
+}
+
 // ---- 查询类 ----
 
 // JiyingUser 是 users.get 返回的用户资料。
