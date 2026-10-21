@@ -146,3 +146,33 @@ func TestDingTalkReplyKeyStable(t *testing.T) {
 		t.Fatal("无消息 ID 时应由正文稳定派生")
 	}
 }
+
+func TestDingTalkNotificationOffFromConversationList(t *testing.T) {
+	payload := map[string]any{"data": map[string]any{"conversations": []any{
+		map[string]any{"openConversationId": "dm-muted", "notificationOff": float64(1), "singleChat": true},
+		map[string]any{"openConversationId": "dm-open", "notificationOff": "0", "singleChat": true},
+	}}}
+	if muted, ok := dingTalkNotificationOffFromPayload(payload, "dm-muted"); !ok || !muted {
+		t.Fatalf("单聊免打扰应识别: %v %v", muted, ok)
+	}
+	if muted, ok := dingTalkNotificationOffFromPayload(payload, "dm-open"); !ok || muted {
+		t.Fatalf("单聊未免打扰应识别: %v %v", muted, ok)
+	}
+	if _, ok := dingTalkNotificationOffFromPayload(payload, "missing"); ok {
+		t.Fatal("缺失会话不应给出结论")
+	}
+}
+
+func TestDingTalkTopicModeDefaultsOn(t *testing.T) {
+	setupAgentBucket(t, "dingtalk-topic-default")
+	BucketApp.Delete(dingTalkConfigKey)
+	if cfg := loadDingTalkConfig(); !cfg.TopicMode {
+		t.Fatal("新部署应默认开启按会话分话题")
+	}
+	if err := saveDingTalkConfig(DingTalkConfig{Enabled: true, PushAppID: "app-a", PushConversationID: "conv-a", TopicMode: false}); err != nil {
+		t.Fatal(err)
+	}
+	if cfg := loadDingTalkConfig(); cfg.TopicMode {
+		t.Fatal("显式关闭后应保持关闭")
+	}
+}

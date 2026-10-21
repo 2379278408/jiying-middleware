@@ -1004,7 +1004,7 @@ func callChat(ctx context.Context, cfg AgentConfig, model string, msgs []chatMes
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := &http.Client{Timeout: 150 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

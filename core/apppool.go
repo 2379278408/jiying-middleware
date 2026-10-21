@@ -401,6 +401,18 @@ func IsAccountConversation(conversationID string) bool {
 	return appConnPool.accountConv[conversationID]
 }
 
+// KnownConvApps 返回会话到所属应用的快照，供轮询等只读场景使用。
+func KnownConvApps() map[string]string {
+	appConnPool.mu.Lock()
+	defer appConnPool.mu.Unlock()
+	appConnPool.ensureConvAppsLocked()
+	out := make(map[string]string, len(appConnPool.convApp))
+	for k, v := range appConnPool.convApp {
+		out[k] = v
+	}
+	return out
+}
+
 // ConvAppOwner 返回会话归属的应用资料。known 为 false 表示尚未记录归属。
 func ConvAppOwner(conversationID string) (appID, name string, online, known bool) {
 	appConnPool.mu.Lock()
