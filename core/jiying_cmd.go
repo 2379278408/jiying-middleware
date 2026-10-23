@@ -12,6 +12,20 @@ type choiceWait struct {
 	TaskID         string
 	UserID         string
 	ConversationID string
+	CreatedAt      time.Time
+}
+
+// choiceWaitTTL 限制确认等待的最长时间，避免无人响应的任务永久占用内存。
+const choiceWaitTTL = 24 * time.Hour
+
+func pruneChoiceWaits() {
+	now := time.Now()
+	choiceWaits.Range(func(k, v any) bool {
+		if w, ok := v.(choiceWait); ok && !w.CreatedAt.IsZero() && now.Sub(w.CreatedAt) > choiceWaitTTL {
+			choiceWaits.Delete(k)
+		}
+		return true
+	})
 }
 
 var choiceWaits sync.Map
@@ -195,6 +209,10 @@ func cmdFeatureInstall() {
 	parts := strings.Fields(rest)
 	if len(parts) < 2 {
 		ReplyCurrent("用法: 安装功能 <名字> <http地址>")
+		return
+	}
+	if err := validateOutboundURL(parts[1], false); err != nil {
+		ReplyCurrent(err.Error())
 		return
 	}
 	if err := UpsertFeature(Feature{Name: parts[0], Kind: "http", Target: parts[1], Scope: "master", Identity: "app", Enabled: true, Confirm: true}); err != nil {
@@ -412,6 +430,7 @@ func resumeChoice(ctx context.Context, choiceMessageID, userID, conversationID s
 			yes = true
 		}
 	}
+	pruneChoiceWaits()
 	v, ok := choiceWaits.Load(choiceMessageID)
 	if !ok {
 		return nil

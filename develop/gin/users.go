@@ -52,6 +52,10 @@ func SaveUser(c *gin.Context) {
 		created = true
 	}
 	if !created && password != "" {
+		if err := users.ValidatePassword(password); err != nil {
+			jsonErr(c, err.Error())
+			return
+		}
 		if err := u.SetPassword(password); err != nil {
 			jsonErr(c, err.Error())
 			return
@@ -128,8 +132,14 @@ func ToggleUser(c *gin.Context) {
 		jsonErr(c, "用户不存在")
 		return
 	}
-	u.Disable = c.PostForm("disable") == "true" || c.PostForm("disable") == "1"
+	disabled := c.PostForm("disable") == "true" || c.PostForm("disable") == "1"
+	changed := u.Disable != disabled
+	u.Disable = disabled
 	_ = u.Save()
+	// 禁用或重新启用都让已有会话立即失效，避免旧 Cookie 在状态切换后继续使用。
+	if changed {
+		core.BumpSessionEpoch(username)
+	}
 	jsonOK(c, gin.H{"disable": u.Disable})
 }
 

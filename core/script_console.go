@@ -21,8 +21,7 @@ var scriptConsoleTokenCache = struct {
 	token  string
 }{}
 
-// ConsoleAdminUserID 返回控制台引导管理员账号 ID，供脚本专用登录映射到主控身份。
-func ConsoleAdminUserID() string { return consoleAdminID }
+// 脚本登录后只获得 ops 权限，不能读取系统参数或管理用户。
 
 func randomScriptToken() string {
 	buf := make([]byte, 32)

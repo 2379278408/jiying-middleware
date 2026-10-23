@@ -3,16 +3,28 @@ package core
 import (
 	"os"
 	"path/filepath"
-	"time"
+	"syscall"
 
 	"jiying/middleware/utils"
 )
 
+// RequestRestart 请求进程原地重启；供 main 的异常监控复用。
+func RequestRestart(reason string) { reboot(reason) }
+
 func reboot(reason string) {
 	GetMyLog().Warn("重启原因: %s", reason)
-	utils.Daemon(0)
-	time.Sleep(500 * time.Millisecond)
-	os.Exit(0)
+	log := GetMyLog()
+	log.Sync()
+	// 优先用 exec 替换当前进程，避免旧进程继续存活导致双实例与端口冲突。
+	if exe := utils.GetExecPath(); exe != "" {
+		argv := append([]string{exe}, os.Args[1:]...)
+		if err := syscall.Exec(exe, argv, os.Environ()); err == nil {
+			return
+		} else {
+			GetMyLog().Error("进程原地重启失败: %v", err)
+		}
+	}
+	os.Exit(1)
 }
 
 func initUpdate() {

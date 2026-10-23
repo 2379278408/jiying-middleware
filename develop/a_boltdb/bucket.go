@@ -66,8 +66,8 @@ func keyExpand(base string, v []interface{}) string {
 
 func anyKey(k string) string { return k }
 
-func (s *Store) put(key string, data []byte) {
-	db.Update(func(tx *bolt.Tx) error {
+func (s *Store) put(key string, data []byte) error {
+	return db.Update(func(tx *bolt.Tx) error {
 		bk := tx.Bucket([]byte(s.name))
 		if bk == nil {
 			var err error
@@ -100,8 +100,7 @@ func (s *Store) Set(key string, v ...interface{}) bool {
 	if err != nil {
 		data = []byte(fmt.Sprint(v[0]))
 	}
-	s.put(anyKey(key), data)
-	return true
+	return s.put(anyKey(key), data) == nil
 }
 
 func (s *Store) GetBytes(key string, v ...interface{}) []byte {
@@ -207,8 +206,7 @@ func (s *Store) Push2Array(key string, v ...interface{}) bool {
 		}
 	}
 	data, _ := json.Marshal(arr)
-	s.put(anyKey(key), data)
-	return true
+	return s.put(anyKey(key), data) == nil
 }
 
 func (s *Store) Delete(key string, v ...interface{}) {

@@ -5,13 +5,56 @@ import (
 	"path/filepath"
 	"strings"
 
+	"gopkg.in/yaml.v3"
+
 	"jiying/middleware/utils"
 )
 
 const confFileName = "config.yaml"
 
 func initYamlConf() {
-	ReadYaml(filepath.Join(utils.GetResHome(), confFileName))
+	text := ReadYaml(filepath.Join(utils.GetResHome(), confFileName))
+	applyYamlConf(text)
+}
+
+// yamlConf 对应 config.yaml；字段名与桶中配置键保持一致，启动时同步。
+type yamlConf struct {
+	HTTP struct {
+		Port   int    `yaml:"port"`
+		Cert   string `yaml:"certFile"`
+		Key    string `yaml:"keyFile"`
+		Public string `yaml:"team_publicip_api"`
+		Local  string `yaml:"local_host"`
+	} `yaml:"http"`
+	System struct {
+		UpdateSource string `yaml:"UpdateSource"`
+		AutoCheck    *bool  `yaml:"AutoCheck"`
+	} `yaml:"system"`
+}
+
+// applyYamlConf 把配置文件同步进应用桶，保证编辑 config.yaml 后重启即可生效。
+func applyYamlConf(text string) {
+	if BucketApp == nil || strings.TrimSpace(text) == "" {
+		return
+	}
+	var conf yamlConf
+	if err := yaml.Unmarshal([]byte(text), &conf); err != nil {
+		GetMyLog().Warn("配置文件解析失败: %v", err)
+		return
+	}
+	if conf.HTTP.Port > 0 {
+		BucketApp.Set("port", conf.HTTP.Port)
+	}
+	BucketApp.Set("certFile", strings.TrimSpace(conf.HTTP.Cert))
+	BucketApp.Set("keyFile", strings.TrimSpace(conf.HTTP.Key))
+	BucketApp.Set("team_publicip_api", strings.TrimSpace(conf.HTTP.Public))
+	BucketApp.Set("local_host", strings.TrimSpace(conf.HTTP.Local))
+	if strings.TrimSpace(conf.System.UpdateSource) != "" {
+		BucketApp.Set("UpdateSource", strings.TrimSpace(conf.System.UpdateSource))
+	}
+	if conf.System.AutoCheck != nil {
+		BucketApp.Set("AutoCheck", *conf.System.AutoCheck)
+	}
 }
 
 func ReadYaml(path string) string {

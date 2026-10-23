@@ -31,4 +31,4 @@ jobs:
       - name: Test
         run: go test ./... -count=1
       - name: Race test
-        run: go test -race -count=1 ./core
+        run: go test -race -count=1 ./...

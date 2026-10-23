@@ -72,6 +72,7 @@ sudo nginx -t && sudo systemctl reload nginx
 需要备份：
 
 - `<JIYING_DATA>/data/buckets/middleware.db`（bbolt，配置、API Key、审计、事件台账）
+- `<JIYING_DATA>/.relay_secret_key`（连接密钥与插件密钥的静态加密主密钥；丢失后密文无法解密）
 - `<JIYING_DATA>/.market_signing_key`（本机插件发布签名私钥）
 - `/etc/jiying/jiying.env`
 

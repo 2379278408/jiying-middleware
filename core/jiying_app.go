@@ -111,6 +111,8 @@ type JiyingClient struct {
 	// ackWatermark 是已确认水位；ACK 某个 cursor 会同时确认不大于它的所有事件。
 	ackWatermark int64
 	serial       chan struct{}
+	// eventSem 限制事件处理 goroutine 的并发排队上限，避免突发流量无限堆积。
+	eventSem chan struct{}
 	// lastErr 记录最近一次连接失败的原因，供就绪面板与排障读取。
 	lastErr string
 	// retryAt 是下一次重连的计划时间；连接成功后清空。
@@ -142,10 +144,11 @@ func NewJiyingClient(cfg JiyingConfig, dial func(context.Context) (jiyingSocket,
 	}
 	return &JiyingClient{
 		cfg: cfg, dial: dial,
-		pending: map[string]jiyingPending{},
-		acks:    map[int64]bool{},
-		acked:   map[int64]bool{},
-		serial:  make(chan struct{}, 1),
+		pending:  map[string]jiyingPending{},
+		acks:     map[int64]bool{},
+		acked:    map[int64]bool{},
+		serial:   make(chan struct{}, 1),
+		eventSem: make(chan struct{}, 64),
 	}
 }
 
@@ -518,9 +521,20 @@ func (c *JiyingClient) Ack(ctx context.Context, cursor int64) error {
 	if cursor > c.ackWatermark {
 		c.ackWatermark = cursor
 	}
+	// 水位线以下的 cursor 已由 ackWatermark 覆盖，及时清理避免长连接内存只增不减。
+	for v := range c.acks {
+		if v <= c.ackWatermark {
+			delete(c.acks, v)
+		}
+	}
+	for v := range c.acked {
+		if v <= c.ackWatermark {
+			delete(c.acked, v)
+		}
+	}
 	c.persistAck(cursor)
+	c.markProcessedLocked(cursor)
 	c.mu.Unlock()
-	c.markProcessed(cursor)
 	return nil
 }
 
@@ -558,11 +572,16 @@ func (c *JiyingClient) loadAcks() {
 
 // markProcessed 把已成功处理的 cursor 写入本地台账，重启后据此跳过重复执行业务。
 func (c *JiyingClient) markProcessed(cursor int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.markProcessedLocked(cursor)
+}
+
+// markProcessedLocked 与 markProcessed 相同，但调用方必须持有 c.mu。
+func (c *JiyingClient) markProcessedLocked(cursor int64) {
 	if cursor <= 0 {
 		return
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.acks[cursor] {
 		return
 	}
@@ -840,6 +859,7 @@ func enqueueSender(ctx context.Context, s Sender) error {
 }
 
 func (c *JiyingClient) processEvent(ctx context.Context, env jiyingEnvelope) {
+	defer func() { <-c.eventSem }()
 	c.serial <- struct{}{}
 	defer func() { <-c.serial }()
 	if err := c.HandleInbound(ctx, env); err != nil {
@@ -1044,7 +1064,12 @@ func (c *JiyingClient) readLoop(ctx context.Context, sock jiyingSocket) error {
 			_ = c.HandleInbound(ctx, env)
 			continue
 		}
-		go c.processEvent(ctx, env)
+		select {
+		case c.eventSem <- struct{}{}:
+			go c.processEvent(ctx, env)
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 }
 
@@ -1280,7 +1305,7 @@ func PostJSON(ctx context.Context, url string, body any) ([]byte, error) {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := safeOutboundHTTPClient(60 * time.Second).Do(req)
 	if err != nil {
 		return nil, err
 	}

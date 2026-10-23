@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,7 +75,7 @@ func getGallery(c *gin.Context) {
 		name := e.Name()
 		if !strings.HasSuffix(name, ".jpg") && !strings.HasSuffix(name, ".png") &&
 			!strings.HasSuffix(name, ".jpeg") && !strings.HasSuffix(name, ".gif") &&
-			!strings.HasSuffix(name, ".bmp") {
+			!strings.HasSuffix(name, ".bmp") && !strings.HasSuffix(name, ".webp") {
 			continue
 		}
 		imgs = append(imgs, "/imgs/static/"+name)
@@ -91,14 +92,62 @@ func uploadGallery(c *gin.Context) {
 		jsonFailMsg(c, "未收到文件")
 		return
 	}
+	if file.Size <= 0 || file.Size > 10<<20 {
+		jsonFailMsg(c, "图片大小需在 10MB 以内")
+		return
+	}
+	base := filepath.Base(file.Filename)
+	stem, ext := strings.TrimSuffix(base, filepath.Ext(base)), strings.ToLower(filepath.Ext(base))
+	if stem == "" || stem == "." || !galleryExtAllowed(ext) {
+		jsonFailMsg(c, "只支持 jpg、png、gif、bmp、webp 图片")
+		return
+	}
+	opened, err := file.Open()
+	if err != nil {
+		jsonFailMsg(c, "读取文件失败")
+		return
+	}
+	head := make([]byte, 512)
+	n, _ := opened.Read(head)
+	_ = opened.Close()
+	contentType := http.DetectContentType(head[:n])
+	if !galleryContentMatches(ext, contentType) {
+		jsonFailMsg(c, "文件内容不是有效图片")
+		return
+	}
 	dir := filepath.Join(utils.GetResHome(), "images", "gallery")
 	_ = os.MkdirAll(dir, 0o755)
-	dst := filepath.Join(dir, filepath.Base(file.Filename))
+	name := stem + ext
+	dst := filepath.Join(dir, name)
 	if err := c.SaveUploadedFile(file, dst); err != nil {
 		jsonFailMsg(c, "保存失败")
 		return
 	}
-	jsonOK(c, "/imgs/static/"+filepath.Base(file.Filename))
+	jsonOK(c, "/imgs/static/"+name)
+}
+
+func galleryExtAllowed(ext string) bool {
+	switch ext {
+	case ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp":
+		return true
+	}
+	return false
+}
+
+func galleryContentMatches(ext, contentType string) bool {
+	switch ext {
+	case ".jpg", ".jpeg":
+		return contentType == "image/jpeg"
+	case ".png":
+		return contentType == "image/png"
+	case ".gif":
+		return contentType == "image/gif"
+	case ".bmp":
+		return contentType == "image/bmp"
+	case ".webp":
+		return contentType == "image/webp"
+	}
+	return false
 }
 
 func deleteGallery(c *gin.Context) {

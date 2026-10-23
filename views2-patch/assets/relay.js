@@ -1282,6 +1282,18 @@
     }
     return "";
   }
+  // 会话头像只读取会话或直接对端的头像。群会话没有头像时使用名称首字，
+  // 不能从 members 里随便挑一个成员，否则会出现与会话无关的头像。
+  function pickConversationAvatar(conv) {
+    if (!conv || typeof conv !== "object") return "";
+    var keys = ["avatar_url", "avatar", "icon", "photo", "avatarUrl"];
+    for (var i = 0; i < keys.length; i++) {
+      var v = conv[keys[i]];
+      if (typeof v === "string" && v.trim()) return v.trim();
+    }
+    var peer = conv.peer || conv.user || conv.target || conv.contact || null;
+    return peer ? pickAvatarURL(peer, 0) : "";
+  }
   // 会话成员按 id 建索引，消息 sender 只带 id/type，昵称与头像需要从成员表补齐。
   function memberIndex(conv) {
     var out = {};
@@ -1373,6 +1385,14 @@
     } else if (opts.body) {
       init.body = opts.body;
     }
+    // 统一超时，避免后端卡死时请求永久悬挂、按钮一直处于加载态。
+    var timer = null, ctrl = null;
+    if (typeof AbortController !== "undefined") {
+      ctrl = new AbortController();
+      init.signal = ctrl.signal;
+      timer = setTimeout(function () { ctrl.abort(); }, opts.timeout || 30000);
+    }
+    var clearTimer = function () { if (timer) { clearTimeout(timer); timer = null; } };
     return fetch(url, init).then(function (r) {
       return r.text().then(function (raw) {
         var data;
@@ -1391,10 +1411,11 @@
         }
         return data;
       });
-    }).catch(function () {
-      if (!opts.silent) toast("网络请求失败，请检查服务状态后重试", "err");
-      return { code: 0, msg: "网络请求失败" };
-    });
+    }).catch(function (err) {
+      var timeout = !!(err && err.name === "AbortError");
+      if (!opts.silent) toast(timeout ? "请求超时，请稍后重试" : "网络请求失败，请检查服务状态后重试", "err");
+      return { code: timeout ? 408 : 0, msg: timeout ? "请求超时" : "网络请求失败" };
+    }).then(function (v) { clearTimer(); return v; });
   }
   function badge(el, good, label) {
     el.className = "badge " + (good ? "badge-ok" : "badge-off");
@@ -2297,11 +2318,17 @@
       if (!convVisible(c)) return;
       var peer = c.peer || c.user || c.target || c.contact || {};
       var name = c.name || c.title || pickDisplayName(peer, "") || c.id;
-      // 同名会话追加短 ID，避免侧栏出现无法区分的重复条目。
-      if (nameCounts[name] > 1) name = name + " · " + shortID(c.id);
       var meta = convAppMeta(c);
+      // 同名会话优先追加所属应用名，便于区分同一群在不同应用下的入口；
+      // 应用名相同或缺失时再追加短 ID。
+      if (nameCounts[name] > 1) {
+        var disambiguator = meta && meta.name && meta.name !== name ? meta.name : shortID(c.id);
+        name = name + " · " + disambiguator;
+      }
       var active = state.conv && state.conv.id === c.id;
-      var av = pickAvatarURL(c) || (state.app && state.app.avatar_url) || "";
+      // 会话头像不能回退到当前选中应用的图标：多应用混排时会把所有无头像会话
+      // 显示成同一个应用头像，看起来像随机错配。应用归属由下方 appLine 单独展示。
+      var av = pickConversationAvatar(c);
       var own = convOwnLabel(c);
       var sameName = !!meta && meta.configured !== false && String(meta.name || "").trim() === String(name || "").trim();
       var appLine = "";
@@ -2442,11 +2469,14 @@
   function renderMsgs() {
     var box = $("#chatStream");
     if (!box) return;
+    // 用户正在向上翻阅历史时不要每次轮询都强行拉回底部。
+    var pinned = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+    var prevTop = box.scrollTop;
     if (!state.msgs.length) { box.innerHTML = emptyState("message", "暂无消息", "在下方输入框发送内容，中间件会按功能或 Agent 自动回复。"); return; }
     var app = state.app || {};
     var acct = state.account || {};
     var members = memberIndex(state.conv);
-    var convAv = pickAvatarURL(state.conv);
+    var convAv = pickConversationAvatar(state.conv);
     box.innerHTML = state.msgs.map(function (m) {
       var body = m.body || {};
       var isMarkdown = body.type === "markdown";
@@ -2474,7 +2504,8 @@
       return '<div class="msg-item ' + (out ? "msg-item-out" : "msg-item-in") + '">' + avatarHTML(av, who, "msg-avatar")
         + '<div class="msg-main"><span class="msg-meta" title="' + esc(who) + '">' + esc(who) + " · " + esc(t) + '</span><div class="msg-bubble ' + (out ? "msg-out" : "msg-in") + '">' + rendered + "</div></div></div>";
     }).join("");
-    box.scrollTop = box.scrollHeight;
+    if (pinned) box.scrollTop = box.scrollHeight;
+    else box.scrollTop = prevTop;
   }
 
   function sendChat(dryRun) {
@@ -4843,7 +4874,7 @@
     if (name) fd.append("name", name);
     var btn = $("#uploadBtn");
     btn.disabled = true;
-    api("/jiying/api/upload", { method: "POST", body: fd }).then(function (r) {
+    api("/jiying/api/upload", { method: "POST", body: fd, timeout: 120000 }).then(function (r) {
       btn.disabled = false;
       if (r.code !== 200) { toast(r.msg || r.message || "上传失败", "err"); return; }
       var d = r.data || {};

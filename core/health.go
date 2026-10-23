@@ -27,12 +27,9 @@ func readyz(c *gin.Context) {
 		"task_queue":  taskLoopReady(),
 		"app_channel": AppChannelConnected(),
 	}
-	ready := true
-	for _, ok := range checks {
-		if !ok {
-			ready = false
-		}
-	}
+	// 应用通道依赖外部服务，短暂断线不应让整个实例退出负载均衡；
+	// 只把本地存储与任务消费线程作为就绪的硬条件。
+	ready := checks["storage"] && checks["task_queue"]
 	code := http.StatusOK
 	status := "ready"
 	if !ready {

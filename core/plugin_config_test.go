@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -195,5 +196,28 @@ func TestRedactConfigSchemaHidesSecretDefaults(t *testing.T) {
 	// 不应修改原 schema。
 	if schema[1].Default != "hard-coded" {
 		t.Fatalf("原 schema 被意外修改: %+v", schema[1])
+	}
+}
+
+func TestPluginSecretEncryptedAtRest(t *testing.T) {
+	setupAgentBucket(t, "plugin-secret-at-rest")
+	name := "secret-demo.js"
+	BucketApp.Delete(pluginConfigBucketKey(name))
+	t.Cleanup(func() { BucketApp.Delete(pluginConfigBucketKey(name)) })
+
+	schema := []PluginConfigField{
+		{Key: "host", Type: "string"},
+		{Key: "token", Type: "secret"},
+	}
+	if err := savePluginConfig(name, map[string]string{"host": "h", "token": "plain-token"}, schema); err != nil {
+		t.Fatalf("保存失败: %v", err)
+	}
+	raw := BucketApp.GetString(pluginConfigBucketKey(name))
+	if strings.Contains(raw, "plain-token") || !strings.Contains(raw, secretEncPrefix) {
+		t.Fatalf("密钥应加密落盘: %q", raw)
+	}
+	got := LoadPluginConfig(name)
+	if got["host"] != "h" || got["token"] != "plain-token" {
+		t.Fatalf("读回不一致: %+v", got)
 	}
 }

@@ -88,6 +88,10 @@ func NewUser() *User {
 func init() {
 	loadAll()
 	ensureAdmin()
+	core.SetSessionUserActive(func(id string) bool {
+		u := GetUser(id)
+		return u != nil && !u.Disable
+	})
 }
 
 func loadAll() {
@@ -217,6 +221,17 @@ func VerifyPassword(username, password string) *User {
 	return u
 }
 
+// ValidatePassword 校验控制台口令的基本强度：至少 8 个字符，且不超过 bcrypt 的 72 字节上限。
+func ValidatePassword(plain string) error {
+	if len(plain) < 8 {
+		return errorsNew("密码至少需要 8 个字符")
+	}
+	if len(plain) > 72 {
+		return errorsNew("密码不能超过 72 个字符")
+	}
+	return nil
+}
+
 // SetPassword 对明文口令做哈希后保存到 User。
 func (u *User) SetPassword(plain string) error {
 	h, err := bcrypt.GenerateFromPassword([]byte(plain), bcrypt.DefaultCost)
@@ -277,6 +292,9 @@ func (u *User) Register(username, password, email string) error {
 	}
 	if GetUser(username) != nil {
 		return errExists
+	}
+	if err := ValidatePassword(password); err != nil {
+		return err
 	}
 	u.ID = username
 	if err := u.SetPassword(password); err != nil {

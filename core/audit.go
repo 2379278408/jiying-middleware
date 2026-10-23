@@ -65,15 +65,19 @@ func loadAuditLocked() []AuditEntry {
 }
 
 // flushAudit 把内存中的审计列表写入桶；失败只记警告，下次写入会再次触发。
-func flushAudit() {
+func flushAudit() { flushAuditTo(BucketApp) }
+
+// flushAuditTo 将待写审计写入指定桶。定时器在调度时就固定目标桶，
+// 避免回调触发时再次读取全局 BucketApp（测试替换桶时会构成数据竞争）。
+func flushAuditTo(bucket Bucket) {
 	auditMu.Lock()
 	defer auditMu.Unlock()
 	auditCache.timer = nil
-	if !auditCache.dirty || BucketApp == nil {
+	if !auditCache.dirty || bucket == nil {
 		return
 	}
 	// 存储桶已切换（测试或热切换）时丢弃旧桶的待写数据，避免写到新桶。
-	if !auditCache.loaded || auditCache.key != BucketApp.String() {
+	if !auditCache.loaded || auditCache.key != bucket.String() {
 		auditCache.dirty = false
 		return
 	}
@@ -82,7 +86,7 @@ func flushAudit() {
 		GetMyLog().Warn("审计日志序列化失败: %v", err)
 		return
 	}
-	if BucketApp.Set("jiying_audit", string(raw)) {
+	if bucket.Set("jiying_audit", string(raw)) {
 		auditCache.dirty = false
 	}
 }
@@ -132,7 +136,8 @@ func RecordAuditApp(appID, actor, action, target, detail, result string) {
 	auditCache.list = list
 	auditCache.dirty = true
 	if auditCache.timer == nil {
-		auditCache.timer = time.AfterFunc(auditFlushDelay, flushAudit)
+		bucket := BucketApp
+		auditCache.timer = time.AfterFunc(auditFlushDelay, func() { flushAuditTo(bucket) })
 	}
 }
 

@@ -247,6 +247,9 @@ func UpdateFeatureSettings(name string, patch featurePatch) error {
 		if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
 			return fmt.Errorf("HTTP 功能需要 http(s) 地址")
 		}
+		if err := validateOutboundURL(target, false); err != nil {
+			return err
+		}
 		f.Target = target
 	}
 	if patch.Scope != nil {

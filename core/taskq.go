@@ -99,8 +99,14 @@ func (q *taskQueue) load() {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	for _, t := range list {
+		// 进程重启时仍处于 running 的任务无法确认副作用是否已发生，
+		// 不能再自动放回 pending 重放；标记失败并保留记录等待人工处理。
 		if t.Status == taskRunning {
-			t.Status = taskPending
+			t.Status = taskFailed
+			t.ErrorCode = "PROCESS_RESTARTED"
+			t.Result = "服务重启，任务未完成，请人工确认后重试"
+			t.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+			t.UpdatedAt = t.FinishedAt
 		}
 		if t.Confirm && (t.Status == "" || t.Status == taskPending) {
 			t.Status = taskWaitingConfirmation
@@ -275,7 +281,7 @@ func (q *taskQueue) run(t *Task) {
 				cur.Status = taskTimeout
 				cur.ErrorCode = "EXECUTION_TIMEOUT"
 			}
-			text = "失败: " + err.Error()
+			text = "失败: " + redactSecretText(err.Error())
 		} else {
 			cur.Status = taskDone
 			cur.Result = result
@@ -752,9 +758,11 @@ func bindChoice(choiceMessageID string, task *Task) {
 	if choiceMessageID == "" || task == nil || task.ID == "" {
 		return
 	}
+	pruneChoiceWaits()
 	choiceWaits.Store(choiceMessageID, choiceWait{
 		TaskID:         task.ID,
 		UserID:         task.UserID,
 		ConversationID: task.ConversationID,
+		CreatedAt:      time.Now(),
 	})
 }

@@ -116,33 +116,37 @@ func newScriptSandbox(pluginPath string) (*scriptSandbox, error) {
 }
 
 // sandboxCommand 组合无网络命名空间、rlimit 与解释器命令。
-// prlimit 不可用时退化为普通子进程，仍保留超时与进程组终止。
-func sandboxCommand(ctx context.Context, sandbox *scriptSandbox, bin string, argv []string) *exec.Cmd {
+// 缺少 prlimit 或声明离线却缺少 unshare 时直接失败，避免安全策略静默退化。
+func sandboxCommand(ctx context.Context, sandbox *scriptSandbox, bin string, argv []string) (*exec.Cmd, error) {
 	cmdArgs := append([]string(nil), argv...)
-	if prlimit, err := exec.LookPath("prlimit"); err == nil {
-		limit := []string{
-			fmt.Sprintf("--as=%d", scriptMemoryLimit),
-			fmt.Sprintf("--cpu=%d", scriptCPUQuota),
-			fmt.Sprintf("--nproc=%d", scriptMaxProcesses),
-			fmt.Sprintf("--nofile=%d", scriptMaxOpenFiles),
-			"--",
-			bin,
-		}
-		cmdArgs = append(limit, cmdArgs...)
-		bin = prlimit
+	prlimit, err := exec.LookPath("prlimit")
+	if err != nil {
+		return nil, fmt.Errorf("缺少 prlimit，无法限制脚本资源")
 	}
+	limit := []string{
+		fmt.Sprintf("--as=%d", scriptMemoryLimit),
+		fmt.Sprintf("--cpu=%d", scriptCPUQuota),
+		fmt.Sprintf("--nproc=%d", scriptMaxProcesses),
+		fmt.Sprintf("--nofile=%d", scriptMaxOpenFiles),
+		"--",
+		bin,
+	}
+	cmdArgs = append(limit, cmdArgs...)
+	bin = prlimit
 	if !sandbox.Network {
-		if unshare, err := exec.LookPath("unshare"); err == nil {
-			flags := []string{"-n", "--"}
-			if os.Geteuid() != 0 {
-				// 非 root 运行需要同时创建用户命名空间，才能获得 CAP_SYS_ADMIN 建立网络命名空间。
-				flags = []string{"-Urn", "--"}
-			}
-			cmdArgs = append(append(flags, bin), cmdArgs...)
-			bin = unshare
+		unshare, err := exec.LookPath("unshare")
+		if err != nil {
+			return nil, fmt.Errorf("插件声明离线执行，但缺少 unshare，拒绝启动")
 		}
+		flags := []string{"-n", "--"}
+		if os.Geteuid() != 0 {
+			// 非 root 运行需要同时创建用户命名空间，才能获得 CAP_SYS_ADMIN 建立网络命名空间。
+			flags = []string{"-Urn", "--"}
+		}
+		cmdArgs = append(append(flags, bin), cmdArgs...)
+		bin = unshare
 	}
-	return exec.CommandContext(ctx, bin, cmdArgs...)
+	return exec.CommandContext(ctx, bin, cmdArgs...), nil
 }
 
 // limitWriter 限制写入总量，超出部分丢弃，避免脚本输出撑爆内存。
@@ -177,7 +181,10 @@ func validatePythonScript(path string) error {
 		return err
 	}
 	defer sandbox.cleanup()
-	cmd := sandboxCommand(ctx, sandbox, pythonBin(), []string{"-I", "-c", check, path})
+	cmd, err := sandboxCommand(ctx, sandbox, pythonBin(), []string{"-I", "-c", check, path})
+	if err != nil {
+		return err
+	}
 	configureProcessGroup(cmd)
 	cmd.Dir = sandbox.Dir
 	cmd.Env = scriptEnv(map[string]string{"HOME": sandbox.Dir, "TMPDIR": sandbox.Dir})
@@ -255,7 +262,10 @@ func runPythonScript(path, args, convID, replyTo string, cfgEnv map[string]strin
 	if fields := strings.Fields(args); len(fields) > 0 {
 		argv = append(argv, fields...)
 	}
-	cmd := sandboxCommand(ctx, sandbox, pythonBin(), argv)
+	cmd, err := sandboxCommand(ctx, sandbox, pythonBin(), argv)
+	if err != nil {
+		return "", err
+	}
 	configureProcessGroup(cmd)
 	cmd.Dir = sandbox.Dir
 	extra := map[string]string{

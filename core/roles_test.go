@@ -86,3 +86,34 @@ func TestListUserRolesExcludesImplicit(t *testing.T) {
 		t.Fatal("implicit users must not appear in the role table")
 	}
 }
+
+func TestScriptConsoleRoleIsOps(t *testing.T) {
+	setupRolesBucket(t, "roles-script")
+	if got := UserRole(ScriptConsoleUser); got != RoleOps {
+		t.Fatalf("script console role = %q, want %q", got, RoleOps)
+	}
+	if HasRole(ScriptConsoleUser, RoleMaster) {
+		t.Fatal("script console must not inherit master")
+	}
+	if !HasRole(ScriptConsoleUser, RoleOps) {
+		t.Fatal("script console should keep ops for plugin management")
+	}
+}
+
+func TestAppRoleOverride(t *testing.T) {
+	setupRolesBucket(t, "roles-app")
+	rolesMu.Lock()
+	all := loadAppRoles()
+	all["app-a"] = map[string]string{"alice": RoleOps, "bob": RoleReadonly}
+	saveAppRoles(all)
+	rolesMu.Unlock()
+	if got := UserRoleForApp("alice", "app-a"); got != RoleOps {
+		t.Fatalf("app role = %q, want %q", got, RoleOps)
+	}
+	if UserRoleForApp("alice", "app-b") != RoleReadonly {
+		t.Fatal("app role must not leak to other apps")
+	}
+	if got := UserRoleForApp("admin", "app-a"); got != RoleMaster {
+		t.Fatalf("console admin should stay master, got %q", got)
+	}
+}

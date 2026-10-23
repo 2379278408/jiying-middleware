@@ -114,18 +114,42 @@ func LoadPluginConfig(name string) map[string]string {
 		GetMyLog().Warn("插件配置解析失败 %s: %v", name, err)
 		return map[string]string{}
 	}
+	for k, v := range out {
+		out[k] = openSecret(v)
+	}
 	return out
 }
 
-func savePluginConfig(name string, values map[string]string) error {
+func savePluginConfig(name string, values map[string]string, schema ...[]PluginConfigField) error {
 	if BucketApp == nil {
 		return fmt.Errorf("存储未初始化")
 	}
-	b, err := json.Marshal(values)
+	secretKeys := map[string]bool{}
+	if len(schema) > 0 {
+		for _, f := range schema[0] {
+			if f.Type == "secret" {
+				secretKeys[f.Key] = true
+			}
+		}
+	}
+	stored := make(map[string]string, len(values))
+	for k, v := range values {
+		if secretKeys[k] && v != "" {
+			sealed, err := sealSecret(v)
+			if err != nil {
+				return fmt.Errorf("密钥 %s 加密失败: %w", k, err)
+			}
+			v = sealed
+		}
+		stored[k] = v
+	}
+	b, err := json.Marshal(stored)
 	if err != nil {
 		return err
 	}
-	BucketApp.Set(pluginConfigBucketKey(name), string(b))
+	if !BucketApp.Set(pluginConfigBucketKey(name), string(b)) {
+		return fmt.Errorf("保存插件配置失败")
+	}
 	return nil
 }
 

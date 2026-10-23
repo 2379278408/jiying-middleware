@@ -303,6 +303,21 @@ func TestCommandPanicStillAcks(t *testing.T) {
 		if p.Cursor != 9 {
 			t.Fatalf("cursor=%d", p.Cursor)
 		}
+		// Ack 在持锁期间完成落库与台账写入；拿到锁即说明后台路径已完全结束，
+		// 避免下个测试替换 BucketApp 时与残留 goroutine 竞争。
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			client.mu.Lock()
+			done := client.ackWatermark >= 9
+			client.mu.Unlock()
+			if done {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("ack 未完成")
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("panic path must still ack")
 	}

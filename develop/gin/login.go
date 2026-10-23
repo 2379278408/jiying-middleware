@@ -90,14 +90,9 @@ func PostLogin(c *gin.Context) {
 			jsonErr(c, "用户名或密码错误")
 			return
 		}
-		u := users.GetUser(core.ConsoleAdminUserID())
-		if u == nil || u.Disable {
-			core.RecordAudit(username, "login.fail", username, "来源 "+utils.GetClientIP(c), "失败: 控制台管理员不可用")
-			jsonErr(c, "控制台管理员不可用")
-			return
-		}
 		core.ResetLoginFailures(guardKey)
-		IssueUserSession(c, u)
+		// 使用独立身份签发会话，只具备 ops 权限；不映射到控制台管理员。
+		IssueUserSession(c, &users.User{ID: core.ScriptConsoleUser})
 		core.GetMyLog().Info("插件脚本登录成功 %s", utils.GetClientIP(c))
 		core.RecordAudit(username, "login.script", username, "来源 "+utils.GetClientIP(c), "成功")
 		jsonOK(c, nil)
