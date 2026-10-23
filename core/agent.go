@@ -34,6 +34,8 @@ type AgentConfig struct {
 	MaxContextBytes int `json:"max_context_bytes"`
 	// MaxTools 限制单次运行实际执行的工具调用总数。
 	MaxTools int `json:"max_tools"`
+	// TimeoutSeconds 是单次模型请求的超时时间；0 表示使用默认值。
+	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
 	// AppSystems 按应用覆盖系统提示；未配置或为空时使用全局 System。
 	AppSystems map[string]string `json:"app_systems,omitempty"`
 	// Temperature 是采样温度；0 表示不显式传给上游。
@@ -62,6 +64,9 @@ const (
 	agentMinTools        = 1
 	agentMaxTools        = 32
 	agentDefaultTools    = 8
+	agentMinTimeout      = 30
+	agentMaxTimeout      = 600
+	agentDefaultTimeout  = 150
 	agentToolResultCap   = 12 * 1024
 	// agentToolResultTotalCap 限制单次运行回灌给模型的全部工具结果总量。
 	agentToolResultTotalCap = 64 * 1024
@@ -91,14 +96,18 @@ func normalizeAgentLimits(cfg *AgentConfig) {
 	if cfg.MaxTools == 0 {
 		cfg.MaxTools = agentDefaultTools
 	}
+	if cfg.TimeoutSeconds == 0 {
+		cfg.TimeoutSeconds = agentDefaultTimeout
+	}
 	cfg.MaxTurns = clampInt(cfg.MaxTurns, agentMinTurns, agentMaxTurns)
 	cfg.MaxHistory = clampInt(cfg.MaxHistory, agentMinHistory, agentMaxHistory)
 	cfg.MaxContextBytes = clampInt(cfg.MaxContextBytes, agentMinContextBytes, agentMaxContextBytes)
 	cfg.MaxTools = clampInt(cfg.MaxTools, agentMinTools, agentMaxTools)
+	cfg.TimeoutSeconds = clampInt(cfg.TimeoutSeconds, agentMinTimeout, agentMaxTimeout)
 }
 
 func LoadAgentConfig() AgentConfig {
-	cfg := AgentConfig{Model: "gpt-4o-mini", MaxTurns: 6, MaxHistory: 12, MaxContextBytes: agentDefaultContext, MaxTools: agentDefaultTools}
+	cfg := AgentConfig{Model: "gpt-4o-mini", MaxTurns: 6, MaxHistory: 12, MaxContextBytes: agentDefaultContext, MaxTools: agentDefaultTools, TimeoutSeconds: agentDefaultTimeout}
 	cfg.BaseURL = strings.TrimRight(strings.TrimSpace(os.Getenv("USER_LLM_BASE_URL")), "/")
 	cfg.APIKey = strings.TrimSpace(os.Getenv("USER_LLM_API_KEY"))
 	if m := strings.TrimSpace(os.Getenv("USER_LLM_MODEL")); m != "" {
@@ -152,6 +161,9 @@ func LoadAgentConfig() AgentConfig {
 				if stored.MaxTools > 0 {
 					cfg.MaxTools = stored.MaxTools
 				}
+				if stored.TimeoutSeconds > 0 {
+					cfg.TimeoutSeconds = stored.TimeoutSeconds
+				}
 				cfg.Enabled = stored.Enabled
 				if key := openSecret(stored.APIKey); key != "" {
 					cfg.APIKey = key
@@ -181,6 +193,16 @@ func SaveAgentConfig(cfg AgentConfig) {
 
 func (c AgentConfig) ready() bool {
 	return c.Enabled && c.BaseURL != "" && c.APIKey != "" && c.Model != ""
+}
+
+// agentRunTimeout 为一次 Agent 运行预留总预算：至少覆盖单次模型请求的
+// 配置超时并留出工具执行时间，同时保留原有 240 秒下限。
+func agentRunTimeout(cfg AgentConfig) time.Duration {
+	per := time.Duration(clampInt(cfg.TimeoutSeconds, agentMinTimeout, agentMaxTimeout)+60) * time.Second
+	if per < 240*time.Second {
+		return 240 * time.Second
+	}
+	return per
 }
 
 func normalizeTemperature(v float64) float64 {
@@ -1004,7 +1026,8 @@ func callChat(ctx context.Context, cfg AgentConfig, model string, msgs []chatMes
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
-	client := &http.Client{Timeout: 150 * time.Second}
+	timeout := time.Duration(clampInt(cfg.TimeoutSeconds, agentMinTimeout, agentMaxTimeout)) * time.Second
+	client := &http.Client{Timeout: timeout}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -1045,6 +1068,7 @@ func registerAgentAPI() {
 			"max_context_bytes": cfg.MaxContextBytes,
 			"max_context_kb":    cfg.MaxContextBytes / 1024,
 			"max_tools":         cfg.MaxTools,
+			"timeout_seconds":   cfg.TimeoutSeconds,
 			"has_key":           cfg.APIKey != "",
 		})
 	})
@@ -1091,6 +1115,12 @@ func registerAgentAPI() {
 		}
 		if v := c.PostForm("max_tools"); v != "" {
 			fmt.Sscan(v, &cfg.MaxTools)
+		}
+		if v := strings.TrimSpace(c.PostForm("timeout_seconds")); v != "" {
+			var timeout int
+			if _, err := fmt.Sscan(v, &timeout); err == nil {
+				cfg.TimeoutSeconds = timeout
+			}
 		}
 		normalizeAgentLimits(&cfg)
 		SaveAgentConfig(cfg)

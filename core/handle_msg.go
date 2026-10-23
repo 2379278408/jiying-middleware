@@ -70,6 +70,10 @@ const (
 	appReplyBudgetKey     = "relay_app_reply_budget"
 )
 
+// appReplyBurstPerMin 限制单会话每分钟的应用间自动回复，避免短时间互相刷屏；
+// 每日总量仍由持久化配额兜底。变量形式便于测试覆盖阈值。
+var appReplyBurstPerMin = 12
+
 type appReplyBudgetStore struct {
 	Day    string         `json:"day"`
 	Counts map[string]int `json:"counts"`
@@ -78,10 +82,12 @@ type appReplyBudgetStore struct {
 var appReplyBudget = struct {
 	sync.Mutex
 	day    string
+	minute string
 	counts map[string]int
+	burst  map[string]int
 	bucket string
 	loaded bool
-}{counts: map[string]int{}}
+}{counts: map[string]int{}, burst: map[string]int{}}
 
 // ensureAppReplyBudgetLocked 按天加载配额；存储桶或日期变化时重建缓存。
 func ensureAppReplyBudgetLocked(today string) {
@@ -121,13 +127,23 @@ func allowAppReplyBudget(convID string) bool {
 	if convID == "" {
 		return false
 	}
-	today := time.Now().Format("2006-01-02")
+	now := time.Now()
+	today := now.Format("2006-01-02")
+	minute := now.Format("2006-01-02T15:04")
 	appReplyBudget.Lock()
 	defer appReplyBudget.Unlock()
 	ensureAppReplyBudgetLocked(today)
+	if appReplyBudget.minute != minute {
+		appReplyBudget.minute = minute
+		appReplyBudget.burst = map[string]int{}
+	}
 	if appReplyBudget.counts[convID] >= appReplyBudgetPerConv {
 		return false
 	}
+	if appReplyBudget.burst[convID] >= appReplyBurstPerMin {
+		return false
+	}
+	appReplyBudget.burst[convID]++
 	appReplyBudget.counts[convID]++
 	if BucketApp != nil {
 		raw, err := json.Marshal(appReplyBudgetStore{Day: today, Counts: appReplyBudget.counts})
@@ -230,7 +246,7 @@ func dispatchAgentReply(sender *JiyingSender, prompt string) {
 			}
 			finishSender(sender)
 		}()
-		ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), agentRunTimeout(LoadAgentConfig()))
 		defer cancel()
 		out, err := RunAgent(ctx, sender.ChatID, sender.UserID, prompt, sender.Seq)
 		if err != nil {

@@ -100,3 +100,40 @@ func TestMsgStatsResetOnNewDay(t *testing.T) {
 		t.Fatalf("new day should reset counters: in=%d out=%d", in, out)
 	}
 }
+
+func TestUnifiedSendMessageCountsOutbound(t *testing.T) {
+	setupMsgStatsBucket(t, "msgstats-unified-send")
+	client, _ := rpcTestClient(t, func(method string, _ json.RawMessage) (bool, string, json.RawMessage) {
+		return true, "", json.RawMessage(`{"message":{"id":"m-app"}}`)
+	})
+	appConnPool.mu.Lock()
+	appConnPool.items[client.cfg.AppID] = &appRuntime{cfg: AppConn{AppID: client.cfg.AppID}, client: client}
+	appConnPool.defaultID = client.cfg.AppID
+	appConnPool.syncDefaultLocked()
+	appConnPool.mu.Unlock()
+	t.Cleanup(stopAppPool)
+	rememberConvApp("conv-app", client.cfg.AppID)
+
+	if _, err := SendMessage(context.Background(), SendOptions{
+		ConversationID: "conv-app", Text: "hi", Identity: "app",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	SetUserSession("user@example.com", "tok")
+	defer SetUserSession("", "")
+	oldSend := sendUserCall
+	defer func() { sendUserCall = oldSend }()
+	sendUserCall = func(ctx context.Context, method, path string, body any) ([]byte, error) {
+		return []byte(`{"data":{"message":{"id":"m-user"}}}`), nil
+	}
+	if _, err := SendMessage(context.Background(), SendOptions{
+		ConversationID: "conv-user", Text: "hi", Identity: "user",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if in, out := jiyingMsgCounts(); in != 0 || out != 2 {
+		t.Fatalf("unified send should count once per identity: in=%d out=%d", in, out)
+	}
+}

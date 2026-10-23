@@ -1269,10 +1269,14 @@ func annotateConversations(data json.RawMessage) json.RawMessage {
 			conv["relay_app_known"] = false
 			if IsAccountConversation(id) {
 				conv["relay_account"] = true
+				conv["relay_channel"] = "account"
+			} else {
+				conv["relay_channel"] = "unknown"
 			}
 			continue
 		}
 		conv["relay_app_known"] = true
+		conv["relay_channel"] = "app"
 		conv["relay_app_id"] = appID
 		conv["relay_app_online"] = online
 		conv["relay_app_configured"] = appConnExists(appID)
