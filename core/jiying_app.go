@@ -988,7 +988,7 @@ func (c *JiyingClient) processEvent(ctx context.Context, env jiyingEnvelope) {
 // 轮询以应用自身可见的会话列表为准，不再依赖单值归属映射，
 // 因此同一个群里的多个应用都能各自看到发给自己的 @。
 func (c *JiyingClient) pollInbound(ctx context.Context) {
-	const interval = 12 * time.Second
+	interval := inboundPollInterval()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	states := map[string]*pollConvState{}
@@ -1006,6 +1006,27 @@ func (c *JiyingClient) pollInbound(ctx context.Context) {
 		}
 		c.pollInboundOnce(ctx, states, since, force)
 	}
+}
+
+// inboundPollInterval 读取轮询间隔；默认 12 秒，限制在 5~120 秒，
+// 便于会话量大或上游限流严格的环境通过环境变量调大。
+func inboundPollInterval() time.Duration {
+	const def = 12 * time.Second
+	raw := strings.TrimSpace(os.Getenv("JIYING_POLL_INTERVAL_SECONDS"))
+	if raw == "" {
+		return def
+	}
+	var sec int
+	if _, err := fmt.Sscan(raw, &sec); err != nil {
+		return def
+	}
+	if sec < 5 {
+		sec = 5
+	}
+	if sec > 120 {
+		sec = 120
+	}
+	return time.Duration(sec) * time.Second
 }
 
 type pollConvState struct {

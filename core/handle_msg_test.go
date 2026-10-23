@@ -197,12 +197,17 @@ func resetAppReplyBudgetForTest() {
 	appReplyBudget.bucket = ""
 	appReplyBudget.day = ""
 	appReplyBudget.counts = map[string]int{}
+	appReplyBudget.minute = ""
+	appReplyBudget.burst = map[string]int{}
 	appReplyBudget.Unlock()
 }
 
 func TestAppReplyBudgetPersistsAndResets(t *testing.T) {
 	setupAgentBucket(t, "app-reply-budget")
 	resetAppReplyBudgetForTest()
+	oldBurst := appReplyBurstPerMin
+	appReplyBurstPerMin = appReplyBudgetPerConv + 1
+	defer func() { appReplyBurstPerMin = oldBurst }()
 	for i := 0; i < appReplyBudgetPerConv; i++ {
 		if !allowAppReplyBudget("conv-1") {
 			t.Fatalf("第 %d 条应用回复不应被拒绝", i+1)
@@ -230,6 +235,8 @@ func TestAppReplyBudgetPersistsAndResets(t *testing.T) {
 	appReplyBudget.bucket = ""
 	appReplyBudget.day = ""
 	appReplyBudget.counts = map[string]int{}
+	appReplyBudget.minute = ""
+	appReplyBudget.burst = map[string]int{}
 	appReplyBudget.Unlock()
 	raw, err := json.Marshal(appReplyBudgetStore{
 		Day:    time.Now().AddDate(0, 0, -1).Format("2006-01-02"),
@@ -241,6 +248,28 @@ func TestAppReplyBudgetPersistsAndResets(t *testing.T) {
 	BucketApp.Set(appReplyBudgetKey, string(raw))
 	if !allowAppReplyBudget("conv-1") {
 		t.Fatal("跨天后配额应重置")
+	}
+}
+
+func TestAppReplyBurstLimit(t *testing.T) {
+	setupAgentBucket(t, "app-reply-burst")
+	resetAppReplyBudgetForTest()
+	oldBurst := appReplyBurstPerMin
+	appReplyBurstPerMin = 2
+	defer func() { appReplyBurstPerMin = oldBurst }()
+
+	if !allowAppReplyBudget("conv-burst") || !allowAppReplyBudget("conv-burst") {
+		t.Fatal("前两条应放行")
+	}
+	if allowAppReplyBudget("conv-burst") {
+		t.Fatal("每分钟上限应拒绝第三条")
+	}
+	// 切换到下一分钟窗口后恢复，不受上一分钟影响。
+	appReplyBudget.Lock()
+	appReplyBudget.minute = "2000-01-01T00:00"
+	appReplyBudget.Unlock()
+	if !allowAppReplyBudget("conv-burst") {
+		t.Fatal("新窗口应恢复配额")
 	}
 }
 

@@ -24,6 +24,8 @@
     "chat.filter.title": { zh: "按应用筛选会话", en: "Filter conversations by app" },
     "chat.noAssignment": { zh: "会话未记录应用归属", en: "No app assignment" },
     "chat.appOffline": { zh: "应用通道离线", en: "app channel offline" },
+    "chat.group": { zh: "群", en: "Group" },
+    "chat.dm": { zh: "私聊", en: "Direct" },
     "chat.noIdentity": { zh: "当前会话没有可用发送身份", en: "No send identity available" },
     "chat.canSend": { zh: "可发送身份：", en: "Send as: " },
     "chat.filter.empty": { zh: "该筛选下暂无会话", en: "No conversations match this filter" },
@@ -2237,7 +2239,18 @@
     return { id: id, name: name, avatar: avatar, online: c.relay_app_online !== false && known.online !== false, configured: c.relay_app_configured !== false };
   }
   function convAccount(c) {
-    return !!c && c.relay_account === true && !convAppMeta(c);
+    return !!c && !convAppMeta(c) && (c.relay_channel === "account" || c.relay_account === true);
+  }
+  // convKindLabel 用会话类型与成员数区分同名会话，例如「群 · 12 人」「私聊」。
+  function convKindLabel(c) {
+    var kind = String(c && c.type || "").toLowerCase();
+    var n = Number(c && c.member_count || 0);
+    if (kind === "group" || kind === "topic") {
+      var base = kind === "topic" ? (LANG === "en" ? "Topic" : "话题") : t("chat.group");
+      return n > 0 ? base + " · " + n + (LANG === "en" ? "" : " 人") : base;
+    }
+    if (kind === "app" || kind === "direct" || kind === "dm") return t("chat.dm");
+    return "";
   }
   function convOwnLabel(c) {
     var meta = convAppMeta(c);
@@ -2277,6 +2290,8 @@
     (state.apps || []).forEach(function (a) {
       var id = String(a.app_id || "");
       if (!id || seen[id]) return;
+      // 离线且没有会话的应用不进入筛选，避免「全部应用」出现一串 (0)。
+      if (a.online === false && !counts[id]) return;
       seen[id] = true;
       var name = a.name || state.appNames[id] && state.appNames[id].name || shortID(id);
       html += '<option value="' + esc(id) + '">' + esc(name) + " (" + (counts[id] || 0) + ")</option>";
@@ -2318,19 +2333,24 @@
       if (!convVisible(c)) return;
       var peer = c.peer || c.user || c.target || c.contact || {};
       var name = c.name || c.title || pickDisplayName(peer, "") || c.id;
+      var baseName = name;
       var meta = convAppMeta(c);
       // 同名会话优先追加所属应用名，便于区分同一群在不同应用下的入口；
       // 应用名相同或缺失时再追加短 ID。
       if (nameCounts[name] > 1) {
-        var disambiguator = meta && meta.name && meta.name !== name ? meta.name : shortID(c.id);
-        name = name + " · " + disambiguator;
+        var parts = [];
+        if (meta && meta.name && meta.name !== name) parts.push(meta.name);
+        var kind = convKindLabel(c);
+        if (kind) parts.push(kind);
+        parts.push(shortID(c.id));
+        name = name + " · " + parts.join(" · ");
       }
       var active = state.conv && state.conv.id === c.id;
       // 会话头像不能回退到当前选中应用的图标：多应用混排时会把所有无头像会话
       // 显示成同一个应用头像，看起来像随机错配。应用归属由下方 appLine 单独展示。
       var av = pickConversationAvatar(c);
       var own = convOwnLabel(c);
-      var sameName = !!meta && meta.configured !== false && String(meta.name || "").trim() === String(name || "").trim();
+      var sameName = !!meta && meta.configured !== false && String(meta.name || "").trim() === String(baseName || "").trim();
       var appLine = "";
       if (meta && meta.configured === false) {
         appLine = '<span class="conv-app-line conv-app-none" title="' + esc(t("chat.appMissing")) + '">' + esc(own) + "</span>";
@@ -3287,7 +3307,8 @@
          + '<details class="agent-advanced"><summary>高级运行保护</summary>'
          + '<div class="grid grid-2"><div class="field"><label>最大模型轮次</label><input class="input" id="ag_turns" type="number" min="1" max="12" value="' + esc(String(d.max_turns || 6)) + '"><div class="hint">模型连续决策的最大轮次，用于防止异常循环。</div></div>'
          + '<div class="field"><label>工具调用上限</label><input class="input" id="ag_tools" type="number" min="1" max="32" value="' + esc(String(d.max_tools || 8)) + '"><div class="hint">单次运行实际执行的功能调用总数，超出后要求模型直接作答。</div></div></div>'
-         + '<div class="field"><label>上下文预算（KB）</label><input class="input" id="ag_ctx" type="number" min="32" max="1024" value="' + esc(String(Math.round((d.max_context_bytes || 131072) / 1024))) + '"><div class="hint">系统提示、历史消息与当前输入的总预算；超出时优先丢弃最旧历史。</div></div></details>'
+         + '<div class="field"><label>上下文预算（KB）</label><input class="input" id="ag_ctx" type="number" min="32" max="1024" value="' + esc(String(Math.round((d.max_context_bytes || 131072) / 1024))) + '"><div class="hint">系统提示、历史消息与当前输入的总预算；超出时优先丢弃最旧历史。</div></div>'
+         + '<div class="field"><label>模型超时（秒）</label><input class="input" id="ag_timeout" type="number" min="30" max="600" value="' + esc(String(d.timeout_seconds || 150)) + '"><div class="hint">单次模型请求等待上限，默认 150 秒；长回复可适当调大。</div></div></details>'
         + '<div class="rl-row"><div class="spacer"></div><button class="btn btn-primary btn-sm" id="ag_save">保存配置</button></div>';
       $("#ag_save").addEventListener("click", saveAgentConfig);
       $("#ag_app_save").addEventListener("click", saveAgentAppSystem);
@@ -3321,7 +3342,8 @@
       max_turns: $("#ag_turns").value.trim(),
       max_tools: $("#ag_tools").value.trim(),
       max_context_kb: $("#ag_ctx").value.trim(),
-      max_history: $("#ag_hist").value.trim()
+      max_history: $("#ag_hist").value.trim(),
+      timeout_seconds: $("#ag_timeout").value.trim()
     };
     api("/jiying/api/agent/config", { method: "POST", form: form }).then(function (r) {
       if (r.code === 200) { toast("配置已保存", "ok"); loadAgentConfig(); }

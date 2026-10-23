@@ -60,3 +60,22 @@ func TestPollInboundUsesVisibleConversationsAndMentions(t *testing.T) {
 		t.Fatalf("无变化时不应重复入队，got %d", got)
 	}
 }
+
+func TestInboundPollInterval(t *testing.T) {
+	t.Setenv("JIYING_POLL_INTERVAL_SECONDS", "")
+	if got := inboundPollInterval(); got != 12*time.Second {
+		t.Fatalf("default interval=%s", got)
+	}
+	t.Setenv("JIYING_POLL_INTERVAL_SECONDS", "1")
+	if got := inboundPollInterval(); got != 5*time.Second {
+		t.Fatalf("min interval=%s", got)
+	}
+	t.Setenv("JIYING_POLL_INTERVAL_SECONDS", "999")
+	if got := inboundPollInterval(); got != 120*time.Second {
+		t.Fatalf("max interval=%s", got)
+	}
+	t.Setenv("JIYING_POLL_INTERVAL_SECONDS", "bad")
+	if got := inboundPollInterval(); got != 12*time.Second {
+		t.Fatalf("invalid interval=%s", got)
+	}
+}

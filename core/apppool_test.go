@@ -270,11 +270,11 @@ func TestAnnotateConversationsAddsAppOwnership(t *testing.T) {
 		t.Fatalf("upstream fields lost: %s", out)
 	}
 	a := root.Conversations[0]
-	if a["relay_app_id"] != "app-a" || a["relay_app_known"] != true || a["name"] != "A" {
+	if a["relay_app_id"] != "app-a" || a["relay_app_known"] != true || a["name"] != "A" || a["relay_channel"] != "app" {
 		t.Fatalf("owned conversation mismatch: %+v", a)
 	}
 	x := root.Conversations[1]
-	if x["relay_app_known"] != false || x["relay_app_id"] != nil {
+	if x["relay_app_known"] != false || x["relay_app_id"] != nil || x["relay_channel"] != "unknown" {
 		t.Fatalf("unknown conversation must stay unassigned: %+v", x)
 	}
 }
@@ -335,13 +335,13 @@ func TestAnnotateConversationsDistinguishesAccountAndMissingApp(t *testing.T) {
 		t.Fatal(err)
 	}
 	account, missing, unknown := root.Conversations[0], root.Conversations[1], root.Conversations[2]
-	if account["relay_account"] != true || account["relay_app_known"] != false {
+	if account["relay_account"] != true || account["relay_app_known"] != false || account["relay_channel"] != "account" {
 		t.Fatalf("account conversation mismatch: %+v", account)
 	}
-	if missing["relay_app_known"] != true || missing["relay_app_configured"] != false || missing["relay_app_online"] != false {
+	if missing["relay_app_known"] != true || missing["relay_app_configured"] != false || missing["relay_app_online"] != false || missing["relay_channel"] != "app" {
 		t.Fatalf("missing app conversation mismatch: %+v", missing)
 	}
-	if unknown["relay_account"] != nil || unknown["relay_app_known"] != false {
+	if unknown["relay_account"] != nil || unknown["relay_app_known"] != false || unknown["relay_channel"] != "unknown" {
 		t.Fatalf("unknown conversation must stay unassigned: %+v", unknown)
 	}
 }

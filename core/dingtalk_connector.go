@@ -3,6 +3,7 @@ package core
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os/exec"
@@ -441,23 +442,24 @@ func strAny(obj map[string]any, key string) string {
 }
 
 func (d *dingTalkConnector) ingestEvent(ev DingTalkEvent) {
-	key := ev.Type + "|" + ev.ID + "|" + ev.ConversationID + "|" + ev.ReceivedAt
-	if ev.ID != "" {
-		key = ev.Type + "|" + ev.ID + "|" + ev.ConversationID
+	key := ev.Type + "|" + ev.ID + "|" + ev.ConversationID
+	if ev.ID == "" {
+		// 无服务端事件 ID 时，秒级时间戳不足以区分同一秒的多条消息；
+		// 把发送人与正文摘要一起纳入 key，避免误判重复而丢消息。
+		sum := sha256.Sum256([]byte(ev.Sender + "\x00" + ev.Content))
+		key = fmt.Sprintf("%s|%s|%s|%x", ev.Type, ev.ConversationID, ev.ReceivedAt, sum[:8])
 	}
 	d.mu.Lock()
-	if ev.ID != "" {
-		for k, at := range d.seen {
-			if time.Since(at) > 10*time.Minute {
-				delete(d.seen, k)
-			}
+	for k, at := range d.seen {
+		if time.Since(at) > 10*time.Minute {
+			delete(d.seen, k)
 		}
-		if _, dup := d.seen[key]; dup {
-			d.mu.Unlock()
-			return
-		}
-		d.seen[key] = time.Now()
 	}
+	if _, dup := d.seen[key]; dup {
+		d.mu.Unlock()
+		return
+	}
+	d.seen[key] = time.Now()
 	d.events = append(d.events, ev)
 	if len(d.events) > dingTalkEventKeep {
 		d.events = d.events[len(d.events)-dingTalkEventKeep:]
