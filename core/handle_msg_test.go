@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -33,6 +34,17 @@ func TestDispatchSysCommand(t *testing.T) {
 	waitTrue(&called)
 }
 
+// finishFake 在异步处理结束时关闭 done，供测试等待后台 goroutine 完全退出。
+type finishFake struct {
+	*Faker
+	done chan struct{}
+	once sync.Once
+}
+
+func (f *finishFake) FinishAck() {
+	f.once.Do(func() { close(f.done) })
+}
+
 func TestDispatchScript(t *testing.T) {
 	if ScriptEngine == nil {
 		return
@@ -49,9 +61,15 @@ func TestDispatchScript(t *testing.T) {
 	})
 	defer func() { Functions = snapshot }()
 
-	s := &Faker{Message: "demo test", Type: 2, UserID: "u1", ChatID: "c1"}
+	done := make(chan struct{})
+	s := &finishFake{Faker: &Faker{Message: "demo test", Type: 2, UserID: "u1", ChatID: "c1"}, done: done}
 	if !HandleMessage(s) {
 		t.Fatal("HandleMessage 应命中 demo 脚本")
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("脚本执行未在超时内结束")
 	}
 }
 
