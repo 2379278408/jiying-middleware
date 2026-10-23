@@ -117,6 +117,8 @@ type JiyingClient struct {
 	lastErr string
 	// retryAt 是下一次重连的计划时间；连接成功后清空。
 	retryAt time.Time
+	// seenMsg 记录已投递的消息 ID，避免本地即时唤醒与轮询/补发重复触发。
+	seenMsg map[string]time.Time
 }
 
 type jiyingSocket interface {
@@ -149,6 +151,7 @@ func NewJiyingClient(cfg JiyingConfig, dial func(context.Context) (jiyingSocket,
 		acked:    map[int64]bool{},
 		serial:   make(chan struct{}, 1),
 		eventSem: make(chan struct{}, 64),
+		seenMsg:  map[string]time.Time{},
 	}
 }
 
@@ -365,12 +368,121 @@ func (c *JiyingClient) SendText(ctx context.Context, conversationID, replyTo, te
 	if replyTo != "" {
 		body["reply_to_message_id"] = replyTo
 	}
-	_, err := c.Call(ctx, "message.send", body)
+	raw, err := c.Call(ctx, "message.send", body)
 	if err != nil {
 		return err
 	}
 	jiyingCountOutbound()
+	var resp struct {
+		Message struct {
+			ID string `json:"id"`
+		} `json:"message"`
+	}
+	_ = json.Unmarshal(raw, &resp)
+	// 即应不会把应用消息推给其他应用；发送成功后按 mention 在本地即时唤醒目标，
+	// 避免只能依赖轮询导致最长 12 秒延迟。失败不影响发送结果，轮询仍会兜底。
+	if resp.Message.ID != "" {
+		c.notifyAppMentions(conversationID, resp.Message.ID, text)
+	}
 	return nil
+}
+
+// mentionedAppIDs 解析文本中的 {(@app/<id>)} 提法，按出现顺序去重。
+func mentionedAppIDs(text string) []string {
+	const prefix = "{(@app/"
+	var out []string
+	seen := map[string]bool{}
+	for {
+		idx := strings.Index(text, prefix)
+		if idx < 0 {
+			break
+		}
+		rest := text[idx+len(prefix):]
+		end := strings.Index(rest, ")}")
+		if end < 0 {
+			break
+		}
+		id := strings.TrimSpace(rest[:end])
+		if id != "" && !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+		text = rest[end+2:]
+	}
+	return out
+}
+
+// notifyAppMentions 把应用发送的 @ 消息即时投递给在线目标应用。
+// 目标按 message.created 走同一套处理链路，因此权限、预算与回执行为保持一致。
+func (c *JiyingClient) notifyAppMentions(conversationID, messageID, text string) {
+	ids := mentionedAppIDs(text)
+	if len(ids) == 0 {
+		return
+	}
+	senderName := c.cfg.AppID
+	appConnPool.mu.Lock()
+	if rt := appConnPool.items[c.cfg.AppID]; rt != nil && rt.profile.Name != "" {
+		senderName = rt.profile.Name
+	}
+	appConnPool.mu.Unlock()
+	for _, id := range ids {
+		if id == c.cfg.AppID {
+			continue
+		}
+		target := clientForApp(id)
+		if target == nil {
+			continue
+		}
+		payload, err := json.Marshal(map[string]any{
+			"conversation": map[string]any{"id": conversationID, "type": "group"},
+			"sender":       map[string]any{"id": c.cfg.AppID, "name": senderName, "type": "app"},
+			"message": map[string]any{
+				"id": messageID, "body": map[string]any{"type": "text", "content": text},
+			},
+		})
+		if err != nil {
+			continue
+		}
+		go target.injectEvent(context.Background(), jiyingEnvelope{
+			Kind: "event", Event: "message.created", Payload: payload,
+		})
+	}
+}
+
+// injectEvent 把本地生成的事件送入目标应用的串行处理链路。
+func (c *JiyingClient) injectEvent(ctx context.Context, env jiyingEnvelope) {
+	select {
+	case <-ctx.Done():
+		return
+	case c.eventSem <- struct{}{}:
+	}
+	c.processEvent(ctx, env)
+}
+
+// duplicateMessage 标记消息 ID 是否已投递；空 ID 不参与去重。
+func (c *JiyingClient) duplicateMessage(id string) bool {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.seenMsg == nil {
+		c.seenMsg = map[string]time.Time{}
+	}
+	now := time.Now()
+	if len(c.seenMsg) > 1024 {
+		for k, at := range c.seenMsg {
+			if now.Sub(at) > 30*time.Minute {
+				delete(c.seenMsg, k)
+			}
+		}
+	}
+	if _, ok := c.seenMsg[id]; ok {
+		return true
+	}
+	c.seenMsg[id] = now
+	return false
 }
 
 // SendStatus 向一对一会话中的在线用户同步临时状态；尽力投递，失败不影响业务。
@@ -786,6 +898,9 @@ func (c *JiyingClient) dispatchEvent(ctx context.Context, env jiyingEnvelope) (b
 		if err := json.Unmarshal(env.Payload, &p); err != nil {
 			return false, err
 		}
+		if c.duplicateMessage(p.Message.ID) {
+			return false, nil
+		}
 		text := p.Message.Body.plainText()
 		if text == "" {
 			text = p.Message.Summary
@@ -981,6 +1096,9 @@ func (c *JiyingClient) pollConversation(ctx context.Context, conv JiyingConversa
 			continue
 		}
 		if created, err := time.Parse(time.RFC3339, m.CreatedAt); err == nil && created.Before(since) {
+			continue
+		}
+		if c.duplicateMessage(m.ID) {
 			continue
 		}
 		convType := strings.TrimSpace(conv.Type)
