@@ -34,8 +34,40 @@ const (
 var (
 	myLog   Loggers
 	getOnce sync.Once
-	logChan chan string
+	// logHub 向本机 SSE 订阅者广播日志；订阅者各自持有有界缓冲区，慢客户端只会丢日志，不会阻塞写日志。
+	logHub = struct {
+		sync.Mutex
+		subs map[chan string]struct{}
+	}{subs: map[chan string]struct{}{}}
 )
+
+func subscribeLogs() chan string {
+	ch := make(chan string, 128)
+	logHub.Lock()
+	logHub.subs[ch] = struct{}{}
+	logHub.Unlock()
+	return ch
+}
+
+func unsubscribeLogs(ch chan string) {
+	logHub.Lock()
+	if _, ok := logHub.subs[ch]; ok {
+		delete(logHub.subs, ch)
+		close(ch)
+	}
+	logHub.Unlock()
+}
+
+func broadcastLog(line string) {
+	logHub.Lock()
+	defer logHub.Unlock()
+	for ch := range logHub.subs {
+		select {
+		case ch <- line:
+		default:
+		}
+	}
+}
 
 func GetMyLog() Loggers {
 	getOnce.Do(func() {
@@ -147,8 +179,8 @@ func (l *Loggers) writeToLoggers(level int, msg string) {
 	_ = fn
 	logstr := fmt.Sprintf("[[ %s ] [ %s ] [ %s : %d ] %s]", time.Now().Format("2006-01-02 15:04:05"), levelChar, file, line, sanitizeLogText(msg))
 
-	if logChan != nil {
-		logChan <- logstr
+	if logHub.subs != nil {
+		broadcastLog(logstr)
 	}
 	if l.logfilelevel <= int8(level) {
 		fmt.Fprintln(l.file, logstr)
@@ -215,32 +247,30 @@ func (l Loggers) Errorf(format string, args ...interface{}) {
 
 func initLogger() {
 	Server.Group("/sselogs", func(c *gin.Context) {
-		ip := c.ClientIP()
-		if ip != "127.0.0.1" && ip != "::1" {
+		// 只信任 TCP 直连来源，避免伪造 X-Forwarded-For 冒充本机。
+		if !isLoopbackRemote(c.Request.RemoteAddr) {
 			c.AbortWithStatus(403)
 			return
 		}
 		if !CheckCookie(c) {
-			c.Abort()
+			c.AbortWithStatus(401)
 			return
 		}
 		c.Next()
-	}, func(c *gin.Context) {
+	}, requireRole(RoleOps), func(c *gin.Context) {
 		c.Header("Content-Type", "text/event-stream")
 		c.Header("Cache-Control", "no-cache")
 		c.Header("Connection", "keep-alive")
 		c.Header("X-Accel-Buffering", "no")
-		newChan := make(chan string)
-		oldChan := logChan
-		logChan = newChan
-		defer func() {
-			logChan = oldChan
-			close(newChan)
-		}()
+		ch := subscribeLogs()
+		defer unsubscribeLogs(ch)
 		clientGone := c.Request.Context().Done()
 		for {
 			select {
-			case msg := <-newChan:
+			case msg, ok := <-ch:
+				if !ok {
+					return
+				}
 				c.SSEvent("message", msg)
 				c.Writer.Flush()
 			case <-clientGone:

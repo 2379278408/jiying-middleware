@@ -199,6 +199,37 @@ func (p *appPool) forgetConvAppsLocked(alive map[string]bool) bool {
 	return true
 }
 
+// removeConvAppsForApp 在锁内移除某个应用的全部会话归属并返回受影响的会话 ID。
+// 调用方无需再遍历 convApp，避免与 rememberConvApp 并发读写 map。
+func (p *appPool) removeConvAppsForApp(appID string) []string {
+	appID = strings.TrimSpace(appID)
+	if appID == "" {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.ensureConvAppsLocked()
+	removed := make([]string, 0)
+	for convID, owner := range p.convApp {
+		if owner == appID {
+			removed = append(removed, convID)
+			delete(p.convApp, convID)
+		}
+	}
+	if len(removed) == 0 {
+		return nil
+	}
+	kept := p.convOrder[:0]
+	for _, convID := range p.convOrder {
+		if _, ok := p.convApp[convID]; ok {
+			kept = append(kept, convID)
+		}
+	}
+	p.convOrder = kept
+	p.persistConvAppsLocked()
+	return removed
+}
+
 // poolMu 串行化连接池配置的「读-改-写」：loadAppConns / loadAccountConns 都基于
 // 整份列表覆写，若两个请求并发修改会发生丢失更新。所有会写配置的入口都要持有它。
 var poolMu sync.Mutex
@@ -662,13 +693,7 @@ func RemoveAppConn(appID string) error {
 		poolMu.Unlock()
 		return fmt.Errorf("应用不存在")
 	}
-	appConnPool.ensureConvAppsLocked()
-	removedConvs := make([]string, 0)
-	for convID, owner := range appConnPool.convApp {
-		if owner == appID {
-			removedConvs = append(removedConvs, convID)
-		}
-	}
+	removedConvs := appConnPool.removeConvAppsForApp(appID)
 	applyAppConns(kept)
 	poolMu.Unlock()
 	cleanupRemovedApp(appID, removedConvs)

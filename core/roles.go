@@ -92,6 +92,11 @@ func UserRole(userID string) string {
 	if userID == "" {
 		return ""
 	}
+	// 插件脚本使用专用口令登录，只授予执行与写入插件所需的最小权限。
+	// 它不能继承控制台管理员身份，避免用户可编辑的脚本获得主控权限。
+	if userID == ScriptConsoleUser {
+		return RoleOps
+	}
 	if IsMaster(userID) || IsConsoleAdmin(userID) {
 		return RoleMaster
 	}
@@ -370,4 +375,41 @@ func requestHasRole(c *gin.Context, min string) bool {
 	}
 	got, ok := roleRank[requestRole(c)]
 	return ok && got >= need
+}
+
+// requireAppRole 校验当前请求在指定应用中的角色；账号级 API Key 仍按 Key 作用域判定。
+func requireAppRole(c *gin.Context, appID, min string) bool {
+	if _, ok := c.Get(ctxAPIKeyScope); ok {
+		if requestHasRole(c, min) {
+			return true
+		}
+	} else if HasRoleForApp(consoleUser(c), appID, min) {
+		return true
+	}
+	c.AbortWithStatusJSON(403, gin.H{"code": 403, "message": "权限不足"})
+	return false
+}
+
+// requireConversationRole 按会话归属应用校验角色；未知归属回落到全局角色。
+func requireConversationRole(c *gin.Context, conversationID, min string) bool {
+	if _, ok := c.Get(ctxAPIKeyScope); ok {
+		if requestHasRole(c, min) {
+			return true
+		}
+		c.AbortWithStatusJSON(403, gin.H{"code": 403, "message": "权限不足"})
+		return false
+	}
+	appID := ""
+	if id, _, _, known := ConvAppOwner(conversationID); known {
+		appID = id
+	}
+	if appID != "" {
+		if HasRoleForApp(consoleUser(c), appID, min) {
+			return true
+		}
+	} else if HasRole(consoleUser(c), min) {
+		return true
+	}
+	c.AbortWithStatusJSON(403, gin.H{"code": 403, "message": "权限不足"})
+	return false
 }

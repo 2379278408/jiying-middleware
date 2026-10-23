@@ -14,6 +14,15 @@ type Faker struct {
 	BaseSender
 }
 
+// sessionUserActive 由用户包注册，用于在会话校验时拒绝已删除或禁用的账号。
+// 通过回调注入避免 core 反向依赖 develop/users。
+var sessionUserActive func(string) bool
+
+// SetSessionUserActive 注册用户状态检查；传入 nil 可清除。
+func SetSessionUserActive(fn func(string) bool) {
+	sessionUserActive = fn
+}
+
 type Sender interface {
 	GetParentID() any
 	GetMsg() string
@@ -44,6 +53,14 @@ func CheckCookie(c *gin.Context) bool {
 	}
 	id, _ := s.Values["user"].(string)
 	if id == "" {
+		return false
+	}
+	// 插件脚本使用独立身份，不要求存在控制台用户记录。
+	if id == ScriptConsoleUser {
+		return true
+	}
+	// 用户被删除或禁用后，即使旧 Cookie 尚未过期也必须立即失效。
+	if sessionUserActive != nil && !sessionUserActive(id) {
 		return false
 	}
 	// 会话代次在改密、禁用、删除用户时递增，旧 Cookie 随即失效。

@@ -180,7 +180,7 @@ JIYING_RES=/opt/jiying JIYING_DATA=/var/lib/jiying JIYING_PORT=8080 ./jymw
 
 `JIYING_RES` 默认是可执行文件所在目录，`JIYING_DATA` 默认与资源目录相同。日志位于 `<数据目录>/logs/YYYYMMDD.log`，脚本、插件、存储桶也落在数据目录下。
 
-端口优先级为控制台配置 `port` > 环境变量 `JIYING_PORT` > 默认 `8080`；监听 `443` 时启用 TLS，需要在控制台配置 `certFile` 与 `keyFile`。其余端口按 HTTP 启动，生产环境建议由反向代理终止 TLS。
+端口优先级为环境变量 `JIYING_PORT` > 配置文件 `http.port` > 默认 `8080`；首次启动会在数据目录生成 `config.yaml` 并同步到配置桶，修改后重启生效。监听 `443` 时启用 TLS，需要在 `config.yaml` 或控制台配置 `certFile` 与 `keyFile`。其余端口按 HTTP 启动，生产环境建议由反向代理终止 TLS。
 
 ### 4. 接入即应
 
@@ -211,7 +211,7 @@ docker run -d --name jymw --restart unless-stopped \
   jiying/jymw:latest
 ```
 
-镜像内已安装 Python、`prlimit`、`unshare` 与 CA 证书。脚本沙箱依赖内核允许非特权用户命名空间；受限内核上会直接失败关闭。
+镜像内已安装 Python、`prlimit`、`unshare` 与 CA 证书。脚本沙箱依赖内核允许非特权用户命名空间；缺少 `prlimit`、`unshare` 或受限内核上会直接失败关闭。
 
 ### 6. 可选：钉钉连接器
 
@@ -313,7 +313,7 @@ API Key 在控制台「AI 接入」页创建，明文只显示一次。权限从
 
 - 连接密钥以 `enc:v1:` 密文落盘，API Key 只保存哈希，页面不回显已存密钥。
 - 出站请求默认拒绝回环、私网与云元数据地址，脚本可关闭网络命名空间。
-- 插件安装校验 Ed25519 签名与内容摘要，插件配置中的 `secret` 字段只返回是否已设置。
+- 插件安装校验 Ed25519 签名与内容摘要，插件配置中的 `secret` 字段以 `enc:v1:` 密文落盘，接口只返回是否已设置。
 - 公开 AI 文档按 API Key 角色裁剪；任务与定时按归属隔离，危险操作写审计。
 - 审计记录会剥离 URL 中的 userinfo 与敏感查询参数。
 

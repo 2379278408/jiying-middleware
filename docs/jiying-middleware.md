@@ -86,11 +86,11 @@
 
 脚本与技能按 CommonJS 语义执行，运行时提供 `module` / `exports` / `require`：安装时先在沙箱试跑，热加载到线上引擎时同样具备这些全局，避免「试跑通过、上线报 `module is not defined`」。技能若以 `module.exports` 导出函数，控制台运行与插件 `require('xxx.js')` 都会以参数调用该函数；未导出函数时回退读取脚本的 `result`，空值统一为 `ok`。
 
-插件可在头部用 `[config: key:type:default:desc]` 声明配置项，类型为 `string` / `number` / `bool` / `select` / `text` / `secret`（`select` 用 `a|b|c`，首项默认）。简写 `[config: key:说明]` 等价于 string。控制台按 schema 动态生成表单，`secret` 不回显（界面标注「已设置，留空则不修改」），保存时留空保持旧值。运行时把配置注入脚本：JS 通过全局 `config` 对象读取（number/bool 已类型化），Python 通过 `JIYING_CONFIG`（JSON）与逐项 `JIYING_CFG_<KEY>` 读取。配置按插件文件名存于桶 `plugincfg:<basename>`，删除插件时一并清理；审计只记录变更的配置键名，不记值。
+插件可在头部用 `[config: key:type:default:desc]` 声明配置项，类型为 `string` / `number` / `bool` / `select` / `text` / `secret`（`select` 用 `a|b|c`，首项默认）。简写 `[config: key:说明]` 等价于 string。控制台按 schema 动态生成表单，`secret` 不回显（界面标注「已设置，留空则不修改」），保存时留空保持旧值。运行时把配置注入脚本：JS 通过全局 `config` 对象读取（number/bool 已类型化），Python 通过 `JIYING_CONFIG`（JSON）与逐项 `JIYING_CFG_<KEY>` 读取。配置按插件文件名存于桶 `plugincfg:<basename>`，删除插件时一并清理；`secret` 字段以 `enc:v1:` 密文落盘，审计只记录变更的配置键名，不记值。
 
 插件还可用 `[class: 分类名]` 归档，用 `[service: 服务名]` 把同一业务/项目的多个插件收进同一文件夹，用 `[apps: app-a, app-b]` 声明可服务的应用白名单（`*` 或省略表示全部应用）。`/jiying/api/scripts` 会返回 `class` / `service` / `apps`，功能记录同步保存；执行功能与 Agent 工具裁剪都会校验当前应用是否命中白名单，未授权返回「该插件未授权当前应用」。控制台按「分类 → 服务 → 插件」三层展示：分类是顶层文件夹，服务是分类内的子文件夹，未声明服务的插件直接挂在分类下；搜索同时匹配分类、服务、应用与插件说明。
 
-脚本运行时按最小权限执行：每次运行创建独立工作目录并替换 `HOME` / `TMPDIR`，环境变量只放行 `PATH`、语言与 `JIYING_*` 白名单，插件目录通过 `JIYING_PLUGIN_DIR` 只读暴露；Python 子进程用 `prlimit` 限制地址空间、CPU、进程数与文件句柄，输出上限 256 KB，超时 15 秒。`[network: false]` 的 Python 插件在独立网络命名空间中运行；非 root 部署使用 `unshare -Urn`，内核禁用用户命名空间时会直接失败。安装含 `subprocess`、`os.system`、`child_process`、`requests`、`fetch`、`eval` 等高风险能力的脚本时，API 要求 `confirm=true`，控制台先弹确认框。
+脚本运行时按最小权限执行：每次运行创建独立工作目录并替换 `HOME` / `TMPDIR`，环境变量只放行 `PATH`、语言与 `JIYING_*` 白名单，插件目录通过 `JIYING_PLUGIN_DIR` 只读暴露；Python 子进程用 `prlimit` 限制地址空间、CPU、进程数与文件句柄，输出上限 256 KB，超时 15 秒。`[network: false]` 的 Python 插件在独立网络命名空间中运行；非 root 部署使用 `unshare -Urn`。缺少 `prlimit`、`unshare` 或内核禁用用户命名空间时直接失败关闭，不再退化为无限制子进程。安装含 `subprocess`、`os.system`、`child_process`、`requests`、`fetch`、`eval` 等高风险能力的脚本时，API 要求 `confirm=true`，控制台先弹确认框。
 
 插件市场使用 Ed25519 发布者签名。本机发布者首次发布自动生成 `<数据目录>/.market_signing_key`(0600) 并登记 `local` 公钥；外部发布者先通过 `POST /jiying/api/market/publishers` 登记公钥，再在发布或导入时携带 `publisher` 与 `signature`（base64，payload 为规范化元数据）。安装前同时校验发布者签名与内容摘要，签名失败或未知发布者直接拒绝；`force` 仅允许降级，不能绕过校验。发布者的公钥登记后不能更换，需要先删除旧记录。
 
@@ -161,7 +161,7 @@
 ### 接口与观测
 
 - 控制台 API 统一返回 `{ok, code, message, error_code, data, trace_id}`；每个请求都会分配追踪 ID 并同时通过响应头 `X-Trace-ID` 回传与写入访问日志（`trace=`），客户端传入的 `X-Trace-ID` 会被透传复用，便于把一次调用与运行日志逐条关联。前端在错误提示中附带短追踪号（`（追踪 xxxxxxxx）`）与「去日志」按钮，点击即跳运行日志并把该前缀填入筛选框。
-- 匿名探针 `/healthz`、`/readyz`、`/metrics` 供进程存活、就绪与 Prometheus 指标采集；就绪检查覆盖存储、任务队列与应用通道。运行观测页除健康、时长、任务与通道状态外，新增「RPC 调用」表，从 `/metrics` 解析各方法的成功/失败数、平均耗时与错误码分布，通道产生调用后自动出现。
+- 匿名探针 `/healthz`、`/readyz`、`/metrics` 供进程存活、就绪与 Prometheus 指标采集；就绪检查以本地存储与任务消费线程为硬条件；应用通道作为状态字段展示，外部通道短暂断线不会让实例退出负载均衡。运行观测页除健康、时长、任务与通道状态外，新增「RPC 调用」表，从 `/metrics` 解析各方法的成功/失败数、平均耗时与错误码分布，通道产生调用后自动出现。
 - 访问日志跳过高频心跳 `/jiying/api/connect/status` 与静态资源请求，保留有意义的接口调用记录。
 - 运行日志支持按关键字筛选、导出为 `.log` 文件，以及可选的自动刷新（勾选后每 5 秒拉取当日日志并滚到底部，离开视图即停止），便于 tail 式跟踪；审计日志支持按操作者 / 动作 / 目标 / 详情关键字筛选并显示匹配计数，每行可一键跳到运行日志并带入该动作作为筛选条件，配合 `trace_id` 完成从操作到日志的关联。审计日志可把当前筛选结果导出为 CSV（带 BOM 便于 Excel 显示中文，含时间 / 操作者 / 动作 / 目标 / 详情 / 结果六列），便于合规归档；审计加载失败时显示错误态与「重试」，不再与「暂无审计记录」混淆。审计结果的成功与失败按关键字判定（失败、拒绝、超时、错误、异常、无效、未授权），避免只匹配「失败」二字而把「拒绝」「执行超时」误标为成功。审计、任务与消息时间统一按本地 `YYYY-MM-DD HH:mm:ss` 展示，避免直接暴露 RFC3339 的 `T`/`Z`。
 - 日志接口只从文件尾部读取（最多 2 MiB）再按 `tail` 参数截取所需行数，并在从中间截断时丢弃首行残段，避免为了最后几百行把整天的日志读进内存。
@@ -352,7 +352,7 @@
 
 ### 插件运行环境与失败详情
 
-- 控制台环境注入：Python 插件子进程新增 `JIYING_PORT`、`JIYING_BASE_URL`（本机 `127.0.0.1` 控制台地址）、`JIYING_CONSOLE_USER`、`JIYING_CONSOLE_PASS`。控制台账号固定为 `script`，口令是首次使用时随机生成并以 AES-GCM 加密保存的专用令牌，登录后映射到控制台管理员身份；即应账号密码不再注入脚本。需要账号身份时使用 `JIYING_ACCOUNT_BASE_URL` / `JIYING_ACCOUNT_EMAIL`，密码始终留在服务端。仅管理员安装的插件可执行；插件自身配置的同名变量仍可覆盖。
+- 控制台环境注入：Python 插件子进程新增 `JIYING_PORT`、`JIYING_BASE_URL`（本机 `127.0.0.1` 控制台地址）、`JIYING_CONSOLE_USER`、`JIYING_CONSOLE_PASS`。控制台账号固定为 `script`，口令是首次使用时随机生成并以 AES-GCM 加密保存的专用令牌，登录后只获得运维（ops）权限，不会继承控制台管理员；即应账号密码不再注入脚本。需要账号身份时使用 `JIYING_ACCOUNT_BASE_URL` / `JIYING_ACCOUNT_EMAIL`，密码始终留在服务端。仅管理员安装的插件可执行；插件自身配置的同名变量仍可覆盖。
 - 输出脱敏：脚本成功/失败输出、任务结果、审计与 Agent 工具回灌统一经过 `redactSecretText`，账号密码与脚本控制台令牌替换为 `***`；任务详情不再展示原始凭据。
 - 失败详情：脚本非零退出时合并 `stderr` 与 `stdout`（各带标签，总计截断 2000 字符）返回。插件把错误 JSON 打印到 stdout 时不再只剩 `exit status 1`，Agent 与任务列表都能看到真实原因。
 - 账号通道边界：账号通道只有 HTTP 会话与 token，不存在应用通道那样的实时事件流；「账号侧收到入站消息」依赖应用通道，文档与就绪检查均按此语义描述。

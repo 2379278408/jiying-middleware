@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -50,5 +51,27 @@ func TestWaitForTaskDoneContextKeepsRunningSnapshot(t *testing.T) {
 	got := WaitForTaskDoneContext(ctx, "running-task", time.Second)
 	if got == nil || got.Status != taskRunning {
 		t.Fatalf("context cancel should return running snapshot, got %+v", got)
+	}
+}
+
+func TestTaskReloadDoesNotReplayRunningTask(t *testing.T) {
+	setupAgentBucket(t, "task-recover-running")
+	defer resetTaskQueue()
+	raw, err := json.Marshal([]*Task{{ID: "running-task", Status: taskRunning, Feature: "demo"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	BucketApp.Set("jiying_tasks", string(raw))
+	tasks.bucket.Store(BucketApp)
+	resetTaskQueue()
+	tasks.load()
+	tasks.mu.Lock()
+	got := tasks.items["running-task"]
+	tasks.mu.Unlock()
+	if got == nil {
+		t.Fatal("task should be restored")
+	}
+	if got.Status != taskFailed || got.ErrorCode != "PROCESS_RESTARTED" {
+		t.Fatalf("running task must not be replayed: %+v", got)
 	}
 }

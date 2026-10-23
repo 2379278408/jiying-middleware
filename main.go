@@ -27,9 +27,8 @@ func monitorGoroutine() {
 			gcount = 1
 		}
 		if gcount > 0x40000 {
-			core.GetMyLog().Warnf("进程goroutine数量过多，%d个，可能导致重启", gcount)
-			time.Sleep(3 * time.Second)
-			utils.Daemon(0)
+			core.GetMyLog().Warnf("进程goroutine数量过多，%d个，准备重启", gcount)
+			core.RequestRestart("goroutine 数量超过阈值")
 		}
 	}
 }
@@ -43,7 +42,10 @@ func main() {
 		utils.ResPath = *resPath
 	}
 
-	core.InitCore()
+	if err := core.InitCore(); err != nil {
+		core.GetMyLog().Error("初始化失败: %v", err)
+		os.Exit(1)
+	}
 	// pprof 会暴露堆栈、内存与 CPU 采样，默认关闭；仅在显式设置 JIYING_PPROF=1 时挂载。
 	if os.Getenv("JIYING_PPROF") == "1" {
 		ginpprof.Wrapper(core.Server)
@@ -54,13 +56,14 @@ func main() {
 	go monitorGoroutine()
 
 	port := 8080
+	if bucketPort := core.BucketApp.GetInt("port"); bucketPort != 0 {
+		port = bucketPort
+	}
+	// 环境变量优先级最高，便于容器编排临时覆盖 config.yaml。
 	if v := os.Getenv("JIYING_PORT"); v != "" {
 		if p, err := strconv.Atoi(v); err == nil {
 			port = p
 		}
-	}
-	if bucketPort := core.BucketApp.GetInt("port"); bucketPort != 0 {
-		port = bucketPort
 	}
 	addr := "0.0.0.0:" + strconv.Itoa(port)
 	if port == 443 {

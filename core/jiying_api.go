@@ -371,16 +371,16 @@ func registerJiyingAPI() {
 	g.POST("/task/delete", requireRole(RoleOps), jiyingAPITaskDelete)
 	g.GET("/conversations", jiyingAPIConversations)
 	g.GET("/messages", jiyingAPIMessages)
-	g.POST("/send", requireRole(RoleOps), jiyingAPISend)
-	g.POST("/send/unified", requireRole(RoleOps), jiyingAPISendUnified)
+	g.POST("/send", jiyingAPISend)
+	g.POST("/send/unified", jiyingAPISendUnified)
 	g.GET("/conversation/capabilities", jiyingAPIConversationCapabilities)
-	g.POST("/send/image", requireRole(RoleOps), jiyingAPISendImage)
-	g.POST("/send/file", requireRole(RoleOps), jiyingAPISendFile)
+	g.POST("/send/image", jiyingAPISendImage)
+	g.POST("/send/file", jiyingAPISendFile)
 	g.POST("/upload", requireRole(RoleOps), jiyingAPIUpload)
-	g.POST("/send/card", requireRole(RoleOps), jiyingAPISendCard)
-	g.POST("/send/markdown", requireRole(RoleOps), jiyingAPISendMarkdown)
-	g.POST("/send/link", requireRole(RoleOps), jiyingAPISendLink)
-	g.POST("/send/chart", requireRole(RoleOps), jiyingAPISendChart)
+	g.POST("/send/card", jiyingAPISendCard)
+	g.POST("/send/markdown", jiyingAPISendMarkdown)
+	g.POST("/send/link", jiyingAPISendLink)
+	g.POST("/send/chart", jiyingAPISendChart)
 	g.GET("/logs", requireRole(RoleOps), jiyingAPILogs)
 	Server.GET("/jiying", func(c *gin.Context) {
 		c.Redirect(http.StatusFound, "/")
@@ -514,6 +514,11 @@ func jiyingAPIFeatureInstall(c *gin.Context) {
 	url := strings.TrimSpace(c.PostForm("url"))
 	if name == "" || url == "" {
 		jiyingErr(c, "缺少功能名或地址")
+		return
+	}
+	if err := validateOutboundURL(url, false); err != nil {
+		RecordAudit(consoleUser(c), "feature.install", name, auditURL(url), "失败: "+err.Error())
+		jiyingErr(c, err.Error())
 		return
 	}
 	if err := UpsertFeature(Feature{Name: name, Kind: "http", Target: url, Scope: "master", Identity: "app", Enabled: true, Confirm: true}); err != nil {
@@ -826,7 +831,7 @@ func jiyingAPIScriptConfigSave(c *gin.Context) {
 		jiyingErr(c, err.Error())
 		return
 	}
-	if err := savePluginConfig(name, merged); err != nil {
+	if err := savePluginConfig(name, merged, schema); err != nil {
 		RecordAudit(consoleUser(c), "script.config", name, "", "失败: "+err.Error())
 		jiyingErr(c, "保存失败: "+err.Error())
 		return
@@ -1314,6 +1319,9 @@ func jiyingAPIMessages(c *gin.Context) {
 		jiyingErr(c, "会话 ID 不合法")
 		return
 	}
+	if !requireConversationRole(c, convID, RoleReadonly) {
+		return
+	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
 	var userErr error
@@ -1360,6 +1368,9 @@ func jiyingAPIConversationCapabilities(c *gin.Context) {
 		jiyingErr(c, "会话 ID 不合法")
 		return
 	}
+	if !requireConversationRole(c, convID, RoleReadonly) {
+		return
+	}
 	jiyingJSON(c, conversationCapabilities(convID))
 }
 
@@ -1371,6 +1382,13 @@ func jiyingAPISendUnified(c *gin.Context) {
 	appID := strings.TrimSpace(c.PostForm("app_id"))
 	if appID != "" && !requestHasRole(c, RoleMaster) {
 		jiyingErr(c, "指定应用发送需要主控权限")
+		return
+	}
+	if appID != "" {
+		if !requireAppRole(c, appID, RoleOps) {
+			return
+		}
+	} else if !requireConversationRole(c, convID, RoleOps) {
 		return
 	}
 	result, err := SendMessage(c.Request.Context(), SendOptions{
@@ -1420,6 +1438,9 @@ func jiyingAPISend(c *gin.Context) {
 		jiyingErr(c, "缺少会话或内容")
 		return
 	}
+	if !requireConversationRole(c, convID, RoleOps) {
+		return
+	}
 	if !conversationSendable(convID) {
 		jiyingErr(c, "即应未连接")
 		return
@@ -1438,6 +1459,9 @@ func jiyingAPISendMedia(c *gin.Context, action string, message map[string]any) {
 	convID := strings.TrimSpace(c.PostForm("conversation_id"))
 	if convID == "" {
 		jiyingErr(c, "缺少会话")
+		return
+	}
+	if !requireConversationRole(c, convID, RoleOps) {
 		return
 	}
 	if !conversationSendable(convID) {
@@ -1460,6 +1484,9 @@ func jiyingAPISendResolvedMedia(c *gin.Context, action string, build func(ctx co
 	convID := strings.TrimSpace(c.PostForm("conversation_id"))
 	if convID == "" {
 		jiyingErr(c, "缺少会话")
+		return
+	}
+	if !requireConversationRole(c, convID, RoleOps) {
 		return
 	}
 	if !conversationSendable(convID) {
