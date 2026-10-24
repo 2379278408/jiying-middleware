@@ -29,6 +29,9 @@
     "chat.noIdentity": { zh: "当前会话没有可用发送身份", en: "No send identity available" },
     "chat.canSend": { zh: "可发送身份：", en: "Send as: " },
     "chat.filter.empty": { zh: "该筛选下暂无会话", en: "No conversations match this filter" },
+    "chat.search": { zh: "搜索会话名称、ID 或应用", en: "Search name, ID or app" },
+    "chat.noMatch": { zh: "没有匹配的会话", en: "No conversations match" },
+    "chat.loadMore": { zh: "显示更多（剩余 ", en: "Show more (" },
     "nav.connect": { zh: "接入系统", en: "Connect" },
     "nav.pool": { zh: "连接池", en: "Connection pool" },
     "nav.dingtalk": { zh: "钉钉连接器", en: "DingTalk connector" },
@@ -1213,7 +1216,7 @@
     if (b && retry) b.addEventListener("click", retry);
   }
 
-  var state = { view: "home", cerr: null, convs: [], conv: null, msgs: [], interval: null, baseUptime: null, uptimeAt: 0, uptimeTimer: null, chatEpoch: 0, chatRequest: 0, chatConvID: "", logLines: [], logShown: [], logPending: "", logTimer: null, logLevel: "all", logPinned: true, logFromBottom: 0, logLoadedAt: "", logDay: "", tasks: [], tasksErr: "", silentTasks: [], role: "", auditRows: [], auditErr: "", executions: [], executionsErr: "", execFilter: { kind: "", status: "", name: "" }, chatCaps: null, convFilter: "", account: null, app: null, apps: [], appProfiles: {}, appNames: {}, scriptView: "tree", scriptFolders: {} };
+  var state = { view: "home", cerr: null, convs: [], conv: null, msgs: [], interval: null, baseUptime: null, uptimeAt: 0, uptimeTimer: null, chatEpoch: 0, chatRequest: 0, chatConvID: "", logLines: [], logShown: [], logPending: "", logTimer: null, logLevel: "all", logPinned: true, logFromBottom: 0, logLoadedAt: "", logDay: "", tasks: [], tasksErr: "", silentTasks: [], role: "", auditRows: [], auditErr: "", executions: [], executionsErr: "", execFilter: { kind: "", status: "", name: "" }, chatCaps: null, convFilter: "", convQuery: "", convLimit: 60, account: null, app: null, apps: [], appProfiles: {}, appNames: {}, scriptView: "tree", scriptFolders: {} };
   var VIEW_KEY = "relay-view";
   var PROFILE_KEY = "relay-profile";
   var ROLE_LABEL = { master: "主人", ops: "运营", readonly: "只读" };
@@ -2186,7 +2189,7 @@
     var cont = $("#view-chat");
     cont.innerHTML = '<div class="page-head"><div><span class="eyebrow">MESSAGES / 03</span><h2>消息收发</h2><p>选择会话查看消息并发送内容</p></div></div>'
       + '<div class="chat-grid">'
-      + '<div class="panel"><div class="panel-head"><h3>会话</h3><select class="select" id="convAppFilter" aria-label="' + esc(t("chat.filter.title")) + '" style="max-width:158px;margin-left:auto"></select></div><div class="panel-body" id="convList">' + loadingState() + '</div></div>'
+      + '<div class="panel"><div class="panel-head"><h3>会话</h3><input class="input" id="convSearch" type="search" placeholder="' + esc(t("chat.search")) + '" aria-label="' + esc(t("chat.search")) + '" style="max-width:168px;margin-left:auto"><select class="select" id="convAppFilter" aria-label="' + esc(t("chat.filter.title")) + '" style="max-width:148px"></select></div><div class="panel-body" id="convList">' + loadingState() + '</div></div>'
       + '<div class="panel" style="display:flex;flex-direction:column"><div class="panel-head"><h3>消息</h3><span class="hint" id="chatTitle"></span><select class="select" id="chatAccountSelect" style="max-width:220px;margin-left:auto"><option>加载账号中…</option></select></div>'
       + '<div class="panel-body" style="flex:1;display:flex;flex-direction:column"><div class="chat-stream" id="chatStream">' + emptyState("message", "选择一个会话", "从会话列表中选择，即可查看历史消息并发送内容。") + "</div>"
       + '<div class="muted" id="chatCap" style="font-size:12px;margin-top:8px">选择会话后显示可用发送身份</div>'
@@ -2315,22 +2318,43 @@
       renderConvs();
     };
   }
+  function convMatches(c) {
+    var q = String(state.convQuery || "").trim().toLowerCase();
+    if (!q) return true;
+    var meta = convAppMeta(c);
+    var peer = c.peer || c.user || c.target || c.contact || {};
+    var hay = [c.name, c.title, c.id, pickDisplayName(peer, ""), meta && meta.name, meta && meta.id].join(" ").toLowerCase();
+    return hay.indexOf(q) >= 0;
+  }
   function renderConvs() {
     var box = $("#convList");
     if (!box) return;
     paintConvFilter();
     var list = state.convs || [];
     if (!list.length) { box.innerHTML = emptyState("message", "暂无会话", "收到或发起会话后，会在这里列出。"); return; }
+    var visible = [];
+    list.forEach(function (c, i) {
+      if (convVisible(c) && convMatches(c)) visible.push(i);
+    });
+    if (!visible.length) { box.innerHTML = emptyState("message", state.convQuery ? t("chat.noMatch") : t("chat.filter.empty"), ""); return; }
     var nameCounts = {};
-    list.forEach(function (c) {
-      if (!convVisible(c)) return;
+    visible.forEach(function (i) {
+      var c = list[i];
       var peer = c.peer || c.user || c.target || c.contact || {};
       var base = c.name || c.title || pickDisplayName(peer, "") || c.id;
       nameCounts[base] = (nameCounts[base] || 0) + 1;
     });
+    var limit = Math.max(Number(state.convLimit) || 60, 60);
+    var selectedAt = -1;
+    if (state.conv) {
+      for (var k = 0; k < visible.length; k++) {
+        if (list[visible[k]] && String(list[visible[k]].id) === String(state.conv.id)) { selectedAt = k; break; }
+      }
+      if (selectedAt >= limit) limit = selectedAt + 1;
+    }
     var rows = [];
-    list.forEach(function (c, i) {
-      if (!convVisible(c)) return;
+    visible.slice(0, limit).forEach(function (i) {
+      var c = list[i];
       var peer = c.peer || c.user || c.target || c.contact || {};
       var name = c.name || c.title || pickDisplayName(peer, "") || c.id;
       var baseName = name;
@@ -2366,14 +2390,30 @@
       var tip = name + (own && own !== name && !sameName ? " · " + own : "");
       rows.push('<button type="button" class="conv-item' + (active ? " active" : "") + '" data-conv-index="' + i + '" title="' + esc(tip) + '">' + avatarHTML(av, name, "conv-avatar") + '<span class="conv-main"><span class="cname">' + esc(name) + "</span>" + appLine + "</span></button>");
     });
-    if (!rows.length) { box.innerHTML = emptyState("message", t("chat.filter.empty"), ""); return; }
-    box.innerHTML = rows.join("");
+    var more = "";
+    if (visible.length > limit) {
+      more = '<button type="button" class="btn btn-sm" id="convMore">' + esc(t("chat.loadMore")) + (visible.length - limit) + ')</button>';
+    }
+    box.innerHTML = rows.join("") + more;
     $$("[data-conv-index]", box).forEach(function (item) {
       item.addEventListener("click", function () { pickConv(Number(item.getAttribute("data-conv-index"))); });
     });
+    var moreBtn = $("#convMore");
+    if (moreBtn) moreBtn.addEventListener("click", function () { state.convLimit = limit + 60; renderConvs(); });
     hydrateIcons();
   }
+  function bindConvSearch() {
+    var input = $("#convSearch");
+    if (!input) return;
+    input.value = state.convQuery || "";
+    input.oninput = function () {
+      state.convQuery = input.value;
+      state.convLimit = 60;
+      renderConvs();
+    };
+  }
   function loadConvs(restoreID) {
+    bindConvSearch();
     var epoch = state.chatEpoch;
     api("/jiying/api/conversations").then(function (r) {
       if (epoch !== state.chatEpoch) return;
@@ -2391,6 +2431,7 @@
         var hit = (state.convs || []).filter(function (c) { return String(c.id) === String(want); })[0];
         if (hit && !convVisible(hit)) state.convFilter = "";
       }
+      state.convLimit = 60;
       renderConvs();
       if (want) {
         for (var k = 0; k < state.convs.length; k++) {
